@@ -86,7 +86,7 @@ write_files:
           driver: bridge
 
   - path: /etc/systemd/system/n8n-compose.service
-    owner: root:root
+    owner: ${admin_user}:${admin_user}
     permissions: "0644"
     defer: true
     content: |
@@ -97,14 +97,13 @@ write_files:
       Wants=network-online.target
 
       [Service]
-      Type=simple
+      Type=oneshot
+      RemainAfterExit=yes
       WorkingDirectory=${n8n_root_dir}
-      Environment=HOME=/root
       Environment=COMPOSE_PROJECT_NAME=n8n
-      Environment=COMPOSE_FILE=${n8n_root_dir}/docker-compose.yml
-      User=root
-      ExecStart=/usr/bin/docker compose -f ${n8n_root_dir}/docker-compose.yml up -d
-      ExecStop=/usr/bin/docker compose -f ${n8n_root_dir}/docker-compose.yml down
+      User=${admin_user}
+      ExecStart=/usr/bin/docker compose up -d
+      ExecStop=/usr/bin/docker compose down
       Restart=on-failure
       RestartSec=5s
       TimeoutStartSec=120
