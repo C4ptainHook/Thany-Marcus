@@ -4,6 +4,12 @@ variable "do_token" {
   sensitive   = true
 }
 
+variable "certbot_email" {
+  type        = string
+  description = "Email address for Let's Encrypt notifications."
+  sensitive   = true
+}
+
 variable "name_prefix" {
   description = "Prefix for resource names"
   type        = string
@@ -88,7 +94,6 @@ variable "tags" {
   default     = ["knowledge-hub", "n8n", "obsidian"]
 }
 
-# n8n configuration
 variable "n8n_root_dir" {
   description = "Host directory for n8n configuration and persistent data"
   type        = string
@@ -111,4 +116,10 @@ variable "n8n_timezone" {
   description = "Timezone for n8n (IANA format, e.g., 'UTC', 'America/Los_Angeles')"
   type        = string
   default     = "UTC"
+}
+
+variable "domain_name" {
+  description = "The fully qualified domain name for the n8n service."
+  type        = string
+  default     = "thany.click"
 }

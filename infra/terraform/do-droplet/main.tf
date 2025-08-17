@@ -4,7 +4,7 @@ locals {
   ssh_keys_all            = concat(var.ssh_pubkeys_raw, local.selected_public_keys)
   ssh_keys_block          = length(local.ssh_keys_all) > 0 ? join("\n", [for k in local.ssh_keys_all : "      - ${k}"]) : ""
   resolved_ssh_keys_count = length(local.selected_public_keys)
-  allow_tcp_ports         = distinct(concat(var.allow_additional_tcp_ports, [var.n8n_port]))
+  allow_tcp_ports         = distinct(concat(var.allow_additional_tcp_ports, ["22", "80", "443"]))
 }
 
 data "digitalocean_ssh_keys" "selected" {
@@ -17,6 +17,10 @@ data "digitalocean_ssh_keys" "selected" {
 
 resource "random_id" "suffix" {
   byte_length = 2
+}
+
+resource "digitalocean_floating_ip" "n8n_ip" {
+  region = var.region
 }
 
 resource "digitalocean_droplet" "vm" {
@@ -41,6 +45,8 @@ resource "digitalocean_droplet" "vm" {
     n8n_port       = var.n8n_port
     n8n_version    = var.n8n_version
     n8n_timezone   = var.n8n_timezone
+    domain_name    = var.domain_name
+    certbot_email  = var.certbot_email
   })
 
   lifecycle {
@@ -50,18 +56,19 @@ resource "digitalocean_droplet" "vm" {
       error_message = "No SSH keys resolved. Ensure ssh_key_names exist in your DO account or provide ssh_pubkeys_raw."
     }
   }
+  depends_on = [digitalocean_floating_ip.n8n_ip]
+}
+
+resource "digitalocean_floating_ip_assignment" "n8n_ip_assign" {
+  ip_address = digitalocean_floating_ip.n8n_ip.ip_address
+  droplet_id = digitalocean_droplet.vm.id
+  depends_on = [digitalocean_droplet.vm]
 }
 
 resource "digitalocean_firewall" "fw" {
   count       = var.enable_do_firewall ? 1 : 0
   name        = "${var.name_prefix}-fw"
   droplet_ids = [digitalocean_droplet.vm.id]
-
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = "22"
-    source_addresses = ["0.0.0.0/0", "::/0"]
-  }
 
   dynamic "inbound_rule" {
     for_each = local.allow_tcp_ports

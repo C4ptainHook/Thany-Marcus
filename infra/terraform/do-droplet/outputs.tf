@@ -13,4 +13,9 @@ output "droplet_id" {
 output "droplet_ipv6" {
   value = digitalocean_droplet.vm.ipv6_address
 }
-    
+
+output "floating_ip_address" {
+  description = "The permanent public IP address for the n8n service."
+  value       = digitalocean_floating_ip.n8n_ip.ip_address
+}
+
