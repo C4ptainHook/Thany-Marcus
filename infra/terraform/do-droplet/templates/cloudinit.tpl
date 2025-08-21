@@ -86,6 +86,8 @@ write_files:
       N8N_DIAGNOSTICS_ENABLED=false
       N8N_HIRING_BANNER_ENABLED=false
       N8N_USER_FOLDER=/home/node/.n8n
+      WEBHOOK_URL=https://thany.click/
+      N8N_TRUST_PROXY=true
 
   - path: ${n8n_root_dir}/docker-compose.yml
     owner: ${admin_user}:${admin_user}
