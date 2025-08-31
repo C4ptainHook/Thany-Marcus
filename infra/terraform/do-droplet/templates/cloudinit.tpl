@@ -94,7 +94,6 @@ write_files:
     permissions: "0644"
     defer: true
     content: |
-      version: '3.7'
       services:
         n8n:
           image: docker.io/n8nio/n8n:${n8n_version}
@@ -104,11 +103,10 @@ write_files:
           ports:
             - "${n8n_port}:5678"
           volumes:
-            - ./data:/home/node/.n8n
-      networks:
-        default:
-          name: n8n-net
-          driver: bridge
+            - n8n_data:/home/node/.n8n
+
+      volumes:
+        n8n_data:
 
   - path: /etc/systemd/system/n8n-compose.service
     owner: ${admin_user}:${admin_user}

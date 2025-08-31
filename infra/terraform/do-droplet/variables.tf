@@ -43,13 +43,25 @@ variable "region" {
 variable "size" {
   description = "Droplet size slug"
   type        = string
-  default     = "s-1vcpu-2gb"
+  default     = "s-1vcpu-1gb"
 }
 
 variable "image" {
   description = "Droplet image slug"
   type        = string
   default     = "ubuntu-24-04-x64"
+}
+
+variable "gpu_image" {
+  description = "GPU Droplet image slug"
+  type        = string
+  default     = "ubuntu-24-04-x64"
+}
+
+variable "gpu_size" {
+  description = "GPU Droplet size slug"
+  type        = string
+  default     = "gpu-4000adax1-20gb"
 }
 
 variable "ssh_key_names" {
