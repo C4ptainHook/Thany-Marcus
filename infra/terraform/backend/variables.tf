@@ -123,3 +123,45 @@ variable "domain_name" {
   type        = string
   default     = "thany.click"
 }
+
+variable "enable_kubernetes" {
+  description = "Enable Kubernetes cluster provisioning"
+  type        = bool
+  default     = false
+}
+
+variable "kubernetes_version" {
+  description = "Kubernetes version for DOKS cluster"
+  type        = string
+  default     = "1.31.1-do.4"
+}
+
+variable "kubernetes_node_size" {
+  description = "Node size for Kubernetes workers"
+  type        = string
+  default     = "s-2vcpu-2gb"
+}
+
+variable "kubernetes_node_count" {
+  description = "Initial number of Kubernetes worker nodes"
+  type        = number
+  default     = 2
+}
+
+variable "kubernetes_autoscale" {
+  description = "Enable Kubernetes node autoscaling"
+  type        = bool
+  default     = false
+}
+
+variable "kubernetes_min_nodes" {
+  description = "Minimum nodes for autoscaling"
+  type        = number
+  default     = 2
+}
+
+variable "kubernetes_max_nodes" {
+  description = "Maximum nodes for autoscaling"
+  type        = number
+  default     = 5
+}

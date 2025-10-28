@@ -103,3 +103,27 @@ resource "digitalocean_firewall" "fw" {
   }
 }
 
+resource "digitalocean_kubernetes_cluster" "main" {
+  count    = var.enable_kubernetes ? 1 : 0
+  name     = "${var.name_prefix}-k8s-${random_id.suffix.hex}"
+  region   = var.region
+  version  = var.kubernetes_version
+  vpc_uuid = digitalocean_vpc.main.id
+
+  node_pool {
+    name       = "worker-pool"
+    size       = var.kubernetes_node_size
+    node_count = var.kubernetes_node_count
+    auto_scale = var.kubernetes_autoscale
+    min_nodes  = var.kubernetes_autoscale ? var.kubernetes_min_nodes : null
+    max_nodes  = var.kubernetes_autoscale ? var.kubernetes_max_nodes : null
+    tags       = concat(var.tags, ["k8s-worker"])
+  }
+
+  tags = concat(var.tags, ["kubernetes"])
+
+  lifecycle {
+    ignore_changes = [node_pool[0].node_count]
+  }
+}
+
