@@ -52,18 +52,6 @@ variable "image" {
   default     = "ubuntu-24-04-x64"
 }
 
-variable "gpu_image" {
-  description = "GPU Droplet image slug"
-  type        = string
-  default     = "ubuntu-24-04-x64"
-}
-
-variable "gpu_size" {
-  description = "GPU Droplet size slug"
-  type        = string
-  default     = "gpu-4000adax1-20gb"
-}
-
 variable "ssh_key_names" {
   description = "List of existing DO SSH key names to attach"
   type        = list(string)
