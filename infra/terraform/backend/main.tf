@@ -51,8 +51,6 @@ resource "digitalocean_droplet" "n8n_vm" {
     n8n_port       = var.n8n_port
     n8n_version    = var.n8n_version
     n8n_timezone   = var.n8n_timezone
-    domain_name    = var.domain_name
-    certbot_email  = var.certbot_email
   })
 
   lifecycle {

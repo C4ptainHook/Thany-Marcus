@@ -35,3 +35,18 @@ output "kubeconfig_command" {
   value = var.enable_kubernetes ? "doctl kubernetes cluster kubeconfig save ${digitalocean_kubernetes_cluster.main[0].id}" : ""
 }
 
+output "vpc_id" {
+  description = "VPC ID for use by monitoring infrastructure"
+  value       = digitalocean_vpc.main.id
+}
+
+output "nginx_lb_ip" {
+  description = "nginx LoadBalancer IP (use for DNS A record: nginx.thany.click)"
+  value       = var.enable_kubernetes ? "Check: kubectl get svc -n ingress-nginx nginx-ingress-ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}'" : ""
+}
+
+output "haproxy_lb_ip" {
+  description = "haproxy LoadBalancer IP (use for DNS A record: haproxy.thany.click)"
+  value       = var.enable_kubernetes ? "Check: kubectl get svc -n ingress-haproxy haproxy-ingress-kubernetes-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}'" : ""
+}
+

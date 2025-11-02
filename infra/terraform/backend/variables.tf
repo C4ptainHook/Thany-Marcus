@@ -118,12 +118,6 @@ variable "n8n_timezone" {
   default     = "UTC"
 }
 
-variable "domain_name" {
-  description = "The fully qualified domain name for the n8n service."
-  type        = string
-  default     = "thany.click"
-}
-
 variable "enable_kubernetes" {
   description = "Enable Kubernetes cluster provisioning"
   type        = bool
