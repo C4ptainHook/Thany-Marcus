@@ -78,6 +78,10 @@ spec:
           value: "5678"
         - name: N8N_PROTOCOL
           value: "http"
+        - name: N8N_TRUST_PROXY
+          value: "true"
+        - name: N8N_ALLOWED_ORIGINS
+          value: "https://nginx.thany.click,https://haproxy.thany.click"
         resources:
           requests:
             cpu: 200m
