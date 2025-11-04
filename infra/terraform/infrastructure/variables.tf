@@ -10,6 +10,13 @@ variable "certbot_email" {
   sensitive   = true
 }
 
+variable "grafana_password" {
+  type        = string
+  description = "Grafana admin password"
+  sensitive   = true
+  default     = "admin"
+}
+
 variable "name_prefix" {
   description = "Prefix for resource names"
   type        = string
@@ -43,7 +50,7 @@ variable "region" {
 variable "size" {
   description = "Droplet size slug"
   type        = string
-  default     = "s-1vcpu-2gb"
+  default     = "s-1vcpu-1gb"
 }
 
 variable "image" {
@@ -118,8 +125,44 @@ variable "n8n_timezone" {
   default     = "UTC"
 }
 
-variable "domain_name" {
-  description = "The fully qualified domain name for the n8n service."
+variable "enable_kubernetes" {
+  description = "Enable Kubernetes cluster provisioning"
+  type        = bool
+  default     = false
+}
+
+variable "kubernetes_version" {
+  description = "Kubernetes version for DOKS cluster"
   type        = string
-  default     = "thany.click"
+  default     = "1.33.1-do.5"
+}
+
+variable "kubernetes_node_size" {
+  description = "Node size for Kubernetes workers"
+  type        = string
+  default     = "s-4vcpu-8gb"
+}
+
+variable "kubernetes_node_count" {
+  description = "Initial number of Kubernetes worker nodes"
+  type        = number
+  default     = 1
+}
+
+variable "kubernetes_autoscale" {
+  description = "Enable Kubernetes node autoscaling"
+  type        = bool
+  default     = false
+}
+
+variable "kubernetes_min_nodes" {
+  description = "Minimum nodes for autoscaling"
+  type        = number
+  default     = 2
+}
+
+variable "kubernetes_max_nodes" {
+  description = "Maximum nodes for autoscaling"
+  type        = number
+  default     = 5
 }

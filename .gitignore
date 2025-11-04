@@ -13,3 +13,5 @@ override.tf.json
 *.plan
 .terraformrc
 terraform.rc
+venv/
+claude.md
