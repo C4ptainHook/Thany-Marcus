@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: n8n-worker
+  namespace: backend
+  labels:
+    app: n8n-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: n8n-worker
+  template:
+    metadata:
+      labels:
+        app: n8n-worker
+    spec:
+      containers:
+      - name: n8n
+        image: n8nio/n8n:latest
+        command: ["n8n", "worker"]
+        env:
+        - name: EXECUTIONS_MODE
+          value: "queue"
+        - name: QUEUE_BULL_REDIS_HOST
+          value: "redis"
+        - name: QUEUE_BULL_REDIS_PORT
+          value: "6385"
+        - name: DB_TYPE
+          value: "postgresdb"
+        - name: DB_POSTGRESDB_HOST
+          value: "postgres"
+        - name: DB_POSTGRESDB_PORT
+          value: "5432"
+        - name: DB_POSTGRESDB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_DB
+        - name: DB_POSTGRESDB_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_USER
+        - name: DB_POSTGRESDB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: N8N_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: n8n-secret
+              key: N8N_ENCRYPTION_KEY
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: n8n-worker-hpa
+  namespace: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: n8n-worker
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
