@@ -50,3 +50,27 @@ output "haproxy_lb_ip" {
   value       = var.enable_kubernetes ? "Check: kubectl get svc -n ingress-haproxy haproxy-ingress-kubernetes-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}'" : ""
 }
 
+output "cluster_ca_certificate" {
+  description = "Kubernetes cluster CA certificate for app module"
+  value       = var.enable_kubernetes ? digitalocean_kubernetes_cluster.main[0].kube_config[0].cluster_ca_certificate : ""
+  sensitive   = true
+}
+
+output "cluster_token" {
+  description = "Kubernetes cluster token for app module"
+  value       = var.enable_kubernetes ? digitalocean_kubernetes_cluster.main[0].kube_config[0].token : ""
+  sensitive   = true
+}
+
+output "certbot_email" {
+  description = "Email for Let's Encrypt (passed to app module)"
+  value       = var.certbot_email
+  sensitive   = true
+}
+
+output "kube_config" {
+  description = "Kubernetes cluster kubeconfig"
+  value       = var.enable_kubernetes ? digitalocean_kubernetes_cluster.main[0].kube_config[0].raw_config : ""
+  sensitive   = true
+}
+

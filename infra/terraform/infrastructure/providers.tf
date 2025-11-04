@@ -30,3 +30,11 @@ provider "kubernetes" {
   cluster_ca_certificate = try(base64decode(digitalocean_kubernetes_cluster.main[0].kube_config[0].cluster_ca_certificate), "")
 }
 
+provider "helm" {
+  kubernetes = {
+    host                   = try(digitalocean_kubernetes_cluster.main[0].endpoint, "")
+    token                  = try(digitalocean_kubernetes_cluster.main[0].kube_config[0].token, "")
+    cluster_ca_certificate = try(base64decode(digitalocean_kubernetes_cluster.main[0].kube_config[0].cluster_ca_certificate), "")
+  }
+}
+

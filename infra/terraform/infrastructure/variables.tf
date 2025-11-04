@@ -127,19 +127,19 @@ variable "enable_kubernetes" {
 variable "kubernetes_version" {
   description = "Kubernetes version for DOKS cluster"
   type        = string
-  default     = "1.31.1-do.4"
+  default     = "1.33.1-do.5"
 }
 
 variable "kubernetes_node_size" {
   description = "Node size for Kubernetes workers"
   type        = string
-  default     = "s-2vcpu-2gb"
+  default     = "s-4vcpu-8gb"
 }
 
 variable "kubernetes_node_count" {
   description = "Initial number of Kubernetes worker nodes"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "kubernetes_autoscale" {

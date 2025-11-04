@@ -25,6 +25,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: api-service
+            name: n8n-editor
             port:
-              number: 80
+              number: 5678
