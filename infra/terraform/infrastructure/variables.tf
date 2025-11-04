@@ -10,6 +10,13 @@ variable "certbot_email" {
   sensitive   = true
 }
 
+variable "grafana_password" {
+  type        = string
+  description = "Grafana admin password"
+  sensitive   = true
+  default     = "admin"
+}
+
 variable "name_prefix" {
   description = "Prefix for resource names"
   type        = string

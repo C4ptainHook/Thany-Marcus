@@ -94,3 +94,54 @@ resource "helm_release" "haproxy_ingress" {
 
   depends_on = [digitalocean_kubernetes_cluster.main]
 }
+
+resource "helm_release" "prometheus_stack" {
+  count            = var.enable_kubernetes ? 1 : 0
+  name             = "prometheus"
+  repository       = "https://prometheus-community.github.io/helm-charts"
+  chart            = "kube-prometheus-stack"
+  version          = "65.1.1"
+  namespace        = "monitoring"
+  create_namespace = true
+
+  values = [
+    yamlencode({
+      grafana = {
+        service = {
+          type = "ClusterIP"
+        }
+        adminPassword = var.grafana_password
+        persistence = {
+          enabled = false
+        }
+      }
+      prometheus = {
+        prometheusSpec = {
+          serviceMonitorSelectorNilUsesHelmValues = false
+          podMonitorSelectorNilUsesHelmValues     = false
+          retention                               = "7d"
+          storageSpec = {
+            volumeClaimTemplate = {
+              spec = {
+                accessModes = ["ReadWriteOnce"]
+                resources = {
+                  requests = {
+                    storage = "10Gi"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      alertmanager = {
+        enabled = false
+      }
+    })
+  ]
+
+  depends_on = [
+    digitalocean_kubernetes_cluster.main,
+    helm_release.metrics_server
+  ]
+}

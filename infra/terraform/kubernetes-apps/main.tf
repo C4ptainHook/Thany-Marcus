@@ -171,3 +171,11 @@ resource "kubernetes_manifest" "ingress_haproxy" {
     kubernetes_manifest.cluster_issuer_haproxy
   ]
 }
+
+resource "kubernetes_manifest" "ingress_grafana" {
+  manifest = yamldecode(file("${path.module}/k8s-manifests/ingress-grafana.yaml"))
+
+  depends_on = [
+    kubernetes_manifest.cluster_issuer_nginx
+  ]
+}
