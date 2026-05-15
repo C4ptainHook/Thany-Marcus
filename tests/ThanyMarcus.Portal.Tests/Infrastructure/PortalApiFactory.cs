@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 
 namespace ThanyMarcus.Portal.Tests.Infrastructure;
 
@@ -38,6 +39,10 @@ internal sealed class TestEndpointsStartupFilter : IStartupFilter
         {
             endpoints.MapGet("/api/test/totp-required", () => Results.Ok())
                 .RequireAuthorization(AuthPolicies.TotpRequired);
+
+            endpoints.MapGet("/api/test/step-up-only", () => Results.Ok())
+                .RequireAuthorization()
+                .AddEndpointFilter<RequireInfraOpUnlockFilter>();
         });
     };
 }

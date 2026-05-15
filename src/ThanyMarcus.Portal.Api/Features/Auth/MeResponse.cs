@@ -5,4 +5,5 @@ public sealed record MeResponse(
     string Email,
     string Name,
     string? ProfilePictureUrl,
-    string Totp);
+    string Totp,
+    bool PassphraseSet);
