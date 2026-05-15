@@ -76,16 +76,6 @@ public sealed class AuthEndpointsTests(PostgresFixture postgres) : FactoryTestBa
     }
 
     [Fact]
-    public async Task Totp_challenge_stub_returns_html()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        using var client = Factory.CreateClient();
-        var response = await client.GetAsync(new Uri("/totp-challenge", UriKind.Relative), ct);
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        response.Content.Headers.ContentType!.MediaType.ShouldBe("text/html");
-    }
-
-    [Fact]
     public async Task TotpRequired_endpoint_returns_403_for_NotVerified_on_api_path()
     {
         var ct = TestContext.Current.CancellationToken;

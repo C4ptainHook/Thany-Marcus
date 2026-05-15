@@ -38,6 +38,11 @@
     <!-- Time -->
     <PackageVersion Include="NodaTime" Version="3.*" />
 
+    <!-- Auth / TOTP (PORTAL-003a) -->
+    <PackageVersion Include="Otp.NET" Version="1.4.*" />
+    <PackageVersion Include="QRCoder" Version="1.6.*" />
+    <PackageVersion Include="Konscious.Security.Cryptography.Argon2" Version="1.3.*" />
+
     <!-- Test isolation -->
     <PackageVersion Include="Respawn" Version="6.*" />
     <PackageVersion Include="NodaTime.Testing" Version="3.*" />
