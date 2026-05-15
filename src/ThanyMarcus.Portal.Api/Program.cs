@@ -12,6 +12,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
@@ -148,6 +149,8 @@ builder.Services.AddHealthChecks()
     .AddCheck("self", () => HealthCheckResult.Healthy(), tags: ["live", "ready"])
     .AddDbContextCheck<PortalDbContext>(tags: ["ready"]);
 
+builder.Services.AddAuthRateLimiting(builder.Configuration);
+
 var app = builder.Build();
 
 await using (var scope = app.Services.CreateAsyncScope())
@@ -158,8 +161,10 @@ await using (var scope = app.Services.CreateAsyncScope())
 
 app.UseStaticFiles();
 
+app.UseMiddleware<SignInGoogleRateLimitMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapOpenApi();
 app.MapScalarApiReference();
