@@ -1,6 +1,29 @@
+<script lang="ts">
+  export let data: {
+    me: {
+      userId: string;
+      email: string;
+      name: string;
+      profilePictureUrl: string | null;
+      totp: string;
+    } | null;
+  };
+</script>
+
 <main>
   <h1>Thany-Marcus Portal</h1>
-  <p>Portal coming soon.</p>
+  {#if data.me}
+    <p>Signed in as <strong>{data.me.name}</strong> ({data.me.email})</p>
+    {#if data.me.profilePictureUrl}
+      <img src={data.me.profilePictureUrl} alt="" width="64" height="64" />
+    {/if}
+    <p>TOTP state: {data.me.totp}</p>
+    <form method="post" action="/api/auth/signout">
+      <button type="submit">Sign out</button>
+    </form>
+  {:else}
+    <p><a href="/api/auth/signin">Sign in with Google</a></p>
+  {/if}
 </main>
 
 <style>

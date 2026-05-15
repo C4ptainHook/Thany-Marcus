@@ -1,3 +1,7 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -6,6 +10,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
+using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -33,7 +38,7 @@ builder.Services.AddOpenTelemetry()
         .AddHttpClientInstrumentation()
         .AddConsoleExporter());
 
-builder.Services.AddSingleton<IClock>(SystemClock.Instance);
+builder.Services.AddSingleton<IClock>(NodaTime.SystemClock.Instance);
 builder.Services.AddSingleton<TimestampInterceptor>();
 builder.Services.AddDbContext<PortalDbContext>((sp, opts) => opts
     .UseNpgsql(
@@ -42,6 +47,88 @@ builder.Services.AddDbContext<PortalDbContext>((sp, opts) => opts
         npg => npg.UseNodaTime())
     .UseSnakeCaseNamingConvention()
     .AddInterceptors(sp.GetRequiredService<TimestampInterceptor>()));
+
+builder.Services.AddScoped<GoogleSignInHandler>();
+builder.Services.AddScoped<CookiePrincipalValidator>();
+
+builder.Services.AddAuthentication(opts =>
+{
+    opts.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    opts.DefaultChallengeScheme = GoogleDefaults.AuthenticationScheme;
+})
+.AddCookie(opts =>
+{
+    opts.Cookie.Name = ".Portal.Auth";
+    opts.ExpireTimeSpan = TimeSpan.FromDays(14);
+    opts.SlidingExpiration = true;
+    opts.Cookie.HttpOnly = true;
+    opts.Cookie.SameSite = SameSiteMode.Lax;
+    opts.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    opts.LoginPath = "/api/auth/signin";
+    opts.LogoutPath = "/api/auth/signout";
+    opts.AccessDeniedPath = "/totp-challenge";
+    opts.Events.OnValidatePrincipal = async ctx =>
+    {
+        var validator = ctx.HttpContext.RequestServices.GetRequiredService<CookiePrincipalValidator>();
+        var outcome = await validator.ValidateAsync(
+            ctx.Principal!,
+            ctx.Properties.IssuedUtc,
+            ctx.HttpContext.RequestAborted);
+        if (outcome == CookieValidationOutcome.Reject)
+        {
+            ctx.RejectPrincipal();
+            await ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        }
+        else
+        {
+            ctx.ShouldRenew = true;
+        }
+    };
+    opts.Events.OnRedirectToLogin = ctx =>
+    {
+        if (ctx.Request.Path.StartsWithSegments("/api"))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        }
+        ctx.Response.Redirect(ctx.RedirectUri);
+        return Task.CompletedTask;
+    };
+    opts.Events.OnRedirectToAccessDenied = ctx =>
+    {
+        if (ctx.Request.Path.StartsWithSegments("/api"))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        }
+        ctx.Response.Redirect(ctx.RedirectUri);
+        return Task.CompletedTask;
+    };
+})
+.AddGoogle(opts =>
+{
+    opts.ClientId = builder.Configuration["Google:ClientId"]
+        ?? throw new InvalidOperationException("Google:ClientId not configured");
+    opts.ClientSecret = builder.Configuration["Google:ClientSecret"]
+        ?? throw new InvalidOperationException("Google:ClientSecret not configured");
+    opts.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    opts.Scope.Add("email");
+    opts.Scope.Add("profile");
+    opts.SaveTokens = false;
+    opts.Events.OnCreatingTicket = async ctx =>
+    {
+        var handler = ctx.HttpContext.RequestServices.GetRequiredService<GoogleSignInHandler>();
+        var identity = (ClaimsIdentity)ctx.Principal!.Identity!;
+        await handler.HandleAsync(identity, ctx.User, ctx.HttpContext.RequestAborted);
+    };
+});
+
+builder.Services.AddAuthorization(opts =>
+{
+    opts.AddPolicy(AuthPolicies.TotpRequired, p => p.RequireAssertion(c =>
+        c.User.FindFirstValue(AuthClaimTypes.Totp)
+            is TotpClaimValues.Verified or TotpClaimValues.NotEnabled));
+});
 
 builder.Services.AddHealthChecks()
     .AddCheck("self", () => HealthCheckResult.Healthy(), tags: ["live", "ready"])
@@ -57,6 +144,9 @@ await using (var scope = app.Services.CreateAsyncScope())
 
 app.UseStaticFiles();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapOpenApi();
 app.MapScalarApiReference();
 app.MapPrometheusScrapingEndpoint();
@@ -69,6 +159,8 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready"),
 });
+
+app.MapAuthEndpoints();
 
 app.MapFallbackToFile("index.html");
 
