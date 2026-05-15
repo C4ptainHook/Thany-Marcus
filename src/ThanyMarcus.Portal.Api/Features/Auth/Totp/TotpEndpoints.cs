@@ -1,0 +1,134 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.EntityFrameworkCore;
+using NodaTime;
+using ThanyMarcus.Portal.Api.Infrastructure.Database;
+
+namespace ThanyMarcus.Portal.Api.Features.Auth.Totp;
+
+public static class TotpEndpoints
+{
+    public static void MapTotpEndpoints(this IEndpointRouteBuilder app)
+    {
+        var grp = app.MapGroup("/api/auth/totp").RequireAuthorization();
+
+        grp.MapPost("/enable/init", (
+            ClaimsPrincipal user,
+            TotpService totp) =>
+        {
+            var email = user.FindFirstValue(ClaimTypes.Email)!;
+            var secret = totp.GenerateSecret();
+            var qr = totp.BuildQrPngDataUri(secret, email);
+            return Results.Ok(new TotpEnableInitResponse(secret, qr));
+        });
+
+        grp.MapPost("/enable/verify", async (
+            TotpEnableVerifyRequest body,
+            ClaimsPrincipal user,
+            HttpContext http,
+            PortalDbContext db,
+            TotpService totp,
+            TotpBackupCodeService backups,
+            IClock clock,
+            CancellationToken ct) =>
+        {
+            if (!totp.Verify(body.Secret, body.Code))
+                return Results.BadRequest(new { error = "invalid_code" });
+
+            var userId = Guid.Parse(user.FindFirstValue(AuthClaimTypes.SubUs)!);
+            var now = clock.GetCurrentInstant();
+
+            var row = await db.TotpSecrets.SingleOrDefaultAsync(t => t.UserId == userId, ct);
+            if (row is { EnabledAt: not null, DisabledAt: null })
+                return Results.Conflict(new { error = "already_enabled" });
+
+            var (ciphertext, nonce, tag) = totp.Encrypt(body.Secret);
+            if (row is null)
+            {
+                row = new TotpSecret
+                {
+                    UserId = userId,
+                    Ciphertext = ciphertext,
+                    Nonce = nonce,
+                    Tag = tag,
+                    EnabledAt = now,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                };
+                db.TotpSecrets.Add(row);
+            }
+            else
+            {
+                row.Ciphertext = ciphertext;
+                row.Nonce = nonce;
+                row.Tag = tag;
+                row.EnabledAt = now;
+                row.DisabledAt = null;
+            }
+            await db.SaveChangesAsync(ct);
+
+            var backupCodes = await backups.IssueAsync(userId, ct);
+
+            await RefreshTotpClaim(http, user, TotpClaimValues.Verified);
+
+            return Results.Ok(new TotpEnableVerifyResponse(backupCodes));
+        });
+
+        grp.MapPost("/disable", async (
+            TotpDisableRequest body,
+            ClaimsPrincipal user,
+            HttpContext http,
+            PortalDbContext db,
+            TotpService totp,
+            TotpBackupCodeService backups,
+            IClock clock,
+            CancellationToken ct) =>
+        {
+            var userId = Guid.Parse(user.FindFirstValue(AuthClaimTypes.SubUs)!);
+            var result = await totp.VerifyChallengeAsync(db, userId, body.Code, ct);
+            if (result is TotpChallengeResult.Failed)
+                return Results.Unauthorized();
+
+            var row = await db.TotpSecrets.SingleAsync(t => t.UserId == userId, ct);
+            row.DisabledAt = clock.GetCurrentInstant();
+            await db.SaveChangesAsync(ct);
+            await backups.PurgeUnusedAsync(userId, ct);
+
+            await RefreshTotpClaim(http, user, TotpClaimValues.NotEnabled);
+            return Results.NoContent();
+        }).RequireAuthorization(AuthPolicies.TotpRequired);
+
+        app.MapPost("/totp-challenge", async (
+            TotpChallengeRequest body,
+            ClaimsPrincipal user,
+            HttpContext http,
+            PortalDbContext db,
+            TotpService totp,
+            TotpBackupCodeService backups,
+            CancellationToken ct) =>
+        {
+            if (user.Identity?.IsAuthenticated != true)
+                return Results.Unauthorized();
+
+            var userId = Guid.Parse(user.FindFirstValue(AuthClaimTypes.SubUs)!);
+
+            var totpOk = await totp.VerifyChallengeAsync(db, userId, body.Code, ct);
+            var ok = totpOk is TotpChallengeResult.Verified
+                  || await backups.RedeemAsync(userId, body.Code, ct);
+            if (!ok) return Results.Unauthorized();
+
+            await RefreshTotpClaim(http, user, TotpClaimValues.Verified);
+            return Results.NoContent();
+        }).RequireAuthorization();
+    }
+
+    private static async Task RefreshTotpClaim(HttpContext http, ClaimsPrincipal user, string totpValue)
+    {
+        var identity = (ClaimsIdentity)user.Identity!;
+        foreach (var existing in identity.FindAll(AuthClaimTypes.Totp).ToList())
+            identity.RemoveClaim(existing);
+        identity.AddClaim(new Claim(AuthClaimTypes.Totp, totpValue));
+        await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, user);
+    }
+}

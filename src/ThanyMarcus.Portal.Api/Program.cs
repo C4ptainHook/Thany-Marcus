@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -11,6 +12,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.Totp;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -50,6 +52,12 @@ builder.Services.AddDbContext<PortalDbContext>((sp, opts) => opts
 
 builder.Services.AddScoped<GoogleSignInHandler>();
 builder.Services.AddScoped<CookiePrincipalValidator>();
+
+// TODO(PORTAL-017): PersistKeysToFileSystem so restarts don't invalidate TotpSecret ciphertexts.
+builder.Services.AddDataProtection()
+    .SetApplicationName("ThanyMarcus.Portal");
+builder.Services.AddScoped<TotpService>();
+builder.Services.AddScoped<TotpBackupCodeService>();
 
 builder.Services.AddAuthentication(opts =>
 {
@@ -161,6 +169,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 });
 
 app.MapAuthEndpoints();
+app.MapTotpEndpoints();
 
 app.MapFallbackToFile("index.html");
 

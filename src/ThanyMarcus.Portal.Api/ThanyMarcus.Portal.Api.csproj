@@ -28,6 +28,10 @@
     <PackageReference Include="EFCore.NamingConventions" />
     <PackageReference Include="NodaTime" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
+
+    <PackageReference Include="Otp.NET" />
+    <PackageReference Include="QRCoder" />
+    <PackageReference Include="Konscious.Security.Cryptography.Argon2" />
   </ItemGroup>
 
 </Project>

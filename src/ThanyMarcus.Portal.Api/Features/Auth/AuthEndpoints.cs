@@ -33,14 +33,5 @@ public static class AuthEndpoints
             Results.Challenge(
                 new AuthenticationProperties { RedirectUri = "/" },
                 [GoogleDefaults.AuthenticationScheme]));
-
-        app.MapGet("/totp-challenge", () => Results.Content(
-            """
-            <!DOCTYPE html>
-            <html><body><h1>TOTP challenge</h1>
-            <p>POST handler ships in PORTAL-003a.</p>
-            </body></html>
-            """,
-            "text/html"));
     }
 }
