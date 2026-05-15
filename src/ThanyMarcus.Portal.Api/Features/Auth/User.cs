@@ -19,6 +19,7 @@ public sealed class User : IHasUpdatedAt
     public byte[]? PassphraseWrappedDek { get; set; }
     public byte[]? PassphraseWrapNonce { get; set; }
     public byte[]? PassphraseWrapTag { get; set; }
+    public Instant? PassphraseSetAt { get; set; }
 
     public Instant CreatedAt { get; init; }
     public Instant UpdatedAt { get; set; }

@@ -7,8 +7,27 @@ using ThanyMarcus.Portal.Tests.Infrastructure;
 
 namespace ThanyMarcus.Portal.Tests.Features.Auth;
 
-public sealed class AuthEndpointsTests(PostgresFixture postgres) : FactoryTestBase(postgres)
+public sealed class AuthEndpointsTests(PostgresFixture postgres) : FactoryDbTestBase(postgres)
 {
+    private async Task<Guid> InsertUserAsync()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var now = Clock.GetCurrentInstant();
+        var user = new User
+        {
+            GoogleSubject = $"sub-{Guid.NewGuid()}",
+            Email = $"u-{Guid.NewGuid():N}@x.com",
+            Name = "U",
+            LastSeenAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        Db.Users.Add(user);
+        await Db.SaveChangesAsync(ct);
+        Db.ChangeTracker.Clear();
+        return user.Id;
+    }
+
     [Fact]
     public async Task Me_unauthenticated_returns_401()
     {
@@ -24,7 +43,7 @@ public sealed class AuthEndpointsTests(PostgresFixture postgres) : FactoryTestBa
     public async Task Me_authenticated_returns_claims(string? picture)
     {
         var ct = TestContext.Current.CancellationToken;
-        var userId = Guid.CreateVersion7();
+        var userId = await InsertUserAsync();
         using var client = Factory.WithTestAuth(
             userId,
             email: "alice@example.com",
@@ -44,6 +63,7 @@ public sealed class AuthEndpointsTests(PostgresFixture postgres) : FactoryTestBa
         else
             body.ProfilePictureUrl.ShouldBe(picture);
         body.Totp.ShouldBe(TotpClaimValues.NotEnabled);
+        body.PassphraseSet.ShouldBeFalse();
     }
 
     [Fact]

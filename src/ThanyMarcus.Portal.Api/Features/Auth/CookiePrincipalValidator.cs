@@ -1,13 +1,14 @@
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
+using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth;
 
 public enum CookieValidationOutcome { Pass, Reject }
 
-public sealed class CookiePrincipalValidator(PortalDbContext db)
+public sealed class CookiePrincipalValidator(PortalDbContext db, IInfraOpUnlockCache cache)
 {
     public async Task<CookieValidationOutcome> ValidateAsync(
         ClaimsPrincipal principal,
@@ -22,12 +23,18 @@ public sealed class CookiePrincipalValidator(PortalDbContext db)
             .AsNoTracking()
             .SingleOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null)
+        {
+            cache.Invalidate(userId);
             return CookieValidationOutcome.Reject;
+        }
 
         if (user.SessionsInvalidatedAt is { } invalidatedAt
             && issuedUtc is { } issued
             && Instant.FromDateTimeOffset(issued) < invalidatedAt)
+        {
+            cache.Invalidate(userId);
             return CookieValidationOutcome.Reject;
+        }
 
         var identity = (ClaimsIdentity)principal.Identity!;
         ReplaceClaim(identity, ClaimTypes.Email, user.Email);

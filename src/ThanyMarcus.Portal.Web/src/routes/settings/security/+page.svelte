@@ -1,14 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { enableInit, enableVerify, disable, type TotpEnableInit } from '$lib/totpClient';
+  import { setPassphrase } from '$lib/stepUpClient';
 
   type Phase = 'loading' | 'idle' | 'enabling' | 'showing-codes' | 'disabling';
 
   let phase = $state<Phase>('loading');
   let totpState = $state<string>('');
+  let passphraseSet = $state(false);
   let init = $state<TotpEnableInit | null>(null);
   let enableCode = $state('');
   let disableCode = $state('');
+  let newPassphrase = $state('');
+  let confirmPassphrase = $state('');
+  let passphraseError = $state<string | null>(null);
+  let passphraseBusy = $state(false);
   let backupCodes = $state<string[]>([]);
   let error = $state<string | null>(null);
 
@@ -20,7 +26,37 @@
     }
     const me = await r.json();
     totpState = me.totp;
+    passphraseSet = me.passphraseSet === true;
     phase = 'idle';
+  }
+
+  async function submitPassphrase(e: SubmitEvent) {
+    e.preventDefault();
+    passphraseError = null;
+    if (newPassphrase !== confirmPassphrase) {
+      passphraseError = 'Passphrases do not match.';
+      return;
+    }
+    if (newPassphrase.length < 12) {
+      passphraseError = 'Passphrase must be at least 12 characters.';
+      return;
+    }
+    passphraseBusy = true;
+    try {
+      const res = await setPassphrase(newPassphrase);
+      if (res.status === 204) {
+        newPassphrase = '';
+        confirmPassphrase = '';
+        passphraseSet = true;
+      } else if (res.status === 409) {
+        passphraseError = 'Passphrase is already set.';
+        passphraseSet = true;
+      } else {
+        passphraseError = `Failed (status ${res.status}).`;
+      }
+    } finally {
+      passphraseBusy = false;
+    }
   }
 
   onMount(refreshMe);
@@ -138,6 +174,31 @@
         <button type="button" onclick={startEnable}>Enable TOTP</button>
       {/if}
     </section>
+
+    {#if !passphraseSet}
+      <section>
+        <h2>Set passphrase</h2>
+        <p>The passphrase protects destructive infrastructure operations. You will be asked for it before each destroy or rotate action.</p>
+        <form onsubmit={submitPassphrase}>
+          <label>
+            Passphrase
+            <input type="password" autocomplete="new-password" bind:value={newPassphrase} required />
+          </label>
+          <label>
+            Confirm
+            <input type="password" autocomplete="new-password" bind:value={confirmPassphrase} required />
+          </label>
+          {#if passphraseError}<p class="error">{passphraseError}</p>{/if}
+          <button type="submit" disabled={passphraseBusy || !newPassphrase || !confirmPassphrase}>
+            {passphraseBusy ? 'Setting…' : 'Set passphrase'}
+          </button>
+        </form>
+      </section>
+    {:else}
+      <section>
+        <p>Passphrase: <strong>set</strong></p>
+      </section>
+    {/if}
   {/if}
 </main>
 

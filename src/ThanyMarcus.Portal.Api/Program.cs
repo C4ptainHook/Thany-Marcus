@@ -12,6 +12,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
@@ -58,6 +59,11 @@ builder.Services.AddDataProtection()
     .SetApplicationName("ThanyMarcus.Portal");
 builder.Services.AddScoped<TotpService>();
 builder.Services.AddScoped<TotpBackupCodeService>();
+
+builder.Services.AddScoped<PassphraseService>();
+builder.Services.AddSingleton<InProcessInfraOpUnlockCache>();
+builder.Services.AddSingleton<IInfraOpUnlockCache>(sp => sp.GetRequiredService<InProcessInfraOpUnlockCache>());
+builder.Services.AddHostedService<InfraOpUnlockSweepService>();
 
 builder.Services.AddAuthentication(opts =>
 {
@@ -170,6 +176,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 
 app.MapAuthEndpoints();
 app.MapTotpEndpoints();
+app.MapPassphraseEndpoints();
 
 app.MapFallbackToFile("index.html");
 

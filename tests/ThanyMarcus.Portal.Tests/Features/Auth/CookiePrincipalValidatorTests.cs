@@ -2,12 +2,15 @@ using System.Security.Claims;
 using NodaTime;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Tests.Infrastructure;
 
 namespace ThanyMarcus.Portal.Tests.Features.Auth;
 
 public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : DbIntegrationTestBase(postgres)
 {
+    private InProcessInfraOpUnlockCache Cache { get; } = new(new NodaTime.Testing.FakeClock(Instant.FromUtc(2026, 5, 15, 12, 0)));
+
     private static ClaimsIdentity BuildIdentity(
         Guid? userId,
         string? totp = TotpClaimValues.NotEnabled,
@@ -53,7 +56,7 @@ public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : Db
     public async Task Missing_sub_us_rejects()
     {
         var ct = TestContext.Current.CancellationToken;
-        var validator = new CookiePrincipalValidator(Db);
+        var validator = new CookiePrincipalValidator(Db, Cache);
         var principal = new ClaimsPrincipal(BuildIdentity(userId: null));
 
         var outcome = await validator.ValidateAsync(principal, DateTimeOffset.UtcNow, ct);
@@ -64,7 +67,7 @@ public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : Db
     public async Task User_not_in_db_rejects()
     {
         var ct = TestContext.Current.CancellationToken;
-        var validator = new CookiePrincipalValidator(Db);
+        var validator = new CookiePrincipalValidator(Db, Cache);
         var principal = new ClaimsPrincipal(BuildIdentity(Guid.CreateVersion7()));
 
         var outcome = await validator.ValidateAsync(principal, DateTimeOffset.UtcNow, ct);
@@ -79,7 +82,7 @@ public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : Db
         var user = await InsertUserAsync(sessionsInvalidatedAt: invalidatedAt);
         var issued = invalidatedAt - Duration.FromMinutes(5);
 
-        var validator = new CookiePrincipalValidator(Db);
+        var validator = new CookiePrincipalValidator(Db, Cache);
         var identity = BuildIdentity(user.Id);
         var principal = new ClaimsPrincipal(identity);
 
@@ -100,7 +103,7 @@ public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : Db
             name: "Fresh Name",
             picture: "https://example.com/fresh.png");
 
-        var validator = new CookiePrincipalValidator(Db);
+        var validator = new CookiePrincipalValidator(Db, Cache);
         var identity = BuildIdentity(user.Id);
         var principal = new ClaimsPrincipal(identity);
 
@@ -117,7 +120,7 @@ public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : Db
         var ct = TestContext.Current.CancellationToken;
         var user = await InsertUserAsync(email: "new@example.com", name: "New");
 
-        var validator = new CookiePrincipalValidator(Db);
+        var validator = new CookiePrincipalValidator(Db, Cache);
         var identity = BuildIdentity(user.Id, email: "stale@example.com", name: "Stale");
         var principal = new ClaimsPrincipal(identity);
 
@@ -133,7 +136,7 @@ public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : Db
         var ct = TestContext.Current.CancellationToken;
         var user = await InsertUserAsync();
 
-        var validator = new CookiePrincipalValidator(Db);
+        var validator = new CookiePrincipalValidator(Db, Cache);
         var identity = BuildIdentity(user.Id, totp: TotpClaimValues.Verified);
         var principal = new ClaimsPrincipal(identity);
 
@@ -161,7 +164,7 @@ public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : Db
         await Db.SaveChangesAsync(ct);
         Db.ChangeTracker.Clear();
 
-        var validator = new CookiePrincipalValidator(Db);
+        var validator = new CookiePrincipalValidator(Db, Cache);
         var identity = BuildIdentity(user.Id, totp: TotpClaimValues.Verified);
         var principal = new ClaimsPrincipal(identity);
 
@@ -189,7 +192,7 @@ public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : Db
         await Db.SaveChangesAsync(ct);
         Db.ChangeTracker.Clear();
 
-        var validator = new CookiePrincipalValidator(Db);
+        var validator = new CookiePrincipalValidator(Db, Cache);
         var identity = BuildIdentity(user.Id, totp: TotpClaimValues.NotVerified);
         var principal = new ClaimsPrincipal(identity);
 
