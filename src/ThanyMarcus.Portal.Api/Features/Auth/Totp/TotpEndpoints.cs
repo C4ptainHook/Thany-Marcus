@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
+using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth.Totp;
@@ -120,7 +122,7 @@ public static class TotpEndpoints
 
             await RefreshTotpClaim(http, user, TotpClaimValues.Verified);
             return Results.NoContent();
-        }).RequireAuthorization();
+        }).RequireAuthorization().RequireRateLimiting(AuthRateLimiterPolicies.TotpChallenge);
     }
 
     private static async Task RefreshTotpClaim(HttpContext http, ClaimsPrincipal user, string totpValue)

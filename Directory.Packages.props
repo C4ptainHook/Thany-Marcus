@@ -46,6 +46,7 @@
     <!-- Test isolation -->
     <PackageVersion Include="Respawn" Version="6.*" />
     <PackageVersion Include="NodaTime.Testing" Version="3.*" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.*" />
 
     <!-- Transitive pins to satisfy CVE warnings-as-errors (Respawn 6 pulls SqlClient which transitively pulls these). -->
     <PackageVersion Include="Azure.Identity" Version="1.13.*" />

@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.RateLimiting;
+using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 
@@ -39,6 +41,6 @@ public static class PassphraseEndpoints
             {
                 CryptographicOperations.ZeroMemory(dek);
             }
-        }).RequireAuthorization(AuthPolicies.TotpRequired);
+        }).RequireAuthorization(AuthPolicies.TotpRequired).RequireRateLimiting(AuthRateLimiterPolicies.Unlock);
     }
 }
