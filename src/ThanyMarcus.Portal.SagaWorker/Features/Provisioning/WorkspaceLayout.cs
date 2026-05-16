@@ -33,13 +33,28 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
             "terraform { backend \"pg\" {} }\n",
             ct);
 
-        var size = !string.IsNullOrWhiteSpace(cloud.Region) ? defaultSize : defaultSize;
-        var tfvars = string.Create(CultureInfo.InvariantCulture, $"""
-            cloud_id = "{cloud.Id}"
-            region   = "{cloud.Region}"
-            size     = "{size}"
-            hostname = "{cloud.Hostname}"
-            """);
+        string tfvars;
+        if (cloud.Provider == "stub")
+        {
+            tfvars = string.Create(CultureInfo.InvariantCulture, $"""
+                cloud_id = "{cloud.Id}"
+                region   = "{cloud.Region}"
+                size     = "{defaultSize}"
+                hostname = "{cloud.Hostname}"
+                """);
+        }
+        else
+        {
+            var portalUrl = config["Provisioning:PortalUrl"]
+                ?? throw new InvalidOperationException("Provisioning:PortalUrl is not configured");
+            tfvars = string.Create(CultureInfo.InvariantCulture, $"""
+                cloud_id   = "{cloud.Id}"
+                region     = "{cloud.Region}"
+                size       = "{defaultSize}"
+                hostname   = "{cloud.Hostname}"
+                portal_url = "{portalUrl}"
+                """);
+        }
         await File.WriteAllTextAsync(Path.Combine(dir, "variables.auto.tfvars"), tfvars, ct);
 
         LogRendered(log, job.Id, cloud.Provider, dir);
@@ -79,41 +94,77 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
 
     private static string RenderMainTf(string modulePath, string provider)
     {
-        var requiredProviders = provider switch
+        var (requiredProviders, providerBlock, extraModuleArgs, extraRootVars) = provider switch
         {
-            "stub" => string.Empty,
-            "digitalocean" => """
+            "stub" => (
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty),
+            "digitalocean" => (
+                """
                   required_providers {
-                    digitalocean = { source = "digitalocean/digitalocean" }
+                    digitalocean = {
+                      source  = "digitalocean/digitalocean"
+                      version = "~> 2.0"
+                    }
                   }
                 """,
-            "azure" => """
-                  required_providers {
-                    azurerm = { source = "hashicorp/azurerm" }
-                  }
+                """
+
+                provider "digitalocean" {
+                  token = var.provider_token
+                }
                 """,
+                """
+
+                  enrollment_token = var.enrollment_token
+                  ghcr_pat         = var.ghcr_pat
+                  portal_url       = var.portal_url
+                """,
+                """
+
+                variable "provider_token" {
+                  type      = string
+                  sensitive = true
+                  default   = ""
+                }
+                variable "enrollment_token" {
+                  type      = string
+                  sensitive = true
+                  default   = ""
+                }
+                variable "ghcr_pat" {
+                  type      = string
+                  sensitive = true
+                  default   = ""
+                }
+                variable "portal_url" {
+                  type = string
+                }
+                """),
+            "azure" => throw new NotImplementedException("Azure provider lands in PORTAL-009"),
             _ => throw new InvalidOperationException($"Unknown provider: {provider}"),
         };
 
         return $$"""
             terraform {
               required_version = ">= 1.6"
-            {{requiredProviders}}}
-
-            variable "cloud_id"          { type = string }
-            variable "region"            { type = string }
-            variable "size"              { type = string }
-            variable "hostname"          { type = string }
-            variable "provider_token"    { type = string sensitive = true default = "" }
-            variable "enrollment_token"  { type = string sensitive = true default = "" }
-            variable "ghcr_pat"          { type = string sensitive = true default = "" }
-
+            {{requiredProviders}}
+            }
+            {{providerBlock}}
+            variable "cloud_id" { type = string }
+            variable "region"   { type = string }
+            variable "size"     { type = string }
+            variable "hostname" { type = string }
+            {{extraRootVars}}
             module "cloud" {
               source   = "{{modulePath.Replace("\\", "/", StringComparison.Ordinal)}}"
               cloud_id = var.cloud_id
               region   = var.region
               size     = var.size
               hostname = var.hostname
+            {{extraModuleArgs}}
             }
 
             output "ip" { value = module.cloud.ip }
