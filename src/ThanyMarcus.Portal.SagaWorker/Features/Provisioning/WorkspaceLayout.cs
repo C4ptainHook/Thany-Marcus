@@ -47,12 +47,22 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
         {
             var portalUrl = config["Provisioning:PortalUrl"]
                 ?? throw new InvalidOperationException("Provisioning:PortalUrl is not configured");
+            var cloudInit = ReadCloudInitConfig();
             tfvars = string.Create(CultureInfo.InvariantCulture, $"""
-                cloud_id   = "{cloud.Id}"
-                region     = "{cloud.Region}"
-                size       = "{defaultSize}"
-                hostname   = "{cloud.Hostname}"
-                portal_url = "{portalUrl}"
+                cloud_id       = "{cloud.Id}"
+                region         = "{cloud.Region}"
+                size           = "{defaultSize}"
+                hostname       = "{cloud.Hostname}"
+                portal_url     = "{portalUrl}"
+                le_email       = "{cloudInit.LeEmail}"
+                le_acme_ca     = "{cloudInit.LeAcmeCa}"
+                image_tag      = "{cloudInit.ImageTag}"
+                admin_user     = "{cloudInit.AdminUser}"
+                ssh_public_key = "{cloudInit.SshPublicKey}"
+                compose_url    = "{cloudInit.ComposeUrl}"
+                caddyfile_url  = "{cloudInit.CaddyfileUrl}"
+                nginx_conf_url = "{cloudInit.NginxConfUrl}"
+                timezone       = "{cloudInit.Timezone}"
                 """);
         }
         await File.WriteAllTextAsync(Path.Combine(dir, "variables.auto.tfvars"), tfvars, ct);
@@ -60,6 +70,38 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
         LogRendered(log, job.Id, cloud.Provider, dir);
         return dir;
     }
+
+    private CloudInitConfig ReadCloudInitConfig()
+    {
+        var section = config.GetSection("Provisioning:CloudInit");
+        string Require(string key) => section[key]
+            ?? throw new InvalidOperationException($"Provisioning:CloudInit:{key} is not configured");
+        return new CloudInitConfig(
+            LeEmail:       Require("LeEmail"),
+            LeAcmeCa:      section["LeAcmeCa"] ?? "",
+            ImageTag:      Require("ImageTag"),
+            AdminUser:     section["AdminUser"] ?? "thanyadmin",
+            SshPublicKey:  EscapeTfString(section["SshPublicKey"] ?? ""),
+            ComposeUrl:    Require("ComposeUrl"),
+            CaddyfileUrl:  Require("CaddyfileUrl"),
+            NginxConfUrl:  Require("NginxConfUrl"),
+            Timezone:      section["Timezone"] ?? "Etc/UTC");
+    }
+
+    private static string EscapeTfString(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+             .Replace("\"", "\\\"", StringComparison.Ordinal);
+
+    private sealed record CloudInitConfig(
+        string LeEmail,
+        string LeAcmeCa,
+        string ImageTag,
+        string AdminUser,
+        string SshPublicKey,
+        string ComposeUrl,
+        string CaddyfileUrl,
+        string NginxConfUrl,
+        string Timezone);
 
     public void SweepTerminal(Instant now, Duration retention)
     {
@@ -121,6 +163,15 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                   enrollment_token = var.enrollment_token
                   ghcr_pat         = var.ghcr_pat
                   portal_url       = var.portal_url
+                  le_email         = var.le_email
+                  le_acme_ca       = var.le_acme_ca
+                  image_tag        = var.image_tag
+                  admin_user       = var.admin_user
+                  ssh_public_key   = var.ssh_public_key
+                  compose_url      = var.compose_url
+                  caddyfile_url    = var.caddyfile_url
+                  nginx_conf_url   = var.nginx_conf_url
+                  timezone         = var.timezone
                 """,
                 """
 
@@ -139,8 +190,27 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                   sensitive = true
                   default   = ""
                 }
-                variable "portal_url" {
-                  type = string
+                variable "portal_url"     { type = string }
+                variable "le_email"       { type = string }
+                variable "le_acme_ca" {
+                  type    = string
+                  default = ""
+                }
+                variable "image_tag"  { type = string }
+                variable "admin_user" {
+                  type    = string
+                  default = "thanyadmin"
+                }
+                variable "ssh_public_key" {
+                  type    = string
+                  default = ""
+                }
+                variable "compose_url"    { type = string }
+                variable "caddyfile_url"  { type = string }
+                variable "nginx_conf_url" { type = string }
+                variable "timezone" {
+                  type    = string
+                  default = "Etc/UTC"
                 }
                 """),
             "azure" => throw new NotImplementedException("Azure provider lands in PORTAL-009"),

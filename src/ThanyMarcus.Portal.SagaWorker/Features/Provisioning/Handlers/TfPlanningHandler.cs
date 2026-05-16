@@ -145,7 +145,7 @@ public sealed partial class TfPlanningHandler(
         return env;
     }
 
-    private static string ToPostgresUrl(string netConnStr)
+    internal static string ToPostgresUrl(string netConnStr)
     {
         var b = new Npgsql.NpgsqlConnectionStringBuilder(netConnStr);
         var user = Uri.EscapeDataString(b.Username ?? "");

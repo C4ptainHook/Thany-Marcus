@@ -7,7 +7,6 @@ services:
   saga-worker:
     environment:
       DOTNET_ENVIRONMENT: Development
-      Cloudflare__UseStub: "false"
 
   caddy:
     profiles: [prod]

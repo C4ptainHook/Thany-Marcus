@@ -38,4 +38,13 @@
     <PackageReference Include="Konscious.Security.Cryptography.Argon2" />
   </ItemGroup>
 
+  <Target Name="BuildSpa" BeforeTargets="Build" Condition="'$(SkipSpaBuild)' != 'true'">
+    <Exec Command="pnpm install --frozen-lockfile" WorkingDirectory="..\ThanyMarcus.Portal.Web" />
+    <Exec Command="pnpm build" WorkingDirectory="..\ThanyMarcus.Portal.Web" />
+    <ItemGroup>
+      <SpaOutput Include="..\ThanyMarcus.Portal.Web\build\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(SpaOutput)" DestinationFolder="wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

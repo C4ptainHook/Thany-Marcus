@@ -39,6 +39,11 @@ public sealed class DigitalOceanModuleValidationTests
                   enrollment_token = "fake"
                   ghcr_pat         = "fake"
                   portal_url       = "https://example.test/"
+                  le_email         = "letsencrypt@example.test"
+                  image_tag        = "test"
+                  compose_url      = "https://example.test/docker-compose.yml"
+                  caddyfile_url    = "https://example.test/Caddyfile.tpl"
+                  nginx_conf_url   = "https://example.test/nginx.conf"
                 }
                 """, ct);
 

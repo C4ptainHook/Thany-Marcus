@@ -51,6 +51,13 @@ services:
       ConnectionStrings__Portal: Host=postgres;Port=5432;Username=postgres;Password=postgres;Database=portal_dev
       DataProtection__KeyRingPath: /var/lib/portal/data-protection-keys
       Provisioning__PortalUrl: ${PROVISIONING_PORTAL_URL}
+      Provisioning__CloudInit__LeEmail: ${CLOUDINIT_LE_EMAIL:-letsencrypt@thany.click}
+      Provisioning__CloudInit__LeAcmeCa: ${CLOUDINIT_LE_ACME_CA:-}
+      Provisioning__CloudInit__ImageTag: ${CLOUDINIT_IMAGE_TAG:-main}
+      Provisioning__CloudInit__ComposeUrl: ${CLOUDINIT_COMPOSE_URL}
+      Provisioning__CloudInit__CaddyfileUrl: ${CLOUDINIT_CADDYFILE_URL}
+      Provisioning__CloudInit__NginxConfUrl: ${CLOUDINIT_NGINX_CONF_URL}
+      Provisioning__CloudInit__SshPublicKey: ${CLOUDINIT_SSH_PUBLIC_KEY:-}
       Cloudflare__ZoneId: ${CLOUDFLARE_ZONE_ID}
       Cloudflare__ApiToken: ${CLOUDFLARE_API_TOKEN}
     volumes:

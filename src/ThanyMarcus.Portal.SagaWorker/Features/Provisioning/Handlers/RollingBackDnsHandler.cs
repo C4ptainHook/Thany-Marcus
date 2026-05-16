@@ -1,11 +1,7 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
-using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
-using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloudflare;
@@ -15,8 +11,6 @@ namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 public sealed partial class RollingBackDnsHandler(
     PortalDbContext db,
     IClock clock,
-    IInfraOpUnlockCache unlockCache,
-    IProviderTokenVault providerVault,
     ICloudflareDnsClient cloudflare,
     ILogger<RollingBackDnsHandler> log) : ISagaPhaseHandler
 {
@@ -27,7 +21,6 @@ public sealed partial class RollingBackDnsHandler(
         ArgumentNullException.ThrowIfNull(job);
         var jobId = job.Id;
         job = await db.ProvisioningJobs.SingleAsync(j => j.Id == jobId, ct);
-        var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
 
         var recordId = ReadDnsRecordId(job);
         if (recordId is null)
@@ -41,51 +34,28 @@ public sealed partial class RollingBackDnsHandler(
             return;
         }
 
-        var dek = new byte[32];
-        byte[]? cloudflareToken = null;
         try
         {
-            string tokenString;
-            if (await unlockCache.TryGetAsync(cloud.UserId, dek, ct))
+            await cloudflare.DeleteAsync(recordId, string.Empty, ct);
+            EventsLogAppender.Append(job, clock, Phase, new JsonObject
             {
-                cloudflareToken = await providerVault.DecryptAsync(cloud.UserId, KnownProviders.Cloudflare, dek, ct);
-                tokenString = cloudflareToken is not null
-                    ? Encoding.UTF8.GetString(cloudflareToken)
-                    : string.Empty;
-            }
-            else
-            {
-                tokenString = string.Empty;
-            }
-
-            try
-            {
-                await cloudflare.DeleteAsync(recordId, tokenString, ct);
-                EventsLogAppender.Append(job, clock, Phase, new JsonObject
-                {
-                    ["event"] = "dns_deleted",
-                    ["record_id"] = recordId,
-                });
-            }
-            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
-            {
-                LogDeleteFailure(log, ex, job.Id, recordId);
-                EventsLogAppender.Append(job, clock, Phase, new JsonObject
-                {
-                    ["event"] = "dns_delete_failed",
-                    ["record_id"] = recordId,
-                    ["error"] = ex.Message,
-                });
-            }
-
-            await SagaTransitions.TransitionAsync(
-                db, clock, job, SagaStatus.RollingBackTf, Duration.Zero, ct: ct);
+                ["event"] = "dns_deleted",
+                ["record_id"] = recordId,
+            });
         }
-        finally
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
         {
-            CryptographicOperations.ZeroMemory(dek);
-            if (cloudflareToken is not null) CryptographicOperations.ZeroMemory(cloudflareToken);
+            LogDeleteFailure(log, ex, job.Id, recordId);
+            EventsLogAppender.Append(job, clock, Phase, new JsonObject
+            {
+                ["event"] = "dns_delete_failed",
+                ["record_id"] = recordId,
+                ["error"] = ex.Message,
+            });
         }
+
+        await SagaTransitions.TransitionAsync(
+            db, clock, job, SagaStatus.RollingBackTf, Duration.Zero, ct: ct);
     }
 
     private static string? ReadDnsRecordId(ProvisioningJob job)

@@ -16,7 +16,7 @@ public sealed class CloudInitTemplateRenderTests
     {
         var path = Path.Combine(
             TerraformTemplateRenderer.FindRepoRoot(),
-            "infra", "terraform", "shared", "cloud-init.yaml.tpl");
+            "infra", "docker", "saga-worker", "terraform-modules", "digitalocean", "cloud-init.yaml.tpl");
         File.Exists(path).ShouldBeTrue($"missing: {path}");
     }
 
@@ -257,7 +257,7 @@ public sealed class CloudInitTemplateRenderTests
     {
         var path = Path.Combine(
             TerraformTemplateRenderer.FindRepoRoot(),
-            "infra", "terraform", "shared", "cloud-init.yaml.tpl");
+            "infra", "docker", "saga-worker", "terraform-modules", "digitalocean", "cloud-init.yaml.tpl");
         var template = File.ReadAllText(path);
         return TerraformTemplateRenderer.Render(template, vars);
     }
