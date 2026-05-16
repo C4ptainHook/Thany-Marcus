@@ -31,6 +31,8 @@ public sealed class WorkspaceLayoutTests
         mainTf.ShouldContain("module \"cloud\"");
         mainTf.ShouldContain("output \"ip\"");
         mainTf.ShouldNotContain("required_providers");
+        mainTf.ShouldNotContain("provider \"digitalocean\"");
+        mainTf.ShouldNotContain("portal_url");
 
         var backendTf = await File.ReadAllTextAsync(Path.Combine(dir, "backend.tf"), ct);
         backendTf.ShouldContain("backend \"pg\"");
@@ -39,6 +41,62 @@ public sealed class WorkspaceLayoutTests
         tfvars.ShouldContain(cloud.Id.ToString());
         tfvars.ShouldContain(cloud.Hostname);
         tfvars.ShouldNotContain("provider_token");
+        tfvars.ShouldNotContain("portal_url");
+    }
+
+    [Fact]
+    public async Task Renders_required_providers_and_provider_block_for_digitalocean()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var sandbox = new TempDir();
+        var modulesRoot = sandbox.Path("modules");
+        Directory.CreateDirectory(Path.Combine(modulesRoot, "digitalocean"));
+
+        var layout = new WorkspaceLayout(
+            BuildConfig(sandbox.Path("workspace"), modulesRoot, portalUrl: "https://test.example/"),
+            NullLogger<WorkspaceLayout>.Instance);
+
+        var (job, cloud) = MakeJobAndCloud("digitalocean");
+
+        var dir = await layout.RenderAsync(job, cloud, ct);
+
+        var mainTf = await File.ReadAllTextAsync(Path.Combine(dir, "main.tf"), ct);
+        mainTf.ShouldContain("required_providers");
+        mainTf.ShouldContain("digitalocean = {");
+        mainTf.ShouldContain("source  = \"digitalocean/digitalocean\"");
+        mainTf.ShouldContain("provider \"digitalocean\"");
+        mainTf.ShouldContain("token = var.provider_token");
+        mainTf.ShouldContain("enrollment_token = var.enrollment_token");
+        mainTf.ShouldContain("ghcr_pat         = var.ghcr_pat");
+        mainTf.ShouldContain("portal_url       = var.portal_url");
+        mainTf.ShouldContain("variable \"provider_token\"");
+        mainTf.ShouldContain("variable \"enrollment_token\"");
+        mainTf.ShouldContain("variable \"ghcr_pat\"");
+        mainTf.ShouldContain("variable \"portal_url\"");
+        mainTf.ShouldContain("output \"ip\" { value = module.cloud.ip }");
+
+        var tfvars = await File.ReadAllTextAsync(Path.Combine(dir, "variables.auto.tfvars"), ct);
+        tfvars.ShouldContain("portal_url = \"https://test.example/\"");
+        tfvars.ShouldContain(cloud.Id.ToString());
+        tfvars.ShouldContain(cloud.Hostname);
+    }
+
+    [Fact]
+    public async Task Render_for_non_stub_provider_requires_PortalUrl_configured()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var sandbox = new TempDir();
+        var modulesRoot = sandbox.Path("modules");
+        Directory.CreateDirectory(Path.Combine(modulesRoot, "digitalocean"));
+
+        var layout = new WorkspaceLayout(
+            BuildConfig(sandbox.Path("workspace"), modulesRoot, portalUrl: null),
+            NullLogger<WorkspaceLayout>.Instance);
+
+        var (job, cloud) = MakeJobAndCloud("digitalocean");
+
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await layout.RenderAsync(job, cloud, ct));
     }
 
     [Fact]
@@ -57,13 +115,14 @@ public sealed class WorkspaceLayoutTests
         first.ShouldEndWith(jobId.ToString());
     }
 
-    private static IConfiguration BuildConfig(string workspaceBase, string modulesDir) =>
+    private static IConfiguration BuildConfig(string workspaceBase, string modulesDir, string? portalUrl = "https://api.test/") =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Provisioning:WorkspaceBase"] = workspaceBase,
                 ["Provisioning:TerraformModulesDir"] = modulesDir,
                 ["Provisioning:DefaultSize"] = "s-1vcpu-1gb",
+                ["Provisioning:PortalUrl"] = portalUrl,
             })
             .Build();
 

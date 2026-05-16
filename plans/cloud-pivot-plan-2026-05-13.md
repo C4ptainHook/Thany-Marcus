@@ -126,7 +126,8 @@ Strongest claim:
             |  portal runs `terraform apply` -> droplet up
             v
 +---------------------------------------+
-|  USER'S VPS (per user, single-tenant) |    €15–25/month
+|  CONTROL PLANE (per user, always-on)  |    ~$24/mo DO, ~$30/mo Azure,
+|  2 vCPU / 4 GB, single-tenant         |    ~€5/mo Hetzner
 |  Provisioned by portal via Terraform; |    user owns infra + data
 |  cloud-init pulls Docker Compose:     |
 |                                       |
@@ -135,13 +136,38 @@ Strongest claim:
 |    - portal admin endpoints           |
 |    - public share-recipient endpoint  |
 |  - postgres + pgvector                |
-|  - ollama (4B/8B LLM, safe mode)      |
-|  - parakeet sidecar (sherpa-onnx)     |
 |  - caddy (HTTPS via Let's Encrypt)    |
+|  - embeddings (e5-small ONNX,         |
+|    in-process)                        |
+|  - cheap extraction (URL/PDF/text)    |
+|  - classical D-filter                 |
+|  - saga queue + WorkerLifecycleSvc    |
 |  - cloud-side asset/artifact store    |
 |  - cloud-side processed-md backup     |
-|  NO web client, NO WebDAV, NO         |
-|  human-facing browser UI.             |
+|  Joined to per-cloud private VPC.     |
+|  NO web client, NO WebDAV.            |
++---------------------------------------+
+            |
+            |  private-network lease pull
+            |  (postgres SKIP LOCKED;
+            |   spawn via Terraform)
+            v
++---------------------------------------+
+|  BURST WORKER (per user, ephemeral)   |    ~$0.125/hr DO,
+|  4 vCPU / 16 GB, single-tenant        |    ~$0.166/hr Azure,
+|  Spawned on demand by control plane;  |    ~€0.05/hr Hetzner
+|  destroyed after 10 min idle.         |    Realistic: ~$3–8/mo
+|                                       |
+|  - ollama (Gemma 4 E4B Q4, safe mode) |
+|  - parakeet sidecar (sherpa-onnx)     |
+|  - worker process: pulls jobs from    |
+|    control-plane postgres, runs       |
+|    inference, posts results back      |
+|                                       |
+|  No public ingress (firewall locks to |
+|  control plane's private IP).         |
+|  No persistent state — model weights  |
+|  baked into image / pulled at boot.   |
 +---------------------------------------+
             ^
             |  bearer-token API (plugin <-> user's cloud)
@@ -156,13 +182,14 @@ Strongest claim:
 +---------------------------------------+
 ```
 
-**Three trust boundaries:**
+**Trust boundaries:**
 
-- **Portal trusts:** Google (for SSO), DO/Hetzner (provider APIs), the user (to enter their own data correctly).
-- **User's cloud trusts:** the plugin (via bearer token issued by portal), the portal (via admin token), Let's Encrypt (cert), optionally OpenAI/Anthropic (unsafe mode only).
-- **Plugin trusts:** the user's own cloud (URL + bearer token configured in plugin settings).
+- **Portal trusts:** Google (for SSO), DO/Azure (provider APIs), the user (to enter their own data correctly).
+- **Control plane trusts:** the plugin (via bearer token issued by portal), the portal (via admin token), Let's Encrypt (cert), its own burst worker (via short-lived worker registration token issued at spawn), optionally OpenAI/Anthropic (unsafe mode only).
+- **Burst worker trusts:** the control plane that spawned it (via Terraform-injected registration token + private-network constraint).
+- **Plugin trusts:** the user's own control plane (URL + bearer token configured in plugin settings).
 
-**Portal never sees user content.** After provisioning, captures flow plugin → user's cloud → user's vault. Nothing transits the portal.
+**Portal never sees user content.** After provisioning, captures flow plugin → control plane → (burst worker, transiently) → control plane → user's vault. Nothing transits the portal. The burst worker only ever holds inference data in RAM; it has no persistent disk for user content and is destroyed after idle timeout.
 
 ## 8. Provisioning Portal
 
@@ -298,19 +325,28 @@ All six are exposed as Obsidian commands. User binds hotkeys via Obsidian's norm
 
 ## 11. Cloud Backend
 
-**The user's cloud is API-only.** No web client, no human-facing browser UI, no WebDAV server.
+**The user's cloud is API-only.** No web client, no human-facing browser UI, no WebDAV server. As of DEC-001 (revised 2026-05-16) it is a two-tier deployment: an always-on **control plane** and an ephemeral **burst worker**.
 
-### Stack (per-user cloud)
+### Stack — Control plane (always-on, 2 vCPU / 4 GB)
 
 - ASP.NET Core 10 Minimal API
 - PostgreSQL 16 + **pgvector**
 - Filesystem-backed asset/artifact storage on encrypted VPS volume
 - Filesystem-backed processed-Markdown backup store
-- **Ollama** container (default Gemma 4 E4B Q4 on 16 GB tier; configurable)
-- **Parakeet sidecar** container (sherpa-onnx server image)
-- **multilingual-e5-small** ONNX loaded in-process
+- **multilingual-e5-small** ONNX loaded in-process (embeddings are cheap, stay here)
+- Cheap extractors in-process: AngleSharp + Readability (URL), PdfPig (PDF), text/clipboard
+- Classical D-filter (silence VAD, blur Laplacian, perceptual hash) in-process
 - Caddy + Let's Encrypt for HTTPS on the user's domain
+- Saga queue (Postgres-backed) + **WorkerLifecycleService** (`IHostedService`)
 - Docker Compose for orchestration
+
+### Stack — Burst worker (ephemeral, 4 vCPU / 16 GB, spawned on demand)
+
+- **Ollama** container (default Gemma 4 E4B Q4; configurable per ADR-0035)
+- **Parakeet sidecar** container (sherpa-onnx server image)
+- **Worker process** (binary): polls the control plane's Postgres queue over the private network, calls local Ollama / Parakeet, writes results back. Stateless; no persistent volume.
+- Docker Compose for orchestration. No Caddy, no Postgres, no public ingress.
+- Lifecycle managed by the control plane; see §12.
 
 ### Endpoints
 
@@ -345,31 +381,83 @@ S4 preserved from 2026-05-13. One structured LLM call per artifact: routing + en
 
 Saga runs as ASP.NET Core `IHostedService` background workers with a Postgres-backed queue. LIFO active ordering; failed items go to a retry queue with exponential backoff and a dead-letter destination after N retries.
 
+**Where each step runs (DEC-001 revised 2026-05-16):**
+
+Steps that are CPU-cheap or memory-cheap run on the **control plane**. Steps that need the LLM or ASR model loaded run on the **burst worker**. The saga step that hands off to the worker only enqueues a lease; the worker pulls the lease itself.
+
+- Control plane (in-process or sidecar): URL fetch, HTML→Markdown, PDF text extraction, embeddings (e5-small), classical D-filter, pgvector retrieval, procedural Markdown assembly, hub regen orchestration
+- Burst worker (pulled from queue): Parakeet transcription, LLM structured extraction (safe mode), LLM hub-view regen
+- Unsafe mode bypasses the worker entirely — the LLM step calls the external API directly from the control plane
+
+Final step: emit processed Markdown + assets via `/api/sync/pull` for the plugin to fetch.
+
+### WorkerLifecycleService
+
+A new `IHostedService` in the control plane owns the worker's lifecycle. State machine:
+
+```text
+none ──[first LLM/ASR job arrives]──► spawning
+spawning ──[worker calls /admin/worker-ready within 7 min]──► alive
+spawning ──[7 min timeout]──► destroying (and retry from none on next job)
+alive ──[10 min with no new jobs leased]──► draining
+draining ──[in-flight jobs complete or lease TTL expires]──► destroying
+destroying ──[Terraform destroy returns success]──► none
+```
+
+- `none → spawning`: shell out to `terraform apply` against the worker module (PORTAL-008b / PORTAL-009b), injecting a short-lived worker registration token + the control plane's private IP + Postgres connection string + LLM model choice.
+- Worker cloud-init pulls the worker Docker Compose, starts Ollama (which loads the model into RAM), starts the worker process, which POSTs `/admin/worker-ready` to the control plane.
+- `alive`: worker leases LLM/ASR jobs from the Postgres queue using `FOR UPDATE SKIP LOCKED` with a 10-min lease TTL. Control plane has no direct RPC to the worker — all coordination is via shared Postgres state.
+- `alive → draining`: control plane sets a `worker_should_drain=true` flag in the workers table; worker sees it on its next 30s heartbeat and stops leasing new jobs.
+- `destroying`: shell out to `terraform destroy` with the same workspace. ~60s.
+
+**Sovereignty implications:** the worker never has its own public DNS or persistent disk for user content. Inference inputs traverse the per-cloud private VPC only. After destruction, all user data lived only on the control plane's encrypted volume; the worker's ephemeral disk is gone.
+
+**Failure semantics:** lease TTL of 10 min plus `SKIP LOCKED` means a wedged or destroyed worker can never block the queue — its leases expire and the next worker (or retry of the same spawn cycle) picks them up. The user-facing observation is increased latency, not data loss.
+
+**UX implications:** first capture in an idle session pays a ~5 min cold-start (worker spawn + cloud-init + model load). Subsequent captures within the 10 min idle window are warm (~30 s). The plugin surfaces this via the status bar ("Worker waking up — first note ~5 min" / "Worker warm").
+
 Routes preserved from 2026-05-13 §11 with these adjustments:
-- `parakeet_transcription` calls the Parakeet sidecar HTTP endpoint
-- `local_context_fetch` becomes `pgvector_context_fetch`
-- `llm_structured_extraction` calls in-cloud Ollama (safe mode) or external API (unsafe mode)
-- Final step: emit processed Markdown + assets via `/api/sync/pull` for the plugin to fetch
+- `parakeet_transcription` calls the Parakeet sidecar HTTP endpoint *on the burst worker*
+- `local_context_fetch` becomes `pgvector_context_fetch` (control plane)
+- `llm_structured_extraction` runs on the burst worker (safe mode) or calls external API from the control plane (unsafe mode)
 
 ## 13. LLM Strategy
 
 **Two modes:**
 
-- **Safe (default)** — in-cloud Ollama on the user's VPS. Default model: Gemma 4 E4B Q4 on 16 GB tier; Gemma 4 E2B Q4 on 8 GB tier.
-- **Unsafe (opt-in)** — external API (Anthropic or OpenAI). API key stored on the user's cloud, encrypted at rest. Full-screen consent at enable. Persistent badge in plugin status bar. Per-call audit log entry in provenance JSON.
+- **Safe (default)** — Ollama running on the user's **burst worker** (DEC-001 revised 2026-05-16). Default model: Gemma 4 E4B Q4 on the 16 GB worker tier. The worker is spawned on demand by the control plane and destroyed after 10 min idle. User content traverses the per-cloud private VPC only; the worker has no persistent disk for user data.
+- **Unsafe (opt-in)** — external API (Anthropic or OpenAI), called directly from the control plane (bypasses the burst worker entirely). API key stored on the control plane, encrypted at rest. Full-screen consent at enable. Persistent badge in plugin status bar. Per-call audit log entry in provenance JSON.
 
-C2 per-device backend lock from 2026-05-13 is dropped (only one data plane per user under this architecture). GPU mode is dropped from MVP — if user needs more horsepower, they resize their VPS via the portal. Vision processing in MVP uses Tesseract + EXIF + perceptual hash (server-side classical, no GPU needed).
+**Cold-start UX (safe mode):**
+
+| Capture position in session | Latency to Markdown in vault |
+|---|---|
+| First capture (no warm worker) | ~5 min (spawn + cloud-init + model load + inference) |
+| Subsequent captures within 10 min idle window | ~30 s (worker warm) |
+| Capture after 10+ min of inactivity | ~5 min again |
+
+This is the explicit trade for ~3× lower operating cost vs. an always-on 16 GB tier. Status bar surfaces worker state so the user knows whether the next capture is cold or warm.
+
+**Why the burst design and not always-on 16 GB:** the workload is bursty (humans don't capture continuously), so always-on inference capacity is paid-for-and-idle 95%+ of the time. Burst architecture pays ~$3–8/mo for the worker's actual usage hours instead of $84/mo for 24/7 capacity. The trade is first-capture latency, which is honestly surfaced rather than hidden. See ADR-0035 for the full argument.
+
+C2 per-device backend lock from 2026-05-13 is dropped (only one data plane per user under this architecture). GPU mode is dropped from MVP — if user needs more horsepower, they resize their burst worker tier via the portal. Vision processing in MVP uses Tesseract + EXIF + perceptual hash (control-plane-side classical, no GPU needed).
 
 ## 14. Server-Side Subsystems
 
-Same as the previous revision:
+Split across the two tiers per DEC-001 (revised 2026-05-16):
 
-- **Ollama** container (LLM)
-- **Parakeet sidecar** (ASR via sherpa-onnx)
+**Control plane (always-on):**
 - **multilingual-e5-small** ONNX in-process (embeddings)
 - **pgvector** (vector index)
-- **Classical D filter** (server-side; silence VAD, blur Laplacian, perceptual hash)
-- **Postgres-backed saga queue** (LIFO active, exponential backoff retry, dead-letter)
+- **Classical D filter** (silence VAD, blur Laplacian, perceptual hash)
+- **Postgres-backed saga queue** (LIFO active, exponential backoff retry, dead-letter, `FOR UPDATE SKIP LOCKED` lease semantics shared with worker)
+- **WorkerLifecycleService** (`IHostedService` — state machine + TerraformRunner invocation)
+- Cheap extractors (AngleSharp + Readability, PdfPig, Tesseract for image OCR baseline)
+
+**Burst worker (ephemeral):**
+- **Ollama** container (LLM)
+- **Parakeet sidecar** (ASR via sherpa-onnx)
+- Worker process (queue-puller, results-writer)
 
 ## 15–18. Auto-Routing, Knowledge Generation, Vault Structure, Entity Hubs
 
@@ -581,18 +669,18 @@ Eval corpus collection: ~150–200 self-collected artifacts over 3–4 weeks of 
 - 8 dual-use recovery codes for passphrase recovery
 - TOTP shared-secret storage encrypted at rest
 
-**User's cloud (per instance, API-only data plane):**
+**User's cloud — control plane (per instance, always-on, API-only data plane):**
 - ASP.NET Core 10 API + Docker Compose stack
 - Postgres 16 + pgvector
-- Ollama container (Gemma 4 E4B Q4 default on 16 GB tier)
-- Parakeet sidecar (sherpa-onnx)
-- multilingual-e5-small in-process
+- multilingual-e5-small in-process (embeddings)
+- Cheap extractors in-process (AngleSharp, Readability, PdfPig, Tesseract)
 - Caddy + Let's Encrypt
 - Plugin endpoints with bearer-token auth
 - Portal admin endpoints with cloud admin token auth
+- Worker-registration endpoint (short-lived token issued at spawn)
 - Public share-recipient endpoint
-- Server-side saga (Postgres-backed queue, LIFO, exponential backoff retry, dead-letter)
-- Single structured LLM call per artifact (S4)
+- Server-side saga (Postgres-backed queue, LIFO, exponential backoff retry, dead-letter, lease semantics shared with burst worker)
+- WorkerLifecycleService (`IHostedService`): state machine + Terraform invocation
 - Procedural Markdown assembly + entity-hub regen with B4c
 - LLM auto-routing with project auto-create
 - User-defined entity-type folders (E5)
@@ -601,6 +689,14 @@ Eval corpus collection: ~150–200 self-collected artifacts over 3–4 weeks of 
 - Provenance JSON (§22 schema)
 - Per-project sharing with W1+P1+F1+A1 stripping
 - Safe/unsafe mode toggle + consent UX + audit log
+
+**User's cloud — burst worker (per instance, ephemeral, spawned on demand):**
+- Docker Compose stack: Ollama (Gemma 4 E4B Q4 default) + Parakeet sidecar + worker process
+- Worker process: pulls saga LLM/ASR jobs from control-plane Postgres over private VPC, runs inference, writes results back
+- No public ingress; firewall locks to control plane's private IP
+- 10 min idle timeout → self-shutdown handshake → Terraform destroy
+- Cold-start ~5 min on first capture per session; warm ~30 s thereafter
+- Hosts the single structured LLM call per artifact (S4) — runs here in safe mode
 
 **Obsidian plugin:**
 - TypeScript against Obsidian Plugin API
@@ -716,7 +812,7 @@ Still open:
 
 ### Tier A — affect core claims, must resolve before implementation
 
-- ~~**Q4. VPS minimum spec.**~~ **Resolved (DEC-001):** 16 GB / 4 vCPU as default. Per-provider mapping: DO `s-4vcpu-16gb` (~$84/mo), Azure `Standard_B4ms` (~$120/mo).
+- ~~**Q4. VPS minimum spec.**~~ **Resolved (DEC-001, revised 2026-05-16 — see ADR-0035):** Two-tier burst architecture. **Control plane (always-on):** 2 vCPU / 4 GB — DO `s-2vcpu-4gb` (~$24/mo), Azure `B2s` (~$30/mo), Hetzner `CPX21` (~€5/mo). **Burst worker (ephemeral, spawned on demand):** 4 vCPU / 16 GB — DO `s-4vcpu-16gb` ($0.125/hr), Azure `B4ms` (~$0.166/hr), Hetzner `CPX41` (~€0.05/hr). Realistic monthly cost: ~$28–32 DO, ~$35–40 Azure, ~€11 Hetzner. Original always-on 16 GB / 4 vCPU spec ($84–120/mo) rejected as not cost-credible for a single-tenant sovereign-LLM deployment.
 - **Q-CloudAccess.** Is the user's cloud single-user (only one Google identity can issue plugin tokens), or can multiple Google identities share one cloud? My lean: single-user in MVP.
 - **Q-DNS-cert.** What if DNS hasn't propagated when LE tries to issue the cert? Retry strategy + user-visible error state.
 - **Q-Name.** Project name + portal domain. "Thany-Marcus" is the working name; final?
