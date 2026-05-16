@@ -53,5 +53,8 @@
     <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.*" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.*" />
     <PackageVersion Include="System.Drawing.Common" Version="8.*" />
+
+    <!-- Cloud-init template-render tests (PORTAL-010). -->
+    <PackageVersion Include="YamlDotNet" Version="16.*" />
   </ItemGroup>
 </Project>

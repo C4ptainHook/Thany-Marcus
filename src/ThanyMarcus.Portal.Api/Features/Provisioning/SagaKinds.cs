@@ -1,0 +1,10 @@
+namespace ThanyMarcus.Portal.Api.Features.Provisioning;
+
+public static class SagaKinds
+{
+    public const string Create  = "create";
+    public const string Destroy = "destroy";
+
+    public static readonly IReadOnlySet<string> All =
+        new HashSet<string>(StringComparer.Ordinal) { Create, Destroy };
+}

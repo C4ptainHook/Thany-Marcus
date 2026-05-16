@@ -89,7 +89,7 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
     }
 
     [Fact]
-    public async Task Cascades_on_cloud_delete()
+    public async Task Restricts_cloud_delete_while_job_exists()
     {
         var ct = TestContext.Current.CancellationToken;
         var now = Clock.GetCurrentInstant();
@@ -112,9 +112,7 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
 
         var trackedCloud = await Db.Clouds.SingleAsync(c => c.Id == cloud.Id, ct);
         Db.Clouds.Remove(trackedCloud);
-        await Db.SaveChangesAsync(ct);
-
-        (await Db.ProvisioningJobs.CountAsync(j => j.CloudId == cloud.Id, ct)).ShouldBe(0);
+        await Should.ThrowAsync<DbUpdateException>(async () => await Db.SaveChangesAsync(ct));
     }
 
     private async Task<Cloud> SeedCloudAsync(Instant now, CancellationToken ct)

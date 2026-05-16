@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NodaTime;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -13,9 +14,11 @@ using ThanyMarcus.Portal.Api.Infrastructure.Database;
 namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
 {
     [DbContext(typeof(PortalDbContext))]
-    partial class PortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260516115741_ProvisioningSagaFkRestrict")]
+    partial class ProvisioningSagaFkRestrict
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -599,7 +602,7 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
 
                     b.HasIndex("NextVisibleAt")
                         .HasDatabaseName("ix_provisioning_jobs_active_next_visible_at")
-                        .HasFilter("status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','failed_destroy','cancelled','rolled_back')");
+                        .HasFilter("status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','cancelled','rolled_back')");
 
                     b.ToTable("provisioning_jobs", (string)null);
                 });

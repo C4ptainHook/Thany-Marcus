@@ -5,7 +5,12 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
+using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
+using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
+using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloudflare;
+using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 
 namespace ThanyMarcus.Portal.SagaWorker;
 
@@ -51,7 +56,25 @@ public static class Program
             .SetApplicationName("ThanyMarcus.Portal");
 
         builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
+        builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
 
+        builder.Services.AddSingleton<ITerraformRunner, TerraformRunner>();
+        builder.Services.AddSingleton<ICloudflareDnsClient, StubCloudflareDnsClient>();
+        builder.Services.AddSingleton<WorkspaceLayout>();
+
+        builder.Services.AddScoped<ISagaPhaseHandler, TfPlanningHandler>();
+        builder.Services.AddScoped<ISagaPhaseHandler, TfApplyingHandler>();
+        builder.Services.AddScoped<ISagaPhaseHandler, DnsCreatingHandler>();
+        builder.Services.AddScoped<ISagaPhaseHandler, AwaitingCloudCallbackHandler>();
+        builder.Services.AddScoped<ISagaPhaseHandler, AwaitingCertHandler>();
+        builder.Services.AddScoped<ISagaPhaseHandler, RollingBackTfHandler>();
+        builder.Services.AddScoped<ISagaPhaseHandler, RollingBackDnsHandler>();
+        builder.Services.AddScoped<ISagaPhaseHandler, DestroyEntryHandler>();
+        builder.Services.AddScoped<SagaPhaseDispatcher>();
+
+        builder.Services.AddHttpClient(AwaitingCertHandler.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(5));
+
+        builder.Services.AddHostedService<CrashRecoveryService>();
         builder.Services.AddHostedService<SagaWorker>();
 
         var host = builder.Build();
