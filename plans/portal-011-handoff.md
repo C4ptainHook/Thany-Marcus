@@ -1516,6 +1516,16 @@ public sealed class EnqueueGuard(PortalDbContext db)
 ## Risks & gotchas
 
 - **`provisioning_jobs.user_id` may not exist.** PORTAL-002 added the table; PORTAL-007 may have added `user_id` for its own queries. Grep first (`grep -n "user_id" src/ThanyMarcus.Portal.Api/Infrastructure/Database/Migrations/*.cs`). If it exists, drop the `DO $$ ... END $$` block from the migration; if not, keep it.
+- **Test seeds that build `ProvisioningJob` POCOs directly must set `UserId`** once the migration lands. Production endpoints (`CreateCloudEndpoints.cs`, `DestroyCloudEndpoints.cs`) thread the value from claims, but several test helpers build the entity in-memory and previously didn't need a `UserId`. After applying the migration, the FK `fk_provisioning_jobs_users_user_id` causes `INSERT` to fail with `23503` until every seed is updated. Required sweep:
+  ```
+  grep -rn "new ProvisioningJob" tests/
+  ```
+  Confirmed sites to update (observed 2026-05-16 during pre-flight):
+  - `tests/ThanyMarcus.Portal.Tests/SagaWorker/SagaTestSeed.cs` — the shared helper used by ~27 saga tests; add `UserId = user.Id`.
+  - `tests/ThanyMarcus.Portal.Tests/Features/Provisioning/ProvisioningJobTests.cs` — 4 initializers across `Round_trip_*`, `Partial_index_*`, `Restricts_cloud_delete_*`; add `UserId = cloud.UserId`.
+  - `tests/ThanyMarcus.Portal.Tests/Features/CloudManagement/Destroy/DestroyCloudEndpointTests.cs` — `Active_job_returns_409_cloud_busy`; add `UserId = user.Id`.
+  - `tests/ThanyMarcus.Portal.Tests/SagaWorker/WorkspaceLayoutTests.cs` — in-memory POCO only, never `SaveChangesAsync`'d; safe to leave alone (verify before editing).
+  Without these updates `dotnet test` shows ~32 failures all rooted in `SagaTestSeed.SeedAsync` SaveChangesAsync at the FK violation. The fix is one line per initializer; the diagnosis cost is much higher because the failure cascades across the saga handler test suite.
 - **Hostname collision is astronomically unlikely** (1 in 4 billion). The 5-attempt cap throws `InvalidOperationException("hostname_generation_exhausted")` — verify the endpoint maps it to a 500 rather than leaking the exception. Add `Results.Problem` middleware path.
 - **SSE through Caddy / Cloudflare:** Caddy passes SSE without buffering by default. If Cloudflare is added in front of the portal later (it isn't currently — DEC-003 says CF is for `thany.click`, not for `app.thany.click`), set `Cache-Control: no-transform` to disable CF's buffering. Not a concern today.
 - **`fetchWithStepUp` collapses concurrent 401s.** If a user double-clicks Provision before disable kicks in (between click and `submitting = true`), both POSTs 401, both await the same modal, both retry after unlock. Result: two POSTs to `/api/clouds`. The per-user-in-flight guard catches the second with 409. Net effect: one cloud created, one inline error briefly shown then cleared. Acceptable.

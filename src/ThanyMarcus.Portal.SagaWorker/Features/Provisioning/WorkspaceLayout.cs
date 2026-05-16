@@ -30,7 +30,7 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
 
         await File.WriteAllTextAsync(
             Path.Combine(dir, "backend.tf"),
-            "terraform { backend \"pg\" {} }\n",
+            "terraform {\n  backend \"pg\" {}\n}\n",
             ct);
 
         string tfvars;

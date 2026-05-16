@@ -56,5 +56,11 @@
 
     <!-- Cloud-init template-render tests (PORTAL-010). -->
     <PackageVersion Include="YamlDotNet" Version="16.*" />
+
+    <!-- Polly + IHttpClientFactory (PORTAL-010b). -->
+    <PackageVersion Include="Microsoft.Extensions.Http.Polly" Version="9.*" />
+
+    <!-- WireMock for CloudflareDnsClient tests (PORTAL-010b). -->
+    <PackageVersion Include="WireMock.Net" Version="1.7.*" />
   </ItemGroup>
 </Project>

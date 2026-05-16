@@ -8,9 +8,11 @@ public sealed class ProvisioningJob : IHasUpdatedAt
 {
     public Guid Id { get; init; } = Guid.CreateVersion7();
     public Guid CloudId { get; init; }
+    public Guid UserId { get; init; }
     public string Kind { get; init; } = null!;
     public JsonDocument Payload { get; init; } = null!;
     public string Status { get; set; } = null!;
+    public string? EnrollmentToken { get; set; }
 
     public Instant NextVisibleAt { get; set; }
     public Instant? LeaseExpiresAt { get; set; }

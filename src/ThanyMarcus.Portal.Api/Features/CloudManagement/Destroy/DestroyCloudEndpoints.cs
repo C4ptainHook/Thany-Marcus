@@ -63,6 +63,7 @@ public static class DestroyCloudEndpoints
             var job = new ProvisioningJob
             {
                 CloudId       = cloud.Id,
+                UserId        = userId,
                 Kind          = SagaKinds.Destroy,
                 Payload       = JsonDocument.Parse("""{"reason":"user_initiated"}"""),
                 Status        = SagaStatus.Destroying,

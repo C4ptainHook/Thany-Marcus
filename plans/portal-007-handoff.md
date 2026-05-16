@@ -12,7 +12,7 @@ Estimated **1 person-day** with heavy AI-agent assistance. The original ticket-l
 - **`docs/decisions/0029-type-mappings.md`** — `next_visible_at`, `phase_started_at`, `lease_expires_at` are NodaTime `Instant`s mapped to `timestamptz`. `events_log` and `tf_outputs` are `JsonDocument` mapped to `jsonb`.
 - **`docs/decisions/0032-fk-cascades-and-soft-delete.md`** — `provisioning_jobs.cloud_id` FK is RESTRICT on cloud delete per the ADR amendment (the existing migration says `Cascade`; this handoff *changes* that to `Restrict` so terminal-job-rows survive a soft-deleted cloud).
 - **`docs/decisions/0034-cloud-bootstrap-and-portal-handshake.md`** — defines the `awaiting_cloud_callback` trigger payload and the `awaiting_cert` polling contract (`GET /admin/health` → `{ cert_ready: bool }`). The worker is the *consumer* of those contracts here.
-- **`docs/decisions/0035-wizard-progress-transport.md`** — `events_log` jsonb shape (what each phase appends) and the `GET /api/clouds/{id}/status` endpoint that reads it. PORTAL-007 is the *writer*; the reader lives in PORTAL-011.
+- **`docs/decisions/0036-wizard-progress-transport.md`** — `events_log` jsonb shape (what each phase appends) and the SSE channel (`GET /api/clouds/{id}/events`) + REST snapshot (`GET /api/clouds/{id}`) that read it. PORTAL-007 is the *writer*; the readers live in PORTAL-011.
 - **`plans/portal-007a-handoff.md`** — landed first; provides the SagaWorker project, the empty `BackgroundService`, the docker-compose stack with shared DP keys + `terraform_data` volume + terraform binary in the image. **This ticket assumes PORTAL-007a is merged.**
 - **`plans/portal-005-handoff.md`** — `IProviderTokenVault.DecryptAsync(userId, provider, dek, ct)` is the contract the saga calls to get plaintext provider credentials. Hold the plaintext in a `byte[]`, pass it to terraform via `TF_VAR_*` env var, `CryptographicOperations.ZeroMemory(...)` immediately after.
 - **`plans/portal-003f-handoff.md`** — `IInfraOpUnlockCache` is Postgres-backed and async; the SagaWorker calls `TryGetAsync(userId, dek32, ct)` to fetch the DEK. `SlidingTtl = 10 minutes` — relevant for the "what if the unlock expired mid-saga" handling below.
@@ -951,7 +951,7 @@ A fresh agent picking up **PORTAL-010b** (Cloudflare DNS client) from this state
 A fresh agent picking up **PORTAL-011** (wizard UI + cloud-create endpoint) from this state knows:
 - The endpoint inserts one `clouds` row + one `provisioning_jobs` row with `status = pending`, `next_visible_at = now`, all in one transaction.
 - Before insert, the endpoint calls `EnqueueGuard.CheckAsync(cloudId)` and returns 409 on conflict.
-- The wizard reads progress from `provisioning_jobs.events_log` via a new `GET /api/clouds/{id}/status` endpoint (per ADR-0035).
+- The wizard reads progress from `provisioning_jobs.events_log` via `GET /api/clouds/{id}` (REST snapshot) + `GET /api/clouds/{id}/events` (SSE) — per ADR-0036.
 
 A fresh agent picking up **PORTAL-016** (inbound callback endpoint) from this state knows:
 - The endpoint updates `provisioning_jobs` for `cloud_id`: `SET status = 'awaiting_cert', next_visible_at = now()` in a single transaction.

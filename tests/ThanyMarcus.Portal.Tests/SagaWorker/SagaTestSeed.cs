@@ -52,6 +52,7 @@ internal static class SagaTestSeed
         var job = new ProvisioningJob
         {
             CloudId = cloud.Id,
+            UserId = user.Id,
             Kind = kind,
             Payload = JsonDocument.Parse("{}"),
             Status = status,

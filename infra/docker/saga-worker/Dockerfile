@@ -11,7 +11,7 @@ RUN dotnet publish "src/ThanyMarcus.Portal.SagaWorker/ThanyMarcus.Portal.SagaWor
 FROM hashicorp/terraform:1.7 AS terraform
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates libgssapi-krb5-2 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=terraform /bin/terraform /usr/local/bin/terraform
 COPY infra/docker/saga-worker/entrypoint.sh /entrypoint.sh

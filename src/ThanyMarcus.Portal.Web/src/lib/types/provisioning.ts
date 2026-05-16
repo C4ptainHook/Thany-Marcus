@@ -1,0 +1,20 @@
+export type PhaseName =
+  | 'tf_planning' | 'tf_applying' | 'dns_creating'
+  | 'awaiting_cloud_callback' | 'cloud_registered' | 'awaiting_cert';
+
+export type WizardSseEvent =
+  | { type: 'phase_started'; phase: PhaseName; at: string }
+  | { type: 'phase_completed'; phase: PhaseName; at: string }
+  | { type: 'phase_failed'; phase: PhaseName; reason: string; message: string }
+  | { type: 'cloud_ready'; cloudId: string; hostname: string; ip: string | null }
+  | { type: 'cloud_failed'; terminalStatus: string; reason: string; message: string }
+  | { type: 'cloud_rolled_back'; reason: string };
+
+export const PhaseOrder: PhaseName[] = [
+  'tf_planning',
+  'tf_applying',
+  'dns_creating',
+  'awaiting_cloud_callback',
+  'cloud_registered',
+  'awaiting_cert',
+];

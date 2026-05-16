@@ -11,6 +11,7 @@ public static class RateLimiterServiceCollectionExtensions
         {
             var snapshot = cfg.GetSection("RateLimiting").Get<RateLimitingOptions>() ?? new RateLimitingOptions();
             AuthRateLimiterPolicies.Configure(opts, snapshot);
+            CloudCallbackPolicies.Configure(opts);
         });
         services.AddSingleton<SignInGoogleRateLimitMiddleware>();
         return services;

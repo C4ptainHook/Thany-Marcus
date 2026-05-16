@@ -282,7 +282,7 @@ public sealed record DestroyCloudRequest(string ConfirmHostname);
 - **Hostname-confirm** is the only client-supplied gate; the unlock filter handles step-up. The hostname-confirm is UX, not security — a passphrase-unlocked attacker doesn't have to type the hostname, but the SPA modal will require it. **Treat the check as input validation, not auth.**
 - **SERIALIZABLE isolation** matches PORTAL-011's eventual create endpoint and is the only level Postgres needs to actually serialize the `EnqueueGuard.CheckAsync` → insert sequence (`READ COMMITTED` lets two requests both see "no conflict" before either commits). The retry budget of `serialization_failure` errors is implicit — `EF Core` surfaces them as `PostgresException` SQLSTATE 40001; let them propagate to a 503 (the SPA's `fetchWithStepUp` retries on 503 with backoff per PORTAL-003 conventions). **Do not catch and retry inside the endpoint** — that hides operator-visible signal.
 - **`RequireInfraOpUnlockFilter` placement** — `AddEndpointFilter` is per-endpoint, not per-group, so a future read-only GET on `/api/clouds/{id}` doesn't accidentally inherit the step-up requirement. Mirrors `ProviderTokenEndpoints` line 66 / 81.
-- **No SSE here.** PORTAL-011 / ADR-0035 ship the wizard-progress SSE channel; the destroy SPA modal (PORTAL-012) reuses the same `/api/clouds/{id}/events` stream — out of scope for this ticket.
+- **No SSE here.** PORTAL-011 / ADR-0036 ship the wizard-progress SSE channel; the destroy SPA modal (PORTAL-012) reuses the same `/api/clouds/{id}/events` stream — out of scope for this ticket.
 - **Why `POST .../destroy` not `DELETE /api/clouds/{id}`** — the request has a body (`confirmHostname`), and the action enqueues a job rather than deleting a resource synchronously. `POST .../destroy` matches the eventual `POST .../resize` etc. (post-thesis future-work) better than `DELETE`. RESTafarian objection acknowledged and overridden.
 
 `Program.cs` line ~207 — add the registration alongside the others:
@@ -787,7 +787,7 @@ Testcontainers Postgres + the real worker (single replica, `SemaphoreSlim(1)` fo
 
 - **Operator-side manual cleanup.** If the saga reaches `failed_destroy`, the cloud is still up in DO/Azure. Operator runbook: SSH/web-console into the droplet (or use `doctl compute droplet delete --tag managed-by-portal cloud-id-<uuid>`), then update the row's status manually to `rolled_back` and soft-delete the cloud. Document in the SagaWorker README; not in code.
 
-- **No SSE notification of destroy progress.** The endpoint returns 202; the SPA (PORTAL-012) polls `/api/clouds/{id}/status` (PORTAL-011 / ADR-0035) for `events_log` updates. If you really want SSE for destroys specifically, add a `kind = "destroy"` topic to the existing SSE channel — but that's PORTAL-012's call. Out of scope.
+- **No bespoke destroy SSE channel.** The endpoint returns 202; the SPA (PORTAL-012) subscribes to `/api/clouds/{id}/events` (SSE) + reads `GET /api/clouds/{id}` (REST snapshot) per PORTAL-011 / ADR-0036. If you really want a distinct destroy topic, add a `kind = "destroy"` partition to the existing SSE channel — but that's PORTAL-012's call. Out of scope.
 
 - **Two-step confirm UX (`confirmHostname`) is anti-fat-fingers, not anti-malicious.** A passphrase-unlocked attacker can read the hostname from any cloud-list response and type it. The real security gate is the step-up unlock. **Document that in the endpoint xmldoc** so a future reviewer doesn't accidentally promote the hostname check into something it isn't.
 
@@ -797,7 +797,7 @@ All acceptance criteria pass. `git status` shows only the files in "Output of PO
 
 A fresh agent picking up **PORTAL-012 (cloud-list dashboard UI)** from this state knows:
 - The destroy endpoint is `POST /api/clouds/{id}/destroy` with body `{"confirmHostname": "<hostname>"}`. Step-up-gated via `fetchWithStepUp`.
-- Returns `202 Accepted { jobId, cloudId }` on success; poll `/api/clouds/{id}/status` for progress (PORTAL-011 / ADR-0035 SSE channel).
+- Returns `202 Accepted { jobId, cloudId }` on success; subscribe to `/api/clouds/{id}/events` (SSE) + read `GET /api/clouds/{id}` (REST snapshot) for progress (PORTAL-011 / ADR-0036 channel).
 - Common error responses: `401 step_up_required`, `400 hostname_mismatch`, `409 cloud_busy`, `410 Gone` (cloud already destroyed or never destroyable). The dashboard's destroy modal handles these per the standard auth/conflict UI patterns.
 - The terminal-status surface to render: `rolled_back` (success ✓), `failed_destroy` (manual-cleanup-needed ⚠ with a "retry destroy" CTA).
 

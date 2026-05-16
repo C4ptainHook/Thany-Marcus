@@ -21,7 +21,7 @@ resource "digitalocean_droplet" "cloud" {
   monitoring = true
   tags       = local.tags
 
-  user_data = templatefile("${path.module}/../shared/cloud-init.sh.tpl", {
+  user_data = templatefile("/app/terraform-modules/shared/cloud-init.sh.tpl", {
     cloud_id         = var.cloud_id
     hostname         = var.hostname
     portal_url       = var.portal_url

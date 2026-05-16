@@ -22,6 +22,7 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
         var job = new ProvisioningJob
         {
             CloudId = cloud.Id,
+            UserId = cloud.UserId,
             Kind = "provision",
             Payload = payload,
             Status = "pending",
@@ -54,6 +55,7 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
             Db.ProvisioningJobs.Add(new ProvisioningJob
             {
                 CloudId = cloud.Id,
+                UserId = cloud.UserId,
                 Kind = "provision",
                 Payload = JsonDocument.Parse("{}"),
                 Status = "succeeded",
@@ -67,6 +69,7 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
         var pending = new ProvisioningJob
         {
             CloudId = cloud.Id,
+            UserId = cloud.UserId,
             Kind = "provision",
             Payload = JsonDocument.Parse("{}"),
             Status = "pending",
@@ -98,6 +101,7 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
         Db.ProvisioningJobs.Add(new ProvisioningJob
         {
             CloudId = cloud.Id,
+            UserId = cloud.UserId,
             Kind = "provision",
             Payload = JsonDocument.Parse("{}"),
             Status = "pending",
