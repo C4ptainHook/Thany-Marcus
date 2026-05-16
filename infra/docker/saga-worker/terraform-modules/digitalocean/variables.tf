@@ -46,3 +46,52 @@ variable "image_slug" {
   type        = string
   default     = "ubuntu-24-04-x64"
 }
+
+variable "le_email" {
+  description = "Let's Encrypt account email used by Caddy's ACME registration."
+  type        = string
+}
+
+variable "le_acme_ca" {
+  description = "Optional ACME CA directory URL. Empty string = production LE. Use the staging URL during smoke tests to avoid LE rate limits."
+  type        = string
+  default     = ""
+}
+
+variable "image_tag" {
+  description = "Container image tag pinned per release; written to the cloud .env so docker-compose can pull a stable build."
+  type        = string
+}
+
+variable "admin_user" {
+  description = "Non-root sudo user created by cloud-init."
+  type        = string
+  default     = "thanyadmin"
+}
+
+variable "ssh_public_key" {
+  description = "OpenSSH public key written to the admin user's authorized_keys. Empty string is allowed for unattended provisioning where SSH access is not required."
+  type        = string
+  default     = ""
+}
+
+variable "compose_url" {
+  description = "URL the droplet fetches docker-compose.yml from at first boot. Typically a pinned raw.githubusercontent.com URL."
+  type        = string
+}
+
+variable "caddyfile_url" {
+  description = "URL the droplet fetches the Caddyfile template from at first boot."
+  type        = string
+}
+
+variable "nginx_conf_url" {
+  description = "URL the droplet fetches the stub cloud-api nginx.conf from at first boot."
+  type        = string
+}
+
+variable "timezone" {
+  description = "System timezone passed to timedatectl set-timezone."
+  type        = string
+  default     = "Etc/UTC"
+}

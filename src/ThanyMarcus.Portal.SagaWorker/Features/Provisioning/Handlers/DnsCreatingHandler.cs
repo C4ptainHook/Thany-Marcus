@@ -1,12 +1,8 @@
 using System.Net;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
-using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
-using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloudflare;
@@ -16,8 +12,6 @@ namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 public sealed partial class DnsCreatingHandler(
     PortalDbContext db,
     IClock clock,
-    IInfraOpUnlockCache unlockCache,
-    IProviderTokenVault providerVault,
     ICloudflareDnsClient cloudflare,
     ILogger<DnsCreatingHandler> log) : ISagaPhaseHandler
 {
@@ -51,60 +45,37 @@ public sealed partial class DnsCreatingHandler(
             return;
         }
 
-        var dek = new byte[32];
-        byte[]? cloudflareToken = null;
+        DnsRecord record;
         try
         {
-            string tokenString;
-            if (await unlockCache.TryGetAsync(cloud.UserId, dek, ct))
-            {
-                cloudflareToken = await providerVault.DecryptAsync(cloud.UserId, KnownProviders.Cloudflare, dek, ct);
-                tokenString = cloudflareToken is not null
-                    ? Encoding.UTF8.GetString(cloudflareToken)
-                    : string.Empty;
-            }
-            else
-            {
-                tokenString = string.Empty;
-            }
-
-            DnsRecord record;
-            try
-            {
-                record = await cloudflare.CreateAAsync(SubdomainOf(cloud.Hostname), ip, tokenString, ct);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
-            {
-                LogDnsFailure(log, ex, job.Id);
-                EventsLogAppender.Append(job, clock, Phase, new JsonObject
-                {
-                    ["error"] = $"dns_create_failed: {ex.Message}",
-                    ["rollback_reason"] = "dns_failed",
-                });
-                job.LastError = "Cloudflare DNS create failed";
-                await SagaTransitions.TransitionAsync(
-                    db, clock, job, SagaStatus.RollingBackTf, Duration.Zero, ct: ct);
-                return;
-            }
-
-            cloud.Subdomain = SubdomainOf(cloud.Hostname);
-
+            record = await cloudflare.CreateAAsync(SubdomainOf(cloud.Hostname), ip, string.Empty, ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
+        {
+            LogDnsFailure(log, ex, job.Id);
             EventsLogAppender.Append(job, clock, Phase, new JsonObject
             {
-                ["event"] = "dns_created",
-                ["record_id"] = record.Id,
-                ["subdomain"] = record.Subdomain,
-                ["ip"] = record.Ip.ToString(),
+                ["error"] = $"dns_create_failed: {ex.Message}",
+                ["rollback_reason"] = "dns_failed",
             });
-
+            job.LastError = "Cloudflare DNS create failed";
             await SagaTransitions.TransitionAsync(
-                db, clock, job, SagaStatus.AwaitingCloudCallback, AwaitingCallbackTimeout, ct: ct);
+                db, clock, job, SagaStatus.RollingBackTf, Duration.Zero, ct: ct);
+            return;
         }
-        finally
+
+        cloud.Subdomain = SubdomainOf(cloud.Hostname);
+
+        EventsLogAppender.Append(job, clock, Phase, new JsonObject
         {
-            CryptographicOperations.ZeroMemory(dek);
-            if (cloudflareToken is not null) CryptographicOperations.ZeroMemory(cloudflareToken);
-        }
+            ["event"] = "dns_created",
+            ["record_id"] = record.Id,
+            ["subdomain"] = record.Subdomain,
+            ["ip"] = record.Ip.ToString(),
+        });
+
+        await SagaTransitions.TransitionAsync(
+            db, clock, job, SagaStatus.AwaitingCloudCallback, AwaitingCallbackTimeout, ct: ct);
     }
 
     private static IPAddress? ReadIpFromOutputs(ProvisioningJob job)

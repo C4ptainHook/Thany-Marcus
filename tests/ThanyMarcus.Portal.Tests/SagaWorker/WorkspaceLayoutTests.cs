@@ -76,7 +76,10 @@ public sealed class WorkspaceLayoutTests
         mainTf.ShouldContain("output \"ip\" { value = module.cloud.ip }");
 
         var tfvars = await File.ReadAllTextAsync(Path.Combine(dir, "variables.auto.tfvars"), ct);
-        tfvars.ShouldContain("portal_url = \"https://test.example/\"");
+        tfvars.ShouldContain("\"https://test.example/\"");
+        tfvars.ShouldContain("portal_url");
+        tfvars.ShouldContain("le_email");
+        tfvars.ShouldContain("compose_url");
         tfvars.ShouldContain(cloud.Id.ToString());
         tfvars.ShouldContain(cloud.Hostname);
     }
@@ -123,6 +126,11 @@ public sealed class WorkspaceLayoutTests
                 ["Provisioning:TerraformModulesDir"] = modulesDir,
                 ["Provisioning:DefaultSize"] = "s-1vcpu-1gb",
                 ["Provisioning:PortalUrl"] = portalUrl,
+                ["Provisioning:CloudInit:LeEmail"] = "letsencrypt@example.test",
+                ["Provisioning:CloudInit:ImageTag"] = "test",
+                ["Provisioning:CloudInit:ComposeUrl"] = "https://example.test/docker-compose.yml",
+                ["Provisioning:CloudInit:CaddyfileUrl"] = "https://example.test/Caddyfile.tpl",
+                ["Provisioning:CloudInit:NginxConfUrl"] = "https://example.test/nginx.conf",
             })
             .Build();
 

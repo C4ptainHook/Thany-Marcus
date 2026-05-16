@@ -104,7 +104,14 @@ sed -i.bak "s|^PROVISIONING_PORTAL_URL=.*|PROVISIONING_PORTAL_URL=$NGROK_URL|" .
 grep PROVISIONING_PORTAL_URL .env
 ```
 
-**Update your Google OAuth client's authorized redirect URI** to `${NGROK_URL}/signin-google` (Google Cloud Console → Credentials → your client → Edit). Google won't accept the OAuth callback otherwise. **This must be done every time the ngrok URL changes** (free ngrok rotates URLs across sessions; paid ngrok keeps a stable subdomain).
+**Update your Google OAuth client's authorized redirect URI** to `${NGROK_URL}/signin-google`:
+
+1. Open [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
+2. Click your OAuth 2.0 Client ID for this project.
+3. Under **Authorized redirect URIs**, add `${NGROK_URL}/signin-google` (paste the full URL including the ngrok subdomain — the trailing path is literally `/signin-google`, not `/signin-google/`).
+4. **Save**.
+
+Google won't accept the OAuth callback otherwise — you'll get `redirect_uri_mismatch` in step 1. **This must be redone every time the ngrok URL changes** (free ngrok rotates URLs across sessions; paid ngrok keeps a stable subdomain).
 
 ### 0.4 — bring up the rest of the stack
 

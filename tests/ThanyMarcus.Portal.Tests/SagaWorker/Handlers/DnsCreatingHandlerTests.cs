@@ -72,10 +72,7 @@ public sealed class DnsCreatingHandlerTests(PostgresFixture postgres) : DbIntegr
 
     private DnsCreatingHandler BuildHandler(IDataProtectionProvider dp, FakeCloudflareDnsClient cf)
     {
-        var unlockCache = new PostgresInfraOpUnlockCache(Db, dp, Clock);
-        var providerVault = new ProviderTokenVault(Db, Clock);
-        return new DnsCreatingHandler(
-            Db, Clock, unlockCache, providerVault, cf,
-            NullLogger<DnsCreatingHandler>.Instance);
+        _ = dp;
+        return new DnsCreatingHandler(Db, Clock, cf, NullLogger<DnsCreatingHandler>.Instance);
     }
 }

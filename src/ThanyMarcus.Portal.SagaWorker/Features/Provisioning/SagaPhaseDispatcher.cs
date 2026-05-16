@@ -22,6 +22,8 @@ public sealed partial class SagaPhaseDispatcher
         this.log = log;
     }
 
+    public IReadOnlyCollection<string> KnownPhases => handlers.Keys;
+
     public Task HandleAsync(ProvisioningJob job, CancellationToken ct)
     {
         if (SagaStatus.IsTerminal(job.Status))

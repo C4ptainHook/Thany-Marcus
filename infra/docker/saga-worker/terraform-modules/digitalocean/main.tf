@@ -1,6 +1,7 @@
 locals {
-  resource_name = "thany-${substr(var.cloud_id, 0, 8)}"
-  tags          = ["thany-marcus", "cloud-id-${var.cloud_id}", "managed-by-portal"]
+  resource_name       = "thany-${substr(var.cloud_id, 0, 8)}"
+  tags                = ["thany-marcus", "cloud-id-${var.cloud_id}", "managed-by-portal"]
+  portal_callback_url = "${var.portal_url}/api/clouds/${var.cloud_id}/callback"
 }
 
 resource "digitalocean_volume" "data" {
@@ -21,12 +22,20 @@ resource "digitalocean_droplet" "cloud" {
   monitoring = true
   tags       = local.tags
 
-  user_data = templatefile("/app/terraform-modules/shared/cloud-init.sh.tpl", {
-    cloud_id         = var.cloud_id
-    hostname         = var.hostname
-    portal_url       = var.portal_url
-    enrollment_token = var.enrollment_token
-    ghcr_pat         = var.ghcr_pat
+  user_data = templatefile("${path.module}/cloud-init.yaml.tpl", {
+    cloud_id            = var.cloud_id
+    hostname            = var.hostname
+    enrollment_token    = var.enrollment_token
+    portal_callback_url = local.portal_callback_url
+    le_email            = var.le_email
+    le_acme_ca          = var.le_acme_ca
+    image_tag           = var.image_tag
+    admin_user          = var.admin_user
+    ssh_public_key      = var.ssh_public_key
+    compose_url         = var.compose_url
+    caddyfile_url       = var.caddyfile_url
+    nginx_conf_url      = var.nginx_conf_url
+    timezone            = var.timezone
   })
 
   lifecycle {
