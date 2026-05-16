@@ -4,6 +4,7 @@
     <OutputType>Exe</OutputType>
     <UserSecretsId>thany-marcus-saga-worker</UserSecretsId>
     <RootNamespace>ThanyMarcus.Portal.SagaWorker</RootNamespace>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,10 +22,13 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Process" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" />
+    <PackageReference Include="Microsoft.Extensions.Http.Polly" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ThanyMarcus.Portal.Api\ThanyMarcus.Portal.Api.csproj" />
+    <ProjectReference Include="..\ThanyMarcus.Portal.Api\ThanyMarcus.Portal.Api.csproj">
+      <ExcludeAssets>contentFiles</ExcludeAssets>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>

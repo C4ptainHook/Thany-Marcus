@@ -126,6 +126,7 @@ public sealed class DestroyCloudEndpointTests(PostgresFixture postgres) : Factor
         Db.ProvisioningJobs.Add(new ProvisioningJob
         {
             CloudId = cloud.Id,
+            UserId = user.Id,
             Kind = SagaKinds.Create,
             Payload = JsonDocument.Parse("{}"),
             Status = SagaStatus.TfApplying,

@@ -14,6 +14,18 @@ public sealed class EnqueueGuard(PortalDbContext db)
             .Select(j => new InFlightConflict(j.Id, j.Status))
             .FirstOrDefaultAsync(ct);
     }
+
+    public async Task<InFlightCreate?> CheckUserCreateInFlightAsync(Guid userId, CancellationToken ct)
+    {
+        return await db.ProvisioningJobs
+            .Where(j => j.UserId == userId
+                     && j.Kind == SagaKinds.Create
+                     && !SagaStatus.Terminal.Contains(j.Status))
+            .OrderByDescending(j => j.CreatedAt)
+            .Select(j => new InFlightCreate(j.Id))
+            .FirstOrDefaultAsync(ct);
+    }
 }
 
 public sealed record InFlightConflict(Guid JobId, string CurrentPhase);
+public sealed record InFlightCreate(Guid JobId);

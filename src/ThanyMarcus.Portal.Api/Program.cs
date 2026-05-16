@@ -19,8 +19,14 @@ using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Callback;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Create;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Destroy;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderMeta;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Status;
+using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -84,6 +90,11 @@ builder.Services.AddHostedService<InfraOpUnlockSweepService>();
 
 builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
 builder.Services.AddScoped<EnqueueGuard>();
+builder.Services.AddSingleton<EnrollmentTokenGenerator>();
+builder.Services.AddSingleton<IRandomHexProvider, CryptoRandomHexProvider>();
+builder.Services.AddScoped<HostnameGenerator>();
+builder.Services.AddScoped<SagaEventTranslator>();
+builder.Services.AddSingleton<NpgsqlConnectionFactory>();
 
 builder.Services.AddAuthentication(opts =>
 {
@@ -207,6 +218,11 @@ app.MapAuthEndpoints();
 app.MapTotpEndpoints();
 app.MapPassphraseEndpoints();
 app.MapProviderTokenEndpoints();
+app.MapCreateCloudEndpoints();
+app.MapGetCloudStatusEndpoints();
+app.MapCloudEventsEndpoints();
+app.MapProviderMetaEndpoints();
+app.MapCloudCallbackEndpoints();
 app.MapDestroyCloudEndpoints();
 app.MapCaptchaEndpoints();
 

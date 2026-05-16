@@ -8,6 +8,8 @@ services:
       POSTGRES_DB: portal_dev
     volumes:
       - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     networks: [portal]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d portal_dev"]
@@ -48,6 +50,9 @@ services:
       DOTNET_ENVIRONMENT: Production
       ConnectionStrings__Portal: Host=postgres;Port=5432;Username=postgres;Password=postgres;Database=portal_dev
       DataProtection__KeyRingPath: /var/lib/portal/data-protection-keys
+      Provisioning__PortalUrl: ${PROVISIONING_PORTAL_URL}
+      Cloudflare__ZoneId: ${CLOUDFLARE_ZONE_ID}
+      Cloudflare__ApiToken: ${CLOUDFLARE_API_TOKEN}
     volumes:
       - dp_keys:/var/lib/portal/data-protection-keys
       - terraform_data:/var/lib/portal/terraform

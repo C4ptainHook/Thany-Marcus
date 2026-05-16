@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
@@ -8,7 +9,7 @@ namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 
 internal static class SagaTransitions
 {
-    public static Task TransitionAsync(
+    public static async Task TransitionAsync(
         PortalDbContext db,
         IClock clock,
         ProvisioningJob job,
@@ -34,7 +35,10 @@ internal static class SagaTransitions
         {
             cloudMutation(cloud);
         }
-        return db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT pg_notify('provisioning_job_changed', {0})",
+            [job.Id.ToString()], ct);
     }
 
     public static Task RescheduleAsync(

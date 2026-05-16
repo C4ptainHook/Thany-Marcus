@@ -596,10 +596,10 @@ Portal flow per user-cloud:
 
 1. Portal creates a Terraform workspace for the user-cloud, scoped in portal Postgres via Terraform's `pg` backend.
 2. Portal selects the `.tf` module for the user's chosen provider (`infra/terraform/digitalocean/` or `infra/terraform/azure/`).
-3. Portal generates random subdomain `<random8>.thany.click` and calls Cloudflare API to create A record pointing at the future droplet/VM IP (placeholder; updated post-Terraform).
+3. Portal generates random subdomain `<random8>.thany.click` for the cloud's hostname (saved on the `clouds` row at create time). DNS creation is deferred to the saga's `dns_creating` phase, after terraform applies — see ADR-0033's saga shape.
 4. Portal injects variables into Terraform: provider credentials, subdomain, droplet/VM size, region, SSH key (auto-generated per cloud), cloud-init user-data containing the bootstrap script.
 5. Portal runs `terraform apply -auto-approve` via subprocess; captures outputs (droplet/VM IP, etc.).
-6. Portal calls Cloudflare API again with the actual IP to update the A record.
+6. Portal enters the `dns_creating` phase and calls Cloudflare API to create the A record using the actual droplet IP from terraform outputs (single phase, no placeholder update step).
 5. Cloud-init on the droplet:
    - Installs Docker
    - Pulls Docker Compose YAML from project's release URL

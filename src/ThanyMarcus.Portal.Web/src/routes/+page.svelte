@@ -2,18 +2,9 @@
   import { onMount } from 'svelte';
   import { fetchCaptchaState } from '$lib/turnstileClient';
   import TurnstileWidget from '$lib/TurnstileWidget.svelte';
+  import type { MeResponse } from '$lib/types/auth';
 
-  let { data }: {
-    data: {
-      me: {
-        userId: string;
-        email: string;
-        name: string;
-        profilePictureUrl: string | null;
-        totp: string;
-      } | null;
-    };
-  } = $props();
+  let { data }: { data: { me: MeResponse | null } } = $props();
 
   let captchaRequired = $state(false);
   let siteKey = $state('');
@@ -44,7 +35,13 @@
     {#if data.me.profilePictureUrl}
       <img src={data.me.profilePictureUrl} alt="" width="64" height="64" />
     {/if}
-    <p>TOTP state: {data.me.totp}</p>
+    <p class="muted">TOTP state: {data.me.totp}</p>
+    <p>
+      <a class="primary-button" href="/clouds/new">Create cloud</a>
+    </p>
+    <p>
+      <a href="/settings/security">Security settings</a>
+    </p>
     <form method="post" action="/api/auth/signout">
       <button type="submit">Sign out</button>
     </form>
@@ -61,22 +58,20 @@
 </main>
 
 <style>
-  main {
-    font-family: system-ui, -apple-system, sans-serif;
-    max-width: 40rem;
-    margin: 4rem auto;
-    padding: 0 1rem;
-    color: #1a1a1a;
-  }
   h1 {
     font-size: 2rem;
-    margin-bottom: 0.5rem;
-  }
-  p {
-    color: #555;
+    margin-bottom: var(--space-2);
   }
   .disabled-link {
-    color: #999;
+    color: var(--color-disabled);
     cursor: not-allowed;
+  }
+  .primary-button {
+    display: inline-block;
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-text);
+    color: var(--color-bg);
+    border-radius: var(--radius);
+    text-decoration: none;
   }
 </style>

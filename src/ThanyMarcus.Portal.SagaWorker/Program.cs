@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
+using Polly;
+using Polly.Extensions.Http;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -59,8 +61,24 @@ public static class Program
         builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
 
         builder.Services.AddSingleton<ITerraformRunner, TerraformRunner>();
-        builder.Services.AddSingleton<ICloudflareDnsClient, StubCloudflareDnsClient>();
         builder.Services.AddSingleton<WorkspaceLayout>();
+
+        builder.Services.Configure<CloudflareOptions>(builder.Configuration.GetSection("Cloudflare"));
+        var cfOptions = builder.Configuration.GetSection("Cloudflare").Get<CloudflareOptions>() ?? new CloudflareOptions();
+        builder.Services.AddHttpClient(CloudflareDnsClient.HttpClientName, c =>
+        {
+            c.BaseAddress = new Uri("https://api.cloudflare.com/client/v4/");
+            c.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .AddPolicyHandler(HttpPolicyExtensions
+            .HandleTransientHttpError()
+            .OrResult(r => r.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            .WaitAndRetryAsync(3, n => TimeSpan.FromSeconds(Math.Pow(2, n - 1))));
+
+        if (cfOptions.UseStub)
+            builder.Services.AddSingleton<ICloudflareDnsClient, StubCloudflareDnsClient>();
+        else
+            builder.Services.AddSingleton<ICloudflareDnsClient, CloudflareDnsClient>();
 
         builder.Services.AddScoped<ISagaPhaseHandler, TfPlanningHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, TfApplyingHandler>();

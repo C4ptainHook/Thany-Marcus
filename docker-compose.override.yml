@@ -1,12 +1,13 @@
 services:
   portal-api:
-    ports: ["5000:8080"]
+    ports: ["5050:8080"]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
 
   saga-worker:
     environment:
       DOTNET_ENVIRONMENT: Development
+      Cloudflare__UseStub: "false"
 
   caddy:
     profiles: [prod]

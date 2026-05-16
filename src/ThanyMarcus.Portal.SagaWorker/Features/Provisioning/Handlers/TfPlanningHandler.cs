@@ -70,10 +70,11 @@ public sealed partial class TfPlanningHandler(
             var workdir = await workspaceLayout.RenderAsync(job, cloud, ct);
             var connStr = config.GetConnectionString("Portal")
                 ?? throw new InvalidOperationException("ConnectionStrings:Portal not configured");
+            var pgUrl = ToPostgresUrl(connStr);
 
             var initResult = await tf.InitAsync(workdir, new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["conn_str"] = connStr,
+                ["conn_str"] = pgUrl,
             }, ct);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", initResult.Stdout);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", initResult.Stderr);
@@ -91,7 +92,7 @@ public sealed partial class TfPlanningHandler(
                 return;
             }
 
-            var planEnv = BuildEnv(cloud, providerToken);
+            var planEnv = BuildEnv(cloud, job, providerToken);
             var planResult = await tf.PlanAsync(workdir, planEnv, ct);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", planResult.Stdout);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", planResult.Stderr);
@@ -123,20 +124,39 @@ public sealed partial class TfPlanningHandler(
         }
     }
 
-    private static Dictionary<string, string> BuildEnv(Api.Features.CloudManagement.Cloud cloud, byte[]? providerToken)
+    private static Dictionary<string, string> BuildEnv(
+        Api.Features.CloudManagement.Cloud cloud,
+        ProvisioningJob job,
+        byte[]? providerToken)
     {
+        var enrollmentToken = job.EnrollmentToken
+            ?? Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
         var env = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["TF_VAR_cloud_id"] = cloud.Id.ToString(),
             ["TF_VAR_region"] = cloud.Region,
             ["TF_VAR_hostname"] = cloud.Hostname,
-            ["TF_VAR_enrollment_token"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)),
+            ["TF_VAR_enrollment_token"] = enrollmentToken,
         };
         if (providerToken is not null)
         {
             env["TF_VAR_provider_token"] = Encoding.UTF8.GetString(providerToken);
         }
         return env;
+    }
+
+    private static string ToPostgresUrl(string netConnStr)
+    {
+        var b = new Npgsql.NpgsqlConnectionStringBuilder(netConnStr);
+        var user = Uri.EscapeDataString(b.Username ?? "");
+        var pass = Uri.EscapeDataString(b.Password ?? "");
+        var host = b.Host ?? "localhost";
+        var port = b.Port == 0 ? 5432 : b.Port;
+        var db   = b.Database ?? "";
+        var sslMode = b.SslMode is Npgsql.SslMode.Require or Npgsql.SslMode.VerifyCA or Npgsql.SslMode.VerifyFull
+            ? "require"
+            : "disable";
+        return $"postgres://{user}:{pass}@{host}:{port}/{db}?sslmode={sslMode}";
     }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,

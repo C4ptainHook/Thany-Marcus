@@ -545,6 +545,10 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("EnrollmentToken")
+                        .HasColumnType("text")
+                        .HasColumnName("enrollment_token");
+
                     b.Property<JsonDocument>("EventsLog")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -591,6 +595,10 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
                     b.HasKey("Id")
                         .HasName("pk_provisioning_jobs");
 
@@ -600,6 +608,10 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                     b.HasIndex("NextVisibleAt")
                         .HasDatabaseName("ix_provisioning_jobs_active_next_visible_at")
                         .HasFilter("status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','failed_destroy','cancelled','rolled_back')");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_provisioning_jobs_user_create_active")
+                        .HasFilter("kind = 'create' AND status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','failed_destroy','cancelled','rolled_back')");
 
                     b.ToTable("provisioning_jobs", (string)null);
                 });
@@ -698,6 +710,13 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_provisioning_jobs_clouds_cloud_id");
+
+                    b.HasOne("ThanyMarcus.Portal.Api.Features.Auth.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_provisioning_jobs_users_user_id");
                 });
 #pragma warning restore 612, 618
         }

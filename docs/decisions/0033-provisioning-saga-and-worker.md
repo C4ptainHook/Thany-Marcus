@@ -163,7 +163,7 @@ provisioning_jobs adds:
 INDEX (next_visible_at) WHERE status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','cancelled','rolled_back')
 ```
 
-`events_log` is appended-to in the same transaction as each phase transition (see [[0035-wizard-progress-transport]] for shape). `tf_outputs` captures the structured outputs from terraform (droplet IP, etc.) for the saga's downstream use (DNS creation needs the IP).
+`events_log` is appended-to in the same transaction as each phase transition (see [[0036-wizard-progress-transport]] for shape). `tf_outputs` captures the structured outputs from terraform (droplet IP, etc.) for the saga's downstream use (DNS creation needs the IP).
 
 ### Worker model — claim loop
 
@@ -347,6 +347,6 @@ This is the saga's "bounded outage with automatic recovery" guarantee in action.
 - [[0029-type-mappings]] — `next_visible_at`, `phase_started_at`, `lease_expires_at` are `Instant`s mapped to `timestamptz`.
 - [[0032-fk-cascades-and-soft-delete]] — `provisioning_jobs.cloud_id` FK behavior on cloud destroy: RESTRICT (provision jobs survive a cloud's soft-delete; cleanup sweep handles them).
 - [[0034-cloud-bootstrap-and-portal-handshake]] — defines `awaiting_cloud_callback` trigger (cloud's POST to `/admin/register-with-portal`) and `awaiting_cert` polling contract (`/admin/health` shape).
-- [[0035-wizard-progress-transport]] — defines `events_log` jsonb shape, the terraform-event-translation layer that writes to it, and the `/api/clouds/{id}/status` polling endpoint that reads it.
+- [[0036-wizard-progress-transport]] — defines the curated SSE event vocabulary, the `events_log` → SSE translation layer, and the `GET /api/clouds/{id}` REST snapshot + `GET /api/clouds/{id}/events` SSE channel that the wizard consumes.
 - [[portal_deployment]] — single VM, single SagaWorker container, multi-instance-ready code; multi-replica is a deployment-topology change.
 - DEC-003 — 30-min cert timeout per the cloud-pivot plan.
