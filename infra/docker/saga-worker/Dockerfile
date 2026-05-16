@@ -11,7 +11,12 @@ RUN dotnet publish "src/ThanyMarcus.Portal.SagaWorker/ThanyMarcus.Portal.SagaWor
 FROM hashicorp/terraform:1.7 AS terraform
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=terraform /bin/terraform /usr/local/bin/terraform
+COPY infra/docker/saga-worker/entrypoint.sh /entrypoint.sh
+COPY infra/docker/saga-worker/terraform-modules /app/terraform-modules
+RUN chmod +x /entrypoint.sh
 WORKDIR /app
 COPY --from=build /app .
-ENTRYPOINT ["dotnet", "ThanyMarcus.Portal.SagaWorker.dll"]
+ENTRYPOINT ["/entrypoint.sh"]

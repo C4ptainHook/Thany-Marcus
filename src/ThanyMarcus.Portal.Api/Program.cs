@@ -18,6 +18,8 @@ using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
+using ThanyMarcus.Portal.Api.Features.CloudManagement;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Destroy;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
@@ -81,6 +83,7 @@ builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
 builder.Services.AddHostedService<InfraOpUnlockSweepService>();
 
 builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
+builder.Services.AddScoped<EnqueueGuard>();
 
 builder.Services.AddAuthentication(opts =>
 {
@@ -204,6 +207,7 @@ app.MapAuthEndpoints();
 app.MapTotpEndpoints();
 app.MapPassphraseEndpoints();
 app.MapProviderTokenEndpoints();
+app.MapDestroyCloudEndpoints();
 app.MapCaptchaEndpoints();
 
 app.MapFallbackToFile("index.html");

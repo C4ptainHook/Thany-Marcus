@@ -7,7 +7,7 @@ namespace ThanyMarcus.Portal.Api.Features.Provisioning;
 public sealed class ProvisioningJobConfiguration : IEntityTypeConfiguration<ProvisioningJob>
 {
     private const string TerminalStatusFilter =
-        "status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','cancelled','rolled_back')";
+        "status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','failed_destroy','cancelled','rolled_back')";
 
     public void Configure(EntityTypeBuilder<ProvisioningJob> builder)
     {
@@ -29,13 +29,9 @@ public sealed class ProvisioningJobConfiguration : IEntityTypeConfiguration<Prov
             .HasDatabaseName("ix_provisioning_jobs_active_next_visible_at")
             .HasFilter(TerminalStatusFilter);
 
-        builder.HasIndex(j => j.CreatedAt)
-            .HasDatabaseName("ix_provisioning_jobs_pending_created_at")
-            .HasFilter("status = 'pending'");
-
         builder.HasIndex(j => j.CloudId);
 
         builder.HasOne<Cloud>().WithMany().HasForeignKey(j => j.CloudId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
