@@ -12,6 +12,12 @@ public sealed class Cloud : IHasUpdatedAt
     public string Region { get; init; } = null!;
     public string Hostname { get; set; } = null!;
 
+    public string? Subdomain { get; set; }
+    public string? VmIp { get; set; }
+    public string? TerraformWorkspace { get; set; }
+    public byte[]? CloudAdminTokenHash { get; set; }
+    public Guid? ProviderTokenId { get; set; }
+
     public string ProvisioningStatus { get; set; } = null!;
     public Instant? PlanStartedAt { get; set; }
     public Instant? ApplyStartedAt { get; set; }

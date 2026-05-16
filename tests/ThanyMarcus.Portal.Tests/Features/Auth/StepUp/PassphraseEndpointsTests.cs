@@ -57,9 +57,10 @@ public sealed class PassphraseEndpointsTests(PostgresFixture postgres) : Factory
             ct);
         unlock.StatusCode.ShouldBe(HttpStatusCode.NoContent);
 
-        var cache = factory.Services.GetRequiredService<IInfraOpUnlockCache>();
+        await using var scope = factory.Services.CreateAsyncScope();
+        var cache = scope.ServiceProvider.GetRequiredService<IInfraOpUnlockCache>();
         var probe = new byte[32];
-        cache.TryGet(user.Id, probe).ShouldBeTrue();
+        (await cache.TryGetAsync(user.Id, probe, ct)).ShouldBeTrue();
         probe.Any(b => b != 0).ShouldBeTrue();
     }
 
@@ -110,8 +111,9 @@ public sealed class PassphraseEndpointsTests(PostgresFixture postgres) : Factory
         var body = await bad.Content.ReadFromJsonAsync<ErrorBody>(ct);
         body!.Error.ShouldBe("invalid_passphrase");
 
-        var cache = factory.Services.GetRequiredService<IInfraOpUnlockCache>();
-        cache.TryGet(user.Id, new byte[32]).ShouldBeFalse();
+        await using var scope = factory.Services.CreateAsyncScope();
+        var cache = scope.ServiceProvider.GetRequiredService<IInfraOpUnlockCache>();
+        (await cache.TryGetAsync(user.Id, new byte[32], ct)).ShouldBeFalse();
     }
 
     [Fact]

@@ -6,6 +6,9 @@ namespace ThanyMarcus.Portal.Api.Features.Provisioning;
 
 public sealed class ProvisioningJobConfiguration : IEntityTypeConfiguration<ProvisioningJob>
 {
+    private const string TerminalStatusFilter =
+        "status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','cancelled','rolled_back')";
+
     public void Configure(EntityTypeBuilder<ProvisioningJob> builder)
     {
         builder.ToTable("provisioning_jobs");
@@ -14,17 +17,21 @@ public sealed class ProvisioningJobConfiguration : IEntityTypeConfiguration<Prov
         builder.Property(j => j.Kind).IsRequired();
         builder.Property(j => j.Payload).HasColumnType("jsonb").IsRequired();
         builder.Property(j => j.Status).IsRequired();
-        builder.Property(j => j.Attempts).IsRequired();
+        builder.Property(j => j.NextVisibleAt).IsRequired();
+        builder.Property(j => j.AttemptCount).IsRequired();
+        builder.Property(j => j.EventsLog).HasColumnType("jsonb").IsRequired()
+            .HasDefaultValueSql("'[]'::jsonb");
+        builder.Property(j => j.TfOutputs).HasColumnType("jsonb");
         builder.Property(j => j.CreatedAt).IsRequired();
         builder.Property(j => j.UpdatedAt).IsRequired();
+
+        builder.HasIndex(j => j.NextVisibleAt)
+            .HasDatabaseName("ix_provisioning_jobs_active_next_visible_at")
+            .HasFilter(TerminalStatusFilter);
 
         builder.HasIndex(j => j.CreatedAt)
             .HasDatabaseName("ix_provisioning_jobs_pending_created_at")
             .HasFilter("status = 'pending'");
-
-        builder.HasIndex(j => j.LeaseExpires)
-            .HasDatabaseName("ix_provisioning_jobs_inprogress_lease")
-            .HasFilter("status = 'in_progress'");
 
         builder.HasIndex(j => j.CloudId);
 

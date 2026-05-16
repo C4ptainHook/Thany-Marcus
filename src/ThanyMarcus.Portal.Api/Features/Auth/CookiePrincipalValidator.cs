@@ -24,7 +24,7 @@ public sealed class CookiePrincipalValidator(PortalDbContext db, IInfraOpUnlockC
             .SingleOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null)
         {
-            cache.Invalidate(userId);
+            await cache.InvalidateAsync(userId, ct);
             return CookieValidationOutcome.Reject;
         }
 
@@ -32,7 +32,7 @@ public sealed class CookiePrincipalValidator(PortalDbContext db, IInfraOpUnlockC
             && issuedUtc is { } issued
             && Instant.FromDateTimeOffset(issued) < invalidatedAt)
         {
-            cache.Invalidate(userId);
+            await cache.InvalidateAsync(userId, ct);
             return CookieValidationOutcome.Reject;
         }
 

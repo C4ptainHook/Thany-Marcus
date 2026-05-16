@@ -1,13 +1,40 @@
 <script lang="ts">
-  export let data: {
-    me: {
-      userId: string;
-      email: string;
-      name: string;
-      profilePictureUrl: string | null;
-      totp: string;
-    } | null;
-  };
+  import { onMount } from 'svelte';
+  import { fetchCaptchaState } from '$lib/turnstileClient';
+  import TurnstileWidget from '$lib/TurnstileWidget.svelte';
+
+  let { data }: {
+    data: {
+      me: {
+        userId: string;
+        email: string;
+        name: string;
+        profilePictureUrl: string | null;
+        totp: string;
+      } | null;
+    };
+  } = $props();
+
+  let captchaRequired = $state(false);
+  let siteKey = $state('');
+  let turnstileToken = $state('');
+
+  onMount(async () => {
+    if (data.me) return;
+    const state = await fetchCaptchaState('signin');
+    captchaRequired = state.required;
+    siteKey = state.siteKey;
+  });
+
+  function onCaptchaToken(token: string) {
+    turnstileToken = token;
+  }
+
+  function signInHref() {
+    return captchaRequired && turnstileToken
+      ? `/api/auth/signin?turnstile=${encodeURIComponent(turnstileToken)}`
+      : '/api/auth/signin';
+  }
 </script>
 
 <main>
@@ -22,7 +49,14 @@
       <button type="submit">Sign out</button>
     </form>
   {:else}
-    <p><a href="/api/auth/signin">Sign in with Google</a></p>
+    {#if captchaRequired && siteKey}
+      <TurnstileWidget {siteKey} onToken={onCaptchaToken} />
+    {/if}
+    {#if captchaRequired && !turnstileToken}
+      <p><a aria-disabled="true" class="disabled-link">Sign in with Google</a></p>
+    {:else}
+      <p><a href={signInHref()}>Sign in with Google</a></p>
+    {/if}
   {/if}
 </main>
 
@@ -40,5 +74,9 @@
   }
   p {
     color: #555;
+  }
+  .disabled-link {
+    color: #999;
+    cursor: not-allowed;
   }
 </style>

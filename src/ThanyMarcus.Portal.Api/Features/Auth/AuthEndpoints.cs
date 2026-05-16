@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.EntityFrameworkCore;
+using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
@@ -38,11 +39,12 @@ public static class AuthEndpoints
         grp.MapPost("/signout", async (
             ClaimsPrincipal user,
             HttpContext http,
-            IInfraOpUnlockCache cache) =>
+            IInfraOpUnlockCache cache,
+            CancellationToken ct) =>
         {
             var sub = user.FindFirstValue(AuthClaimTypes.SubUs);
             if (sub is not null && Guid.TryParse(sub, out var userId))
-                cache.Invalidate(userId);
+                await cache.InvalidateAsync(userId, ct);
             await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             return Results.NoContent();
         });
@@ -50,6 +52,8 @@ public static class AuthEndpoints
         grp.MapGet("/signin", () =>
             Results.Challenge(
                 new AuthenticationProperties { RedirectUri = "/" },
-                [GoogleDefaults.AuthenticationScheme]));
+                [GoogleDefaults.AuthenticationScheme]))
+           .AddEndpointFilter<RequireTurnstileFilter>()
+           .WithMetadata(new TurnstileKindMetadata(TurnstileKinds.Signin));
     }
 }

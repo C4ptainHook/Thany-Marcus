@@ -25,7 +25,9 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
             Kind = "provision",
             Payload = payload,
             Status = "pending",
-            Attempts = 0,
+            NextVisibleAt = now,
+            AttemptCount = 0,
+            EventsLog = JsonDocument.Parse("[]"),
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -35,7 +37,7 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
 
         var fetched = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
         fetched.Status.ShouldBe("pending");
-        fetched.LeaseExpires.ShouldBeNull();
+        fetched.LeaseExpiresAt.ShouldBeNull();
         fetched.Payload.RootElement.GetProperty("region").GetString().ShouldBe("nbg1");
     }
 
@@ -54,8 +56,10 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
                 CloudId = cloud.Id,
                 Kind = "provision",
                 Payload = JsonDocument.Parse("{}"),
-                Status = "completed",
-                Attempts = 1,
+                Status = "succeeded",
+                NextVisibleAt = now,
+                AttemptCount = 1,
+                EventsLog = JsonDocument.Parse("[]"),
                 CreatedAt = now,
                 UpdatedAt = now,
             });
@@ -66,7 +70,9 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
             Kind = "provision",
             Payload = JsonDocument.Parse("{}"),
             Status = "pending",
-            Attempts = 0,
+            NextVisibleAt = now,
+            AttemptCount = 0,
+            EventsLog = JsonDocument.Parse("[]"),
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -95,7 +101,9 @@ public sealed class ProvisioningJobTests(PostgresFixture postgres) : DbIntegrati
             Kind = "provision",
             Payload = JsonDocument.Parse("{}"),
             Status = "pending",
-            Attempts = 0,
+            NextVisibleAt = now,
+            AttemptCount = 0,
+            EventsLog = JsonDocument.Parse("[]"),
             CreatedAt = now,
             UpdatedAt = now,
         });

@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: portal_dev
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks: [portal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d portal_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  portal-api:
+    build:
+      context: .
+      dockerfile: infra/docker/portal-api/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Portal: Host=postgres;Port=5432;Username=postgres;Password=postgres;Database=portal_dev
+      DataProtection__KeyRingPath: /var/lib/portal/data-protection-keys
+      Google__ClientId: ${GOOGLE_CLIENT_ID:-}
+      Google__ClientSecret: ${GOOGLE_CLIENT_SECRET:-}
+    volumes:
+      - dp_keys:/var/lib/portal/data-protection-keys
+    networks: [portal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  saga-worker:
+    build:
+      context: .
+      dockerfile: infra/docker/saga-worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      ConnectionStrings__Portal: Host=postgres;Port=5432;Username=postgres;Password=postgres;Database=portal_dev
+      DataProtection__KeyRingPath: /var/lib/portal/data-protection-keys
+    volumes:
+      - dp_keys:/var/lib/portal/data-protection-keys
+      - terraform_data:/var/lib/portal/terraform
+    networks: [portal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 4G
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/docker/caddy/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [portal]
+    depends_on:
+      portal-api:
+        condition: service_healthy
+
+volumes:
+  pg_data:
+  dp_keys:
+  terraform_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  portal:

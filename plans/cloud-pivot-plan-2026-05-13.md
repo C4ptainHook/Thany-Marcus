@@ -671,7 +671,7 @@ Thany-Marcus/
 │   │   ├── sync/{Push,Pull,OfflineQueue}.ts
 │   │   ├── api/CloudClient.ts               # bearer-token HTTP client
 │   │   └── ui/{StatusBar,Notices,Dialogs}/
-│   └── ThanyMarcus.Shared/                  # contracts shared by portal + cloud + plugin (TS types generated from .NET)
+│   └── ThanyMarcus.Shared/                  # contracts shared by portal + cloud (TS types hand-written per ADR-0025; no codegen)
 ├── tests/
 │   ├── ThanyMarcus.Portal.Tests/
 │   ├── ThanyMarcus.Cloud.Tests/

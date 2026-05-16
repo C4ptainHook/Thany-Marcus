@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
+using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
@@ -133,7 +134,9 @@ public static class TotpEndpoints
            .RequireAuthorization()
            .RequireRateLimiting(AuthRateLimiterPolicies.TotpChallenge)
            .AddEndpointFilter<LockoutGuardFilter>()
-           .WithMetadata(new LockoutKindMetadata(AuthLockoutKinds.Totp));
+           .WithMetadata(new LockoutKindMetadata(AuthLockoutKinds.Totp))
+           .AddEndpointFilter<RequireTurnstileFilter>()
+           .WithMetadata(new TurnstileKindMetadata(AuthLockoutKinds.Totp));
     }
 
     private static async Task RefreshTotpClaim(HttpContext http, ClaimsPrincipal user, string totpValue)

@@ -1,0 +1,7 @@
+{
+    auto_https off
+}
+
+:80, :443 {
+    reverse_proxy portal-api:8080
+}

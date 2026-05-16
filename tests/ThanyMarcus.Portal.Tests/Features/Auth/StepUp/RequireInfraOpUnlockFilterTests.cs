@@ -57,10 +57,13 @@ public sealed class RequireInfraOpUnlockFilterTests(PostgresFixture postgres) : 
             .WithClock(Clock);
         using var client = factory.CreateClient();
 
-        var cache = factory.Services.GetRequiredService<IInfraOpUnlockCache>();
         var dek = new byte[32];
         Array.Fill(dek, (byte)0xAB);
-        cache.Set(user.Id, dek);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var cache = scope.ServiceProvider.GetRequiredService<IInfraOpUnlockCache>();
+            await cache.SetAsync(user.Id, dek, ct);
+        }
 
         var ok = await client.GetAsync(new Uri("/api/test/step-up-only", UriKind.Relative), ct);
         ok.StatusCode.ShouldBe(HttpStatusCode.OK);

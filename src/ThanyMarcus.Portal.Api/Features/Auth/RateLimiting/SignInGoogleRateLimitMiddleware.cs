@@ -1,15 +1,24 @@
 using System.Globalization;
 using System.Threading.RateLimiting;
 using Microsoft.Extensions.Options;
+using NodaTime;
+using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 
 public sealed class SignInGoogleRateLimitMiddleware : IMiddleware, IAsyncDisposable
 {
     private readonly PartitionedRateLimiter<HttpContext> _limiter;
+    private readonly CaptchaRequirementTracker _tracker;
+    private readonly IOptions<TurnstileOptions> _turnstileOptions;
 
-    public SignInGoogleRateLimitMiddleware(IOptions<RateLimitingOptions> opts)
+    public SignInGoogleRateLimitMiddleware(
+        IOptions<RateLimitingOptions> opts,
+        CaptchaRequirementTracker tracker,
+        IOptions<TurnstileOptions> turnstileOptions)
     {
+        _tracker = tracker;
+        _turnstileOptions = turnstileOptions;
         var cfg = opts.Value.SignInGoogle;
         _limiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
             RateLimitPartition.GetFixedWindowLimiter(
@@ -37,6 +46,13 @@ public sealed class SignInGoogleRateLimitMiddleware : IMiddleware, IAsyncDisposa
             var retryAfter = lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retry)
                 ? (int)Math.Ceiling(retry.TotalSeconds)
                 : 0;
+
+            if (_turnstileOptions.Value.IsEnabled)
+            {
+                var key = "ip:" + (context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+                _tracker.MarkRequired(key, Duration.FromSeconds(_turnstileOptions.Value.TrackerTtlSeconds));
+            }
+
             if (retryAfter > 0)
                 context.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
