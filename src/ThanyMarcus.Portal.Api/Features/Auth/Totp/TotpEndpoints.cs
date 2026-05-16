@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
+using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
@@ -108,6 +109,7 @@ public static class TotpEndpoints
             PortalDbContext db,
             TotpService totp,
             TotpBackupCodeService backups,
+            AuthLockoutService lockouts,
             CancellationToken ct) =>
         {
             if (user.Identity?.IsAuthenticated != true)
@@ -118,11 +120,20 @@ public static class TotpEndpoints
             var totpOk = await totp.VerifyChallengeAsync(db, userId, body.Code, ct);
             var ok = totpOk is TotpChallengeResult.Verified
                   || await backups.RedeemAsync(userId, body.Code, ct);
-            if (!ok) return Results.Unauthorized();
+            if (!ok)
+            {
+                await lockouts.RecordFailureAsync(userId, AuthLockoutKinds.Totp, ct);
+                return Results.Unauthorized();
+            }
 
+            await lockouts.ClearAsync(userId, AuthLockoutKinds.Totp, ct);
             await RefreshTotpClaim(http, user, TotpClaimValues.Verified);
             return Results.NoContent();
-        }).RequireAuthorization().RequireRateLimiting(AuthRateLimiterPolicies.TotpChallenge);
+        })
+           .RequireAuthorization()
+           .RequireRateLimiting(AuthRateLimiterPolicies.TotpChallenge)
+           .AddEndpointFilter<LockoutGuardFilter>()
+           .WithMetadata(new LockoutKindMetadata(AuthLockoutKinds.Totp));
     }
 
     private static async Task RefreshTotpClaim(HttpContext http, ClaimsPrincipal user, string totpValue)
