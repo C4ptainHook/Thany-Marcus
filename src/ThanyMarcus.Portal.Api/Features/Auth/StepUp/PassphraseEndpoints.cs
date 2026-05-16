@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.RateLimiting;
+using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth.StepUp;
@@ -25,6 +26,7 @@ public static class PassphraseEndpoints
             ClaimsPrincipal user,
             PassphraseService svc,
             IInfraOpUnlockCache cache,
+            AuthLockoutService lockouts,
             CancellationToken ct) =>
         {
             var userId = Guid.Parse(user.FindFirstValue(AuthClaimTypes.SubUs)!);
@@ -33,14 +35,22 @@ public static class PassphraseEndpoints
             {
                 var result = await svc.TryUnwrapDekAsync(userId, body.Passphrase, dek, ct);
                 if (result is UnlockResult.Failed)
+                {
+                    await lockouts.RecordFailureAsync(userId, AuthLockoutKinds.Unlock, ct);
                     return Results.Json(new { error = "invalid_passphrase" }, statusCode: StatusCodes.Status401Unauthorized);
+                }
                 cache.Set(userId, dek);
+                await lockouts.ClearAsync(userId, AuthLockoutKinds.Unlock, ct);
                 return Results.NoContent();
             }
             finally
             {
                 CryptographicOperations.ZeroMemory(dek);
             }
-        }).RequireAuthorization(AuthPolicies.TotpRequired).RequireRateLimiting(AuthRateLimiterPolicies.Unlock);
+        })
+           .RequireAuthorization(AuthPolicies.TotpRequired)
+           .RequireRateLimiting(AuthRateLimiterPolicies.Unlock)
+           .AddEndpointFilter<LockoutGuardFilter>()
+           .WithMetadata(new LockoutKindMetadata(AuthLockoutKinds.Unlock));
     }
 }

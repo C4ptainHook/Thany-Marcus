@@ -12,6 +12,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
@@ -150,6 +151,8 @@ builder.Services.AddHealthChecks()
     .AddDbContextCheck<PortalDbContext>(tags: ["ready"]);
 
 builder.Services.AddAuthRateLimiting(builder.Configuration);
+builder.Services.AddAuthLockout(builder.Configuration);
+builder.Services.AddHostedService<AuthLockoutSweepService>();
 
 var app = builder.Build();
 

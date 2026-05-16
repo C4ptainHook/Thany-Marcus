@@ -9,23 +9,42 @@ using ThanyMarcus.Portal.Tests.Infrastructure;
 
 namespace ThanyMarcus.Portal.Tests.Features.Auth.RateLimiting;
 
-public sealed class TotpChallengeRateLimitTests(PostgresFixture postgres) : FactoryTestBase(postgres)
+public sealed class TotpChallengeRateLimitTests(PostgresFixture postgres) : FactoryDbTestBase(postgres)
 {
+    private async Task<User> InsertUserAsync()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var now = Clock.GetCurrentInstant();
+        var user = new User
+        {
+            GoogleSubject = $"sub-{Guid.NewGuid()}",
+            Email = $"u-{Guid.NewGuid():N}@x.com",
+            Name = "U",
+            LastSeenAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        Db.Users.Add(user);
+        await Db.SaveChangesAsync(ct);
+        Db.ChangeTracker.Clear();
+        return user;
+    }
+
     [Fact]
     public async Task Sixth_request_returns_429_with_retry_after_header_and_body()
     {
         var ct = TestContext.Current.CancellationToken;
-        var userId = Guid.CreateVersion7();
+        var user = await InsertUserAsync();
         var factory = Factory.WithPerRequestTestAuth(TotpClaimValues.NotVerified);
         using var client = factory.CreateClient();
 
         for (var i = 0; i < 5; i++)
         {
-            var ok = await SendChallengeAsync(client, userId, ct);
+            var ok = await SendChallengeAsync(client, user.Id, ct);
             ok.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         }
 
-        var rejected = await SendChallengeAsync(client, userId, ct);
+        var rejected = await SendChallengeAsync(client, user.Id, ct);
         rejected.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
 
         rejected.Headers.TryGetValues("Retry-After", out var retryHeader).ShouldBeTrue();
@@ -41,16 +60,16 @@ public sealed class TotpChallengeRateLimitTests(PostgresFixture postgres) : Fact
     public async Task Partition_is_per_user_so_other_user_first_call_admitted()
     {
         var ct = TestContext.Current.CancellationToken;
-        var userA = Guid.CreateVersion7();
-        var userB = Guid.CreateVersion7();
+        var userA = await InsertUserAsync();
+        var userB = await InsertUserAsync();
         var factory = Factory.WithPerRequestTestAuth(TotpClaimValues.NotVerified);
         using var client = factory.CreateClient();
 
         for (var i = 0; i < 5; i++)
-            (await SendChallengeAsync(client, userA, ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-        (await SendChallengeAsync(client, userA, ct)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+            (await SendChallengeAsync(client, userA.Id, ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await SendChallengeAsync(client, userA.Id, ct)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
 
-        var userBFirst = await SendChallengeAsync(client, userB, ct);
+        var userBFirst = await SendChallengeAsync(client, userB.Id, ct);
         userBFirst.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
@@ -58,7 +77,7 @@ public sealed class TotpChallengeRateLimitTests(PostgresFixture postgres) : Fact
     public async Task After_window_expires_partition_admits_again()
     {
         var ct = TestContext.Current.CancellationToken;
-        var userId = Guid.CreateVersion7();
+        var user = await InsertUserAsync();
         var factory = Factory
             .WithPerRequestTestAuth(TotpClaimValues.NotVerified)
             .WithRateLimitConfig(new Dictionary<string, string?>
@@ -68,13 +87,13 @@ public sealed class TotpChallengeRateLimitTests(PostgresFixture postgres) : Fact
             });
         using var client = factory.CreateClient();
 
-        (await SendChallengeAsync(client, userId, ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-        (await SendChallengeAsync(client, userId, ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-        (await SendChallengeAsync(client, userId, ct)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+        (await SendChallengeAsync(client, user.Id, ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await SendChallengeAsync(client, user.Id, ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await SendChallengeAsync(client, user.Id, ct)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
 
         await Task.Delay(TimeSpan.FromMilliseconds(1500), ct);
 
-        (await SendChallengeAsync(client, userId, ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await SendChallengeAsync(client, user.Id, ct)).StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
     private static async Task<HttpResponseMessage> SendChallengeAsync(
