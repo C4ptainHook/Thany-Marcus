@@ -21,8 +21,12 @@ public sealed class CloudConfiguration : IEntityTypeConfiguration<Cloud>
 
         builder.HasIndex(c => c.UserId);
         builder.HasIndex(c => c.Hostname).IsUnique();
+        builder.HasIndex(c => c.Subdomain).IsUnique();
 
         builder.HasOne<User>().WithMany().HasForeignKey(c => c.UserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<EncryptedProviderToken>().WithMany().HasForeignKey(c => c.ProviderTokenId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasQueryFilter(c => c.DestroyedAt == null);

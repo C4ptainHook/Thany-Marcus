@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.RateLimiting;
+using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 
@@ -39,7 +40,7 @@ public static class PassphraseEndpoints
                     await lockouts.RecordFailureAsync(userId, AuthLockoutKinds.Unlock, ct);
                     return Results.Json(new { error = "invalid_passphrase" }, statusCode: StatusCodes.Status401Unauthorized);
                 }
-                cache.Set(userId, dek);
+                await cache.SetAsync(userId, dek, ct);
                 await lockouts.ClearAsync(userId, AuthLockoutKinds.Unlock, ct);
                 return Results.NoContent();
             }
@@ -51,6 +52,8 @@ public static class PassphraseEndpoints
            .RequireAuthorization(AuthPolicies.TotpRequired)
            .RequireRateLimiting(AuthRateLimiterPolicies.Unlock)
            .AddEndpointFilter<LockoutGuardFilter>()
-           .WithMetadata(new LockoutKindMetadata(AuthLockoutKinds.Unlock));
+           .WithMetadata(new LockoutKindMetadata(AuthLockoutKinds.Unlock))
+           .AddEndpointFilter<RequireTurnstileFilter>()
+           .WithMetadata(new TurnstileKindMetadata(AuthLockoutKinds.Unlock));
     }
 }

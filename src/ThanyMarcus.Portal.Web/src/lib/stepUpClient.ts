@@ -1,23 +1,33 @@
 import { writable } from 'svelte/store';
+import { fetchCaptchaState } from './turnstileClient';
 
-type ResolveFn = (passphrase: string | null) => void;
-export const stepUpPrompt = writable<{ resolve: ResolveFn } | null>(null);
+export type StepUpResolution = { passphrase: string; turnstileToken: string } | null;
+type ResolveFn = (value: StepUpResolution) => void;
 
-let pending: Promise<string | null> | null = null;
+export const stepUpPrompt = writable<{
+  resolve: ResolveFn;
+  siteKey: string;
+  captchaRequired: boolean;
+} | null>(null);
+
+let pending: Promise<StepUpResolution> | null = null;
 let pendingResolvers: ResolveFn[] = [];
 
-function promptForPassphrase(): Promise<string | null> {
+async function promptForPassphrase(): Promise<StepUpResolution> {
   if (pending) return pending;
-  pending = new Promise<string | null>(resolve => {
+  const captcha = await fetchCaptchaState('unlock');
+  pending = new Promise<StepUpResolution>(resolve => {
     pendingResolvers.push(resolve);
     stepUpPrompt.set({
-      resolve: passphrase => {
+      resolve: value => {
         const resolvers = pendingResolvers;
         pendingResolvers = [];
         pending = null;
         stepUpPrompt.set(null);
-        for (const r of resolvers) r(passphrase);
+        for (const r of resolvers) r(value);
       },
+      siteKey: captcha.siteKey,
+      captchaRequired: captcha.required,
     });
   });
   return pending;
@@ -29,13 +39,15 @@ export async function fetchWithStepUp(input: RequestInfo, init?: RequestInit): P
   const body = await res.clone().json().catch(() => null);
   if (body?.error !== 'step_up_required') return res;
 
-  const passphrase = await promptForPassphrase();
-  if (passphrase === null) return res;
+  const resolution = await promptForPassphrase();
+  if (resolution === null) return res;
 
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (resolution.turnstileToken) headers['cf-turnstile-response'] = resolution.turnstileToken;
   const unlockRes = await fetch('/api/auth/unlock', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ passphrase }),
+    headers,
+    body: JSON.stringify({ passphrase: resolution.passphrase }),
   });
   if (!unlockRes.ok) return unlockRes;
   return fetch(input, init);

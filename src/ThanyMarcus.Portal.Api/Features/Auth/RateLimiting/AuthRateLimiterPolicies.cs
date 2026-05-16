@@ -2,6 +2,9 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
+using NodaTime;
+using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 
@@ -54,6 +57,15 @@ public static class AuthRateLimiterPolicies
             : 0;
         if (retryAfter > 0)
             ctx.HttpContext.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
+
+        var turnstile = ctx.HttpContext.RequestServices.GetService<IOptions<TurnstileOptions>>();
+        if (turnstile?.Value.IsEnabled == true)
+        {
+            var tracker = ctx.HttpContext.RequestServices.GetService<CaptchaRequirementTracker>();
+            tracker?.MarkRequired(PartitionKeyForUser(ctx.HttpContext),
+                Duration.FromSeconds(turnstile.Value.TrackerTtlSeconds));
+        }
+
         ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         await ctx.HttpContext.Response.WriteAsJsonAsync(
             new RateLimitErrorBody("rate_limited", retryAfter), ct);

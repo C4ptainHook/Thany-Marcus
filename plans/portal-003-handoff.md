@@ -94,11 +94,38 @@ The `GoogleSignInHandler` and `CookiePrincipalValidator` services exist for one 
 
 Cookie authentication is in `Microsoft.AspNetCore.App` (shared framework) — no separate package needed.
 
+## Deployment-architecture amendments (added 2026-05-16)
+
+After the deployment-architecture grilling concluded with **single-VM Docker Compose + multi-instance-ready code** (see [[0033-provisioning-saga-and-worker]] for the broader context), two pieces of wiring need to be added to this handoff:
+
+1. **`IDataProtector` key ring persisted to a shared filesystem volume.** ASP.NET Core's cookie scheme signs/encrypts cookies with the data-protection key ring. The default in-process key store does not survive process restarts, and breaks the moment the SagaWorker is extracted into a separate container (in [[0033-provisioning-saga-and-worker]]) and both containers need to validate the same encrypted blobs (e.g., DEK ciphertext from `IInfraOpUnlockCache` in PORTAL-003b). Land the persistent key ring now so cookies survive Portal.Api restarts and so PORTAL-003b doesn't have to retrofit the change.
+
+2. **`UseForwardedHeaders` middleware.** Portal runs behind Caddy in production (per [[0027-reverse-proxy-caddy]]). Caddy terminates TLS and forwards via plain HTTP with `X-Forwarded-Proto: https`. Without `UseForwardedHeaders`, ASP.NET Core thinks every request is HTTP, refuses to set `Secure` cookies, and `OnValidatePrincipal`'s `IssuedUtc` comparisons can drift. Land the middleware now so the dev → prod transition is silent.
+
+Both amendments are ~25 LOC total in `Program.cs` + 1 line in `docker-compose.yml` (volume mount, when we get to it). They're additive — the handoff below is correct otherwise.
+
 ## Program.cs wiring (additions only)
 
 Add **before** `var app = builder.Build();`, after the DbContext registration block:
 
 ```csharp
+// --- Data protection key ring (PORTAL-003, deployment amendment) ---
+var dpKeysDir = builder.Configuration["DataProtection:KeyRingPath"]
+    ?? Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys");
+Directory.CreateDirectory(dpKeysDir);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dpKeysDir))
+    .SetApplicationName("ThanyMarcus.Portal");
+
+// --- Forwarded headers (PORTAL-003, deployment amendment) ---
+// Caddy terminates TLS in prod; we run plain HTTP behind it.
+builder.Services.Configure<ForwardedHeadersOptions>(opts =>
+{
+    opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    opts.KnownNetworks.Clear();   // accept from any upstream; Caddy is the only proxy in our compose stack
+    opts.KnownProxies.Clear();
+});
+
 // --- Auth services (PORTAL-003) ---
 builder.Services.AddScoped<GoogleSignInHandler>();
 builder.Services.AddScoped<CookiePrincipalValidator>();
@@ -152,6 +179,10 @@ builder.Services.AddAuthorization(opts =>
 Add **after** `var app = builder.Build();` and **after** the existing `app.UseStaticFiles();`, **before** `app.MapFallbackToFile`:
 
 ```csharp
+// Forwarded headers MUST come before authentication so the cookie scheme sees the
+// correct Request.IsHttps when behind Caddy.
+app.UseForwardedHeaders();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -479,6 +510,8 @@ After running the implementation steps below, all of the following must be true:
 - `AuthEndpointsTests`: `/api/auth/me` 401 without a baked cookie; 200 with the expected JSON body when `WithTestAuth(...)` bakes claims; `/api/auth/signout` returns 204 and signs out (next `/api/auth/me` is 401 — verifiable only with the real cookie scheme, so test against `WithTestAuth(...)` for the 204 plus a separate test that posts to signout against the real cookie scheme via an in-test sign-in helper, or accept that the test covers the endpoint contract only).
 - `TotpRequiredPolicyTests`: a stub endpoint protected by `[Authorize(Policy = AuthPolicies.TotpRequired)]` returns 200 when the baked principal has `totp=verified`, 200 when `totp=not-enabled`, and 403 when `totp=not-verified`. (The browser redirect to `/totp-challenge` is a cookie-scheme behavior that fires only when the cookie scheme is the default — that's covered by the AccessDeniedPath setting, not asserted by this unit-level test.)
 - `pnpm build` in `src/ThanyMarcus.Portal.Web/` still succeeds. The new `+layout.ts` + `+page.svelte` render in dev (`pnpm dev` + `dotnet watch` two-terminal flow): unauthenticated landing shows "Sign in with Google" link.
+- **Data protection key ring**: after first startup, the configured `DataProtection:KeyRingPath` directory contains one `key-<guid>.xml` file. Restarting the Portal.Api process and signing in again does not invalidate previously-issued cookies (would happen with the default in-process key store).
+- **Forwarded headers**: when the API is reached via `curl -H "X-Forwarded-Proto: https" -H "X-Forwarded-For: 1.2.3.4"` (simulating Caddy), `HttpContext.Request.IsHttps` is `true` in handlers and the `Secure` cookie attribute is set on the `Set-Cookie` response (verifiable in `AuthEndpointsTests` with a `TestServer` that injects the headers).
 
 ## Concrete steps in order (each maps to a task)
 
@@ -486,7 +519,13 @@ After running the implementation steps below, all of the following must be true:
 
 2. **Land the claim-type and policy constants** — `AuthClaimTypes.cs`, `AuthPolicies.cs`, `TotpClaimValues.cs`. These are tiny `public static class` files holding `const` strings; landing them first lets the rest of the code reference them without copy-paste.
 
-3. **Wire `Program.cs`** — add the AddAuthentication / AddCookie / AddGoogle / AddAuthorization block. Add `UseAuthentication` + `UseAuthorization`. Skip `MapAuthEndpoints` for now (the endpoints file doesn't exist yet). Configure `Google:ClientId` / `Google:ClientSecret` placeholders in `appsettings.json`. The API should still start (with the InvalidOperationException if Google config is missing). Run the existing PORTAL-002 tests — still green.
+3. **Wire `Program.cs`** — in this order:
+   - **3a.** Add the `AddDataProtection().PersistKeysToFileSystem(...).SetApplicationName(...)` block (deployment amendment). Default key-ring path is `<ContentRoot>/data-protection-keys/`; configurable via `DataProtection:KeyRingPath`. Add `data-protection-keys/` to `.gitignore`. Without `AddDataProtection`, the framework still works but uses an ephemeral in-process key — cookies break across restarts.
+   - **3b.** Add the `Configure<ForwardedHeadersOptions>(...)` block (deployment amendment). Required for cookies' `Secure` flag to behave correctly behind Caddy.
+   - **3c.** Add the AddAuthentication / AddCookie / AddGoogle / AddAuthorization block.
+   - **3d.** Add `app.UseForwardedHeaders()` + `UseAuthentication` + `UseAuthorization` to the app pipeline, in that exact order (forwarded headers MUST come first so the cookie scheme sees the correct scheme).
+   - Skip `MapAuthEndpoints` for now (the endpoints file doesn't exist yet). Configure `Google:ClientId` / `Google:ClientSecret` placeholders in `appsettings.json`. The API should still start (with `InvalidOperationException` if Google config is missing).
+   - Run the existing PORTAL-002 tests — still green.
 
 4. **Land `GoogleSignInHandler` + its tests** — write `GoogleSignInHandlerTests` first (failing), then implement the handler. Each test inserts the relevant `User` / `TotpSecret` rows via `DbIntegrationTestBase.Db`, constructs an `OAuthCreatingTicketContext` manually (it's awkward — see Risks below for the workaround), invokes `OnCreatingTicketAsync`, and asserts on the resulting `ClaimsIdentity` and on the DB rows.
 
@@ -512,7 +551,10 @@ After running the implementation steps below, all of the following must be true:
 
 - **`AccessDeniedPath` redirect vs. SPA fetch.** The cookie scheme's `AccessDeniedPath` redirect kicks in for any 403 response from the cookie handler. For a SPA that calls `/api/...` via `fetch`, the browser silently follows the redirect, and `fetch` resolves with the HTML body of `/totp-challenge` — not what the SPA wants. The standard ASP.NET Core fix is to set `opts.Events.OnRedirectToAccessDenied = ctx => { if (ctx.Request.Path.StartsWithSegments("/api")) { ctx.Response.StatusCode = 403; return Task.CompletedTask; } return base.OnRedirectToAccessDenied(ctx); }` — return 403 for API paths, redirect for everything else. Apply the same to `OnRedirectToLogin` (401 for `/api`, 302 to Google for browser nav). Land both overrides as part of the `AddCookie(...)` block.
 
-- **`SecurePolicy = Always` breaks local dev over plain HTTP.** ASP.NET Core's dev launch profile uses HTTPS by default on `:5001` and HTTP on `:5000`. With `SecurePolicy.Always`, the cookie won't set on `http://localhost:5000`. Two ways to handle: (a) use the HTTPS launch URL in dev, (b) override `SecurePolicy` in the `Development` environment to `SameAsRequest`. (a) is closer to production and avoids a divergent code path; choose (a) unless there's a reason not to. Document the chosen URL in the README.
+- **`SecurePolicy = Always` and local dev / forwarded headers.** With `SecurePolicy.Always`, the cookie only sets when ASP.NET Core thinks the request is HTTPS. Three relevant situations:
+  - **Local dev over plain HTTP `:5000`**: cookie won't set. Use the HTTPS launch URL `:5001` in dev — closer to production, avoids a divergent code path.
+  - **Local dev over `pnpm dev`'s Vite proxy** (`:5173` → `:5000`): Vite forwards to plain HTTP; without `UseForwardedHeaders` the cookie wouldn't set. With the `Configure<ForwardedHeadersOptions>` block from §"Deployment-architecture amendments" landed and Vite configured to send `X-Forwarded-Proto`, it works. Alternative: dev override `SecurePolicy = SameAsRequest`.
+  - **Production behind Caddy**: Caddy terminates TLS and forwards via plain HTTP with `X-Forwarded-Proto: https`. `UseForwardedHeaders` makes ASP.NET Core treat the request as HTTPS, and the cookie sets correctly. **This is why the deployment amendment is mandatory, not optional.**
 
 - **Google `picture` claim location.** Google's OAuth2 handler exposes the parsed `/userinfo` JSON as `OAuthCreatingTicketContext.User` (a `JsonElement`), not as a claim on `ctx.Principal`. The `picture` URL lives in `ctx.User.GetProperty("picture").GetString()`. ASP.NET Core's Google handler maps some fields (sub, email, name) into `ctx.Principal` claims automatically, but not `picture`. The `GoogleSignInHandler` sketch above handles this correctly — don't try to read `picture` off the principal.
 
@@ -549,7 +591,7 @@ A fresh agent can pick PORTAL-003a (TOTP enable/disable + backup codes) up from 
 
 ## Cross-references
 
-- Original ticket (now superseded): `plans/tickets-2026-05-13.md` PORTAL-003 — 0.5 d estimate covering "Google SSO + session cookie". Revised: 0.75 d once `OnValidatePrincipal` + claims-refresh + the `totp` claim state machine landed in ADR-0030.
+- Original ticket (now superseded): `plans/tickets-2026-05-13.md` PORTAL-003 — 0.5 d estimate covering "Google SSO + session cookie". Revised: 0.75 d once `OnValidatePrincipal` + claims-refresh + the `totp` claim state machine landed in ADR-0030. Revised further to **0.85 d** with the data-protection key ring + forwarded-headers deployment amendments (~25 LOC + 2 acceptance bullets).
 - Adjacent tickets that PORTAL-003 unblocks (or unblocks once their sibling 003x tickets land):
   - PORTAL-003a — TOTP enable/disable + backup codes (consumes the `totp` claim shape; lands the POST `/totp-challenge` handler and TOTP enable/disable endpoints; calls `RefreshSignInAsync` with the right claim transition)
   - PORTAL-003b — Step-up auth + `IInfraOpUnlockCache` (independent of the cookie, but invalidates cache on `sessions_invalidated_at` bump landed here)

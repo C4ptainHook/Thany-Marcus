@@ -159,6 +159,38 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                     b.ToTable("recovery_codes", (string)null);
                 });
 
+            modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.StepUp.StepUpUnlock", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<Instant>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<byte[]>("EncryptedDek")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("encrypted_dek");
+
+                    b.Property<Instant>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<Instant>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_used_at");
+
+                    b.HasKey("UserId")
+                        .HasName("pk_step_up_unlocks");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_step_up_unlocks_expires_at");
+
+                    b.ToTable("step_up_unlocks", (string)null);
+                });
+
             modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.TotpBackupCode", b =>
                 {
                     b.Property<Guid>("Id")
@@ -343,6 +375,10 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("cert_started_at");
 
+                    b.Property<byte[]>("CloudAdminTokenHash")
+                        .HasColumnType("bytea")
+                        .HasColumnName("cloud_admin_token_hash");
+
                     b.Property<Instant>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -374,6 +410,10 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("provider");
 
+                    b.Property<Guid?>("ProviderTokenId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("provider_token_id");
+
                     b.Property<Instant?>("ProvisioningCompletedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("provisioning_completed_at");
@@ -392,6 +432,14 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("region");
 
+                    b.Property<string>("Subdomain")
+                        .HasColumnType("text")
+                        .HasColumnName("subdomain");
+
+                    b.Property<string>("TerraformWorkspace")
+                        .HasColumnType("text")
+                        .HasColumnName("terraform_workspace");
+
                     b.Property<Instant>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -400,12 +448,23 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("user_id");
 
+                    b.Property<string>("VmIp")
+                        .HasColumnType("text")
+                        .HasColumnName("vm_ip");
+
                     b.HasKey("Id")
                         .HasName("pk_clouds");
 
                     b.HasIndex("Hostname")
                         .IsUnique()
                         .HasDatabaseName("ix_clouds_hostname");
+
+                    b.HasIndex("ProviderTokenId")
+                        .HasDatabaseName("ix_clouds_provider_token_id");
+
+                    b.HasIndex("Subdomain")
+                        .IsUnique()
+                        .HasDatabaseName("ix_clouds_subdomain");
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_clouds_user_id");
@@ -470,9 +529,13 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<int>("Attempts")
-                        .HasColumnType("integer")
-                        .HasColumnName("attempts");
+                    b.Property<short>("AttemptCount")
+                        .HasColumnType("smallint")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<string>("ClaimedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("claimed_by");
 
                     b.Property<Guid>("CloudId")
                         .HasColumnType("uuid")
@@ -481,6 +544,13 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                     b.Property<Instant>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<JsonDocument>("EventsLog")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("events_log")
+                        .HasDefaultValueSql("'[]'::jsonb");
 
                     b.Property<string>("Kind")
                         .IsRequired()
@@ -491,27 +561,35 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("last_error");
 
-                    b.Property<Instant?>("LeaseExpires")
+                    b.Property<Instant?>("LeaseExpiresAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("lease_expires");
+                        .HasColumnName("lease_expires_at");
+
+                    b.Property<Instant>("NextVisibleAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_visible_at");
 
                     b.Property<JsonDocument>("Payload")
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("payload");
 
+                    b.Property<Instant?>("PhaseStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("phase_started_at");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("status");
 
+                    b.Property<JsonDocument>("TfOutputs")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("tf_outputs");
+
                     b.Property<Instant>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
-
-                    b.Property<string>("WorkerId")
-                        .HasColumnType("text")
-                        .HasColumnName("worker_id");
 
                     b.HasKey("Id")
                         .HasName("pk_provisioning_jobs");
@@ -523,9 +601,9 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasDatabaseName("ix_provisioning_jobs_pending_created_at")
                         .HasFilter("status = 'pending'");
 
-                    b.HasIndex("LeaseExpires")
-                        .HasDatabaseName("ix_provisioning_jobs_inprogress_lease")
-                        .HasFilter("status = 'in_progress'");
+                    b.HasIndex("NextVisibleAt")
+                        .HasDatabaseName("ix_provisioning_jobs_active_next_visible_at")
+                        .HasFilter("status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','cancelled','rolled_back')");
 
                     b.ToTable("provisioning_jobs", (string)null);
                 });
@@ -560,6 +638,16 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasConstraintName("fk_recovery_codes_users_user_id");
                 });
 
+            modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.StepUp.StepUpUnlock", b =>
+                {
+                    b.HasOne("ThanyMarcus.Portal.Api.Features.Auth.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_step_up_unlocks_users_user_id");
+                });
+
             modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.TotpBackupCode", b =>
                 {
                     b.HasOne("ThanyMarcus.Portal.Api.Features.Auth.User", null)
@@ -582,6 +670,12 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
 
             modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.CloudManagement.Cloud", b =>
                 {
+                    b.HasOne("ThanyMarcus.Portal.Api.Features.Auth.EncryptedProviderToken", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderTokenId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_clouds_encrypted_provider_tokens_provider_token_id");
+
                     b.HasOne("ThanyMarcus.Portal.Api.Features.Auth.User", null)
                         .WithMany()
                         .HasForeignKey("UserId")

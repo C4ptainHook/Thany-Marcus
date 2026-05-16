@@ -1,5 +1,7 @@
 using System.Net;
 using System.Security.Claims;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NodaTime;
 using Shouldly;
@@ -40,31 +42,37 @@ public sealed class StepUpInvalidationTests(PostgresFixture postgres) : FactoryD
             .WithClock(Clock);
         using var client = factory.CreateClient();
 
-        var cache = factory.Services.GetRequiredService<IInfraOpUnlockCache>();
         var dek = new byte[32];
         Array.Fill(dek, (byte)0xAB);
-        cache.Set(user.Id, dek);
-        cache.TryGet(user.Id, new byte[32]).ShouldBeTrue();
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var seed = scope.ServiceProvider.GetRequiredService<IInfraOpUnlockCache>();
+            await seed.SetAsync(user.Id, dek, ct);
+        }
+        (await Db.StepUpUnlocks.AnyAsync(u => u.UserId == user.Id, ct)).ShouldBeTrue();
 
         var res = await client.PostAsync(new Uri("/api/auth/signout", UriKind.Relative), content: null, ct);
         res.StatusCode.ShouldBe(HttpStatusCode.NoContent);
 
-        cache.TryGet(user.Id, new byte[32]).ShouldBeFalse();
+        (await Db.StepUpUnlocks.AnyAsync(u => u.UserId == user.Id, ct)).ShouldBeFalse();
     }
 
     [Fact]
     public async Task Cookie_validator_invalidates_cache_when_user_not_in_db()
     {
         var ct = TestContext.Current.CancellationToken;
-        var ghostUserId = Guid.CreateVersion7();
+        var user = await InsertUserAsync();
+        var cache = new PostgresInfraOpUnlockCache(Db, new EphemeralDataProtectionProvider(), Clock);
+        await cache.SetAsync(user.Id, new byte[32], ct);
+        (await cache.TryGetAsync(user.Id, new byte[32], ct)).ShouldBeTrue();
 
-        var cache = new InProcessInfraOpUnlockCache(Clock);
-        cache.Set(ghostUserId, new byte[32]);
-        cache.TryGet(ghostUserId, new byte[32]).ShouldBeTrue();
+        Db.Users.Remove(await Db.Users.SingleAsync(u => u.Id == user.Id, ct));
+        await Db.SaveChangesAsync(ct);
+        Db.ChangeTracker.Clear();
 
         var validator = new CookiePrincipalValidator(Db, cache);
         var identity = new ClaimsIdentity("Cookies");
-        identity.AddClaim(new Claim(AuthClaimTypes.SubUs, ghostUserId.ToString()));
+        identity.AddClaim(new Claim(AuthClaimTypes.SubUs, user.Id.ToString()));
         identity.AddClaim(new Claim(AuthClaimTypes.Totp, TotpClaimValues.NotEnabled));
 
         var outcome = await validator.ValidateAsync(
@@ -73,7 +81,7 @@ public sealed class StepUpInvalidationTests(PostgresFixture postgres) : FactoryD
             ct);
 
         outcome.ShouldBe(CookieValidationOutcome.Reject);
-        cache.TryGet(ghostUserId, new byte[32]).ShouldBeFalse();
+        (await cache.TryGetAsync(user.Id, new byte[32], ct)).ShouldBeFalse();
     }
 
     [Fact]
@@ -87,9 +95,9 @@ public sealed class StepUpInvalidationTests(PostgresFixture postgres) : FactoryD
         await Db.SaveChangesAsync(ct);
         Db.ChangeTracker.Clear();
 
-        var cache = new InProcessInfraOpUnlockCache(Clock);
-        cache.Set(user.Id, new byte[32]);
-        cache.TryGet(user.Id, new byte[32]).ShouldBeTrue();
+        var cache = new PostgresInfraOpUnlockCache(Db, new EphemeralDataProtectionProvider(), Clock);
+        await cache.SetAsync(user.Id, new byte[32], ct);
+        (await cache.TryGetAsync(user.Id, new byte[32], ct)).ShouldBeTrue();
 
         var validator = new CookiePrincipalValidator(Db, cache);
         var identity = new ClaimsIdentity("Cookies");
@@ -100,6 +108,6 @@ public sealed class StepUpInvalidationTests(PostgresFixture postgres) : FactoryD
         var outcome = await validator.ValidateAsync(new ClaimsPrincipal(identity), issued, ct);
 
         outcome.ShouldBe(CookieValidationOutcome.Reject);
-        cache.TryGet(user.Id, new byte[32]).ShouldBeFalse();
+        (await cache.TryGetAsync(user.Id, new byte[32], ct)).ShouldBeFalse();
     }
 }

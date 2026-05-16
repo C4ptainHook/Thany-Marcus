@@ -1,25 +1,38 @@
 <script lang="ts">
   import { stepUpPrompt } from './stepUpClient';
+  import TurnstileWidget from './TurnstileWidget.svelte';
 
   let passphrase = $state('');
+  let turnstileToken = $state('');
   let error = $state<string | null>(null);
 
   function submit(e: SubmitEvent) {
     e.preventDefault();
     const prompt = $stepUpPrompt;
     if (!prompt) return;
+    if (prompt.captchaRequired && !turnstileToken) {
+      error = 'Please complete the verification challenge.';
+      return;
+    }
     const value = passphrase;
+    const token = turnstileToken;
     passphrase = '';
+    turnstileToken = '';
     error = null;
-    prompt.resolve(value);
+    prompt.resolve({ passphrase: value, turnstileToken: token });
   }
 
   function cancel() {
     const prompt = $stepUpPrompt;
     if (!prompt) return;
     passphrase = '';
+    turnstileToken = '';
     error = null;
     prompt.resolve(null);
+  }
+
+  function onCaptchaToken(token: string) {
+    turnstileToken = token;
   }
 </script>
 
@@ -34,10 +47,17 @@
         <!-- svelte-ignore a11y_autofocus -->
         <input type="password" autocomplete="current-password" bind:value={passphrase} required autofocus />
       </label>
+      {#if $stepUpPrompt.captchaRequired && $stepUpPrompt.siteKey}
+        <TurnstileWidget siteKey={$stepUpPrompt.siteKey} onToken={onCaptchaToken} />
+      {/if}
       {#if error}<p class="error">{error}</p>{/if}
       <div class="actions">
         <button type="button" onclick={cancel}>Cancel</button>
-        <button type="submit" disabled={!passphrase}>Unlock</button>
+        <button
+          type="submit"
+          disabled={!passphrase || ($stepUpPrompt.captchaRequired && !turnstileToken)}>
+          Unlock
+        </button>
       </div>
     </form>
   </div>

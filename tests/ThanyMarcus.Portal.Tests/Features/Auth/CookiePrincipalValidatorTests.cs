@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.DataProtection;
 using NodaTime;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth;
@@ -9,7 +10,8 @@ namespace ThanyMarcus.Portal.Tests.Features.Auth;
 
 public sealed class CookiePrincipalValidatorTests(PostgresFixture postgres) : DbIntegrationTestBase(postgres)
 {
-    private InProcessInfraOpUnlockCache Cache { get; } = new(new NodaTime.Testing.FakeClock(Instant.FromUtc(2026, 5, 15, 12, 0)));
+    private IInfraOpUnlockCache Cache => _cache ??= new PostgresInfraOpUnlockCache(Db, new EphemeralDataProtectionProvider(), Clock);
+    private PostgresInfraOpUnlockCache? _cache;
 
     private static ClaimsIdentity BuildIdentity(
         Guid? userId,

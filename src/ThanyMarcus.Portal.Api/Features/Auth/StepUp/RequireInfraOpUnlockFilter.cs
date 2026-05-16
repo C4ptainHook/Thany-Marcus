@@ -13,10 +13,16 @@ public sealed class RequireInfraOpUnlockFilter : IEndpointFilter
             return Results.Unauthorized();
 
         var cache = http.RequestServices.GetRequiredService<IInfraOpUnlockCache>();
-        Span<byte> probe = stackalloc byte[32];
-        if (!cache.TryGet(userId, probe))
-            return Results.Json(new { error = "step_up_required" }, statusCode: StatusCodes.Status401Unauthorized);
-        CryptographicOperations.ZeroMemory(probe);
+        var probe = new byte[32];
+        try
+        {
+            if (!await cache.TryGetAsync(userId, probe, http.RequestAborted))
+                return Results.Json(new { error = "step_up_required" }, statusCode: StatusCodes.Status401Unauthorized);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(probe);
+        }
         return await next(context);
     }
 }

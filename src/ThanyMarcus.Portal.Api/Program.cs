@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using NodaTime;
@@ -12,10 +13,12 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -56,16 +59,28 @@ builder.Services.AddDbContext<PortalDbContext>((sp, opts) => opts
 builder.Services.AddScoped<GoogleSignInHandler>();
 builder.Services.AddScoped<CookiePrincipalValidator>();
 
-// TODO(PORTAL-017): PersistKeysToFileSystem so restarts don't invalidate TotpSecret ciphertexts.
+var dpKeysDir = builder.Configuration["DataProtection:KeyRingPath"]
+    ?? Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys");
+Directory.CreateDirectory(dpKeysDir);
 builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dpKeysDir))
     .SetApplicationName("ThanyMarcus.Portal");
+
+builder.Services.Configure<ForwardedHeadersOptions>(opts =>
+{
+    opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    opts.KnownIPNetworks.Clear();
+    opts.KnownProxies.Clear();
+});
+
 builder.Services.AddScoped<TotpService>();
 builder.Services.AddScoped<TotpBackupCodeService>();
 
 builder.Services.AddScoped<PassphraseService>();
-builder.Services.AddSingleton<InProcessInfraOpUnlockCache>();
-builder.Services.AddSingleton<IInfraOpUnlockCache>(sp => sp.GetRequiredService<InProcessInfraOpUnlockCache>());
+builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
 builder.Services.AddHostedService<InfraOpUnlockSweepService>();
+
+builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
 
 builder.Services.AddAuthentication(opts =>
 {
@@ -153,6 +168,7 @@ builder.Services.AddHealthChecks()
 builder.Services.AddAuthRateLimiting(builder.Configuration);
 builder.Services.AddAuthLockout(builder.Configuration);
 builder.Services.AddHostedService<AuthLockoutSweepService>();
+builder.Services.AddTurnstile(builder.Configuration);
 
 var app = builder.Build();
 
@@ -163,6 +179,8 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 
 app.UseStaticFiles();
+
+app.UseForwardedHeaders();
 
 app.UseMiddleware<SignInGoogleRateLimitMiddleware>();
 app.UseAuthentication();
@@ -185,6 +203,8 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 app.MapAuthEndpoints();
 app.MapTotpEndpoints();
 app.MapPassphraseEndpoints();
+app.MapProviderTokenEndpoints();
+app.MapCaptchaEndpoints();
 
 app.MapFallbackToFile("index.html");
 

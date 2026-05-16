@@ -11,9 +11,14 @@ public sealed class ProvisioningJob : IHasUpdatedAt
     public string Kind { get; init; } = null!;
     public JsonDocument Payload { get; init; } = null!;
     public string Status { get; set; } = null!;
-    public int Attempts { get; set; }
-    public string? WorkerId { get; set; }
-    public Instant? LeaseExpires { get; set; }
+
+    public Instant NextVisibleAt { get; set; }
+    public Instant? LeaseExpiresAt { get; set; }
+    public string? ClaimedBy { get; set; }
+    public short AttemptCount { get; set; }
+    public Instant? PhaseStartedAt { get; set; }
+    public JsonDocument EventsLog { get; set; } = null!;
+    public JsonDocument? TfOutputs { get; set; }
     public string? LastError { get; set; }
 
     public Instant CreatedAt { get; init; }

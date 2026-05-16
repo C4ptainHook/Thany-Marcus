@@ -26,11 +26,12 @@ export async function disable(code: string): Promise<void> {
   if (!r.ok) throw new Error(`disable failed: ${r.status}`);
 }
 
-export async function challenge(code: string): Promise<void> {
-  const r = await fetch('/totp-challenge', {
+export async function challenge(code: string, turnstileToken?: string): Promise<Response> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (turnstileToken) headers['cf-turnstile-response'] = turnstileToken;
+  return fetch('/totp-challenge', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify({ code }),
   });
-  if (!r.ok) throw new Error(`challenge failed: ${r.status}`);
 }

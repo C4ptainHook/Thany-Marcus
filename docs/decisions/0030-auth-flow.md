@@ -80,6 +80,12 @@ Sub-question 4c — where does the decrypted DEK live during the window?
 - **TOTP timing: 2a → A, 2b → β** — required at every sign-in for users who opted in (TOTP enabled = `totp_secrets` row exists with non-null `enabled_at` and null `disabled_at`); enforced via single auth cookie with a `totp` claim and `[Authorize(Policy = "TotpRequired")]` on protected endpoints. The `not-enabled` value passes the policy.
 - **Cookie lifetime: 14-day sliding** (ASP.NET Core default). `HttpOnly + Secure + SameSite=Lax`. TOTP-verified state persists for the cookie's lifetime; no separate TOTP timeout in MVP.
 - **Step-up: 4a → A, 4b → B (10 min), 4c → α** — per-user unlock; 10-minute sliding window from last passphrase entry; decrypted DEK held in singleton `IInfraOpUnlockCache`; never written to disk or cookie. Cache invalidated on logout, recovery-code redemption, passphrase change, `sessions_invalidated_at` bump, and process restart.
+
+### Amendment 2026-05-16 — DEK persistence softened (PORTAL-003f)
+
+The original Step-up §4c decision picked **α** (in-process memory cache). PORTAL-003f moves the cache to Postgres-backed (`step_up_unlocks` table) with `IDataProtector` envelope encryption so that the SagaWorker container (split out in PORTAL-007a) can read DEKs the Portal.Api container wrote. This makes the original property **"DEK never persists outside process memory"** false; the amended property is **"DEK never persists outside process memory in plaintext"** — the encrypted form lives in Postgres, decryptable only via the data-protection key ring on the shared filesystem volume.
+
+Threat-model delta: cookie-theft + portal-DB-read + data-protection-key-read together leak the DEK; before the amendment, cookie-theft + portal-DB-read sufficed for the *encrypted* DEK columns on `users` but the *unwrapped* DEK was unrecoverable post-restart. After the amendment, the unwrapped form is reachable for the cache lifetime if all three are compromised — same blast radius as a generic portal-DB-plus-FS compromise, which is already a catastrophic event. Cache invalidation triggers are unchanged. Process restart no longer forces re-unlock, which is the user-visible behavior change.
 - **Google tokens: 5 → A + cache `profile_picture_url`** — `SaveTokens = false`, no `offline_access`. `id_token` validated at sign-in (signature via Google JWKS, iss/aud/exp), identity claims extracted, tokens dropped. `users.profile_picture_url` cached from the `picture` claim for SPA UI rendering.
 
 ### Cookie claim shape
@@ -196,7 +202,7 @@ builder.Services.AddAuthorization(opts =>
         ctx.User.FindFirstValue("totp") is "verified" or "not-enabled"));
 });
 
-builder.Services.AddSingleton<IInfraOpUnlockCache, InProcessInfraOpUnlockCache>();
+builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();   // PORTAL-003f amendment
 ```
 
 ## Consequences
@@ -205,12 +211,12 @@ builder.Services.AddSingleton<IInfraOpUnlockCache, InProcessInfraOpUnlockCache>(
   - Honest "sign out everywhere" and "recovery-code bumps all sessions" semantics via `sessions_invalidated_at`.
   - Per-request user lookup refreshes stale claims; cookie carries identity, DB carries truth.
   - 14-day sliding cookie + `OnValidatePrincipal` is the canonical ASP.NET Core pattern — no `ITicketStore` complexity.
-  - Step-up DEK never persists outside process memory; restart forces re-unlock.
+  - Step-up DEK never persists outside process memory in plaintext (see amendment 2026-05-16); encrypted form in Postgres survives restart, plaintext does not.
   - `SaveTokens=false` means a portal breach doesn't expose Google access/refresh tokens.
   - Per-user step-up unlock matches the crypto envelope (DEK is per-user); destroy-all-my-clouds is one passphrase entry, not N.
 - **Negative:**
   - "Active sessions" UI for the user is not possible without future migration to `ITicketStore`. Accepted: not in thesis scope; clean follow-up.
-  - In-process DEK cache rules out future multi-replica deploys without revisiting. Accepted: [[portal_deployment]] is single-VM.
+  - ~~In-process DEK cache rules out future multi-replica deploys without revisiting.~~ Superseded by amendment 2026-05-16: Postgres-backed cache is multi-instance-ready.
   - Per-request DB lookup on `users` for cookie validation. Indexed PK lookup; ~0.1ms.
 - **Neutral:**
   - Adding refresh-token-based Google API calls later (e.g., Drive integration) is a clean additive change: one column on `users`, one config flag, one OAuth scope addition.

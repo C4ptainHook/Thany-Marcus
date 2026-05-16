@@ -4,10 +4,10 @@ namespace ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 
 public interface IInfraOpUnlockCache
 {
-    bool TryGet(Guid userId, Span<byte> dekDestination);
+    Task<bool> TryGetAsync(Guid userId, byte[] dekDestination, CancellationToken ct);
 
     [SuppressMessage("Naming", "CA1716:Identifiers should not match keywords", Justification = "Set matches the cache semantics; not consumed from VB.")]
-    void Set(Guid userId, ReadOnlySpan<byte> dek);
+    Task SetAsync(Guid userId, ReadOnlyMemory<byte> dek, CancellationToken ct);
 
-    void Invalidate(Guid userId);
+    Task InvalidateAsync(Guid userId, CancellationToken ct);
 }
