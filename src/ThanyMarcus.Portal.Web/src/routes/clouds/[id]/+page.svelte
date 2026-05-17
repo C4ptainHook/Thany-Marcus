@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { subscribeToEvents } from '$lib/sse';
-  import CostSummary from '$lib/CostSummary.svelte';
+  import CostCard from '$lib/CostCard.svelte';
+  import StatusPill from '$lib/StatusPill.svelte';
   import { PhaseOrder, type PhaseName, type WizardSseEvent } from '$lib/types/provisioning';
   import type { CloudStatusResponse } from '$lib/types/cloud';
 
@@ -86,8 +87,8 @@
     return close;
   });
 
-  function dot(state: PhaseState): string {
-    return state === 'done' ? '●' : state === 'in_progress' ? '◐' : state === 'failed' ? '✗' : '○';
+  function variant(s: PhaseState): 'success' | 'warn' | 'idle' | 'error' {
+    return s === 'done' ? 'success' : s === 'in_progress' ? 'warn' : s === 'failed' ? 'error' : 'idle';
   }
 </script>
 
@@ -95,13 +96,12 @@
   <h1>{cloud.hostname}</h1>
   <p class="muted">{cloud.provider} · {cloud.region}</p>
 
-  <section>
+  <section class="card">
     <h2>Progress</h2>
     <ol class="phase-list">
       {#each PhaseOrder as phase (phase)}
-        <li class={'phase ' + phases[phase]}>
-          <span class="dot">{dot(phases[phase])}</span>
-          <span>{phase.replace(/_/g, ' ')}</span>
+        <li class="phase">
+          <StatusPill variant={variant(phases[phase])} label={phase.replace(/_/g, ' ')} />
         </li>
       {/each}
     </ol>
@@ -116,57 +116,40 @@
           {terminal.hostname}
         </a>.
       </p>
-      <p class="muted small">
+      <p class="muted">
         First request after idle ~5 min may take a moment while the burst worker warms up.
       </p>
+      <p><a href="/">Back to dashboard</a></p>
     </section>
   {:else if terminal?.kind === 'failed'}
     <section class="card failure-card">
       <h2 class="error">Provisioning failed</h2>
       <p>{terminal.message || terminal.reason}</p>
-      <p class="muted small">Status: {terminal.terminalStatus}</p>
+      <p class="muted">Status: {terminal.terminalStatus}</p>
       <p>
-        <a href="/clouds/new">Try again</a>
+        <a class="btn btn-primary" href="/clouds/new">Try again</a>
       </p>
     </section>
   {:else if terminal?.kind === 'rolled_back'}
     <section class="card">
       <h2>Rolled back</h2>
       <p class="muted">All resources have been cleaned up.</p>
-      <p><a href="/clouds/new">Create a new cloud</a></p>
+      <p><a class="btn btn-primary" href="/clouds/new">Create a new cloud</a></p>
     </section>
   {/if}
 
-  <CostSummary />
+  <CostCard cloud={cloud} workerUptimeMonthSeconds={null} />
 </main>
 
 <style>
   .phase-list {
     list-style: none;
     padding: 0;
-    margin: var(--space-3) 0;
-  }
-  .phase {
+    margin: var(--space-3) 0 0;
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: var(--space-2);
-    padding: var(--space-1) 0;
   }
-  .dot {
-    font-family: var(--font-mono);
-    width: 1.5rem;
-    text-align: center;
-  }
-  .phase.done .dot { color: var(--color-success); }
-  .phase.failed .dot { color: var(--color-error); }
-  .phase.pending { color: var(--color-disabled); }
-  .card {
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    padding: var(--space-3);
-    margin: var(--space-3) 0;
-  }
-  .success-card { border-color: var(--color-success); }
-  .failure-card { border-color: var(--color-error); }
-  .small { font-size: 0.9rem; }
+  .success-card { border-color: var(--success); }
+  .failure-card { border-color: var(--error); }
 </style>

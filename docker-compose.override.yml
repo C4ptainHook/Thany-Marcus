@@ -1,15 +1,41 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: portal_dev
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks: [portal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d portal_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   portal-api:
     ports: ["5050:8080"]
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Portal: "Host=postgres;Port=5432;Username=postgres;Password=postgres;Database=portal_dev"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   saga-worker:
     environment:
       DOTNET_ENVIRONMENT: Development
+      ConnectionStrings__Portal: "Host=postgres;Port=5432;Username=postgres;Password=postgres;Database=portal_dev"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   caddy:
     profiles: [prod]
 
-  postgres:
-    ports: ["5432:5432"]
+volumes:
+  pg_data:

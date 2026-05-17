@@ -211,3 +211,39 @@ If the portal restarts mid-apply, the live tail is lost for that window. The SSE
 - [[0020-server-push-sse]] — live log consumed by SSE endpoint
 - [[0024-dbcontext-shape]] — single PortalDbContext, raw SQL via `FromSqlInterpolated` for the claim query
 - `plans/cloud-pivot-plan-2026-05-13.md §15` — saga pattern committed in the plan
+
+## Implementation status (2026-05-17)
+
+All three durability components prescribed by this ADR are now implemented in `ThanyMarcus.Portal.SagaWorker`:
+
+- **Heartbeat every 30s.** While a phase handler is running, a separate task issues `UPDATE provisioning_jobs SET lease_expires_at = now() + interval '60 seconds', updated_at = now() WHERE id = $1 AND claimed_by = $worker_id` on a 30-second cadence. Cancellation is tied to the dispatcher's completion.
+- **LISTEN/NOTIFY worker wakeup with 60s safety-net poll.** The saga-worker holds a dedicated `LISTEN provisioning_new, provisioning_job_changed` connection and wakes on either the notification or the 60-second safety-net `Task.Delay`, whichever fires first. The continuous-poll loop has been removed.
+- **Ownership predicate on transition writes.** `SagaTransitions.TransitionAsync` and `RescheduleAsync` issue raw SQL with `WHERE id = $1 AND claimed_by = $worker_id`. If `rowsAffected = 0`, the handler raises `SagaOwnershipLostException`, discards its work, and lets the next claimer pick the row up. This closes the silent-overwrite hole where two workers could each believe they owned the row past lease expiry.
+
+Default configuration (override via `appsettings.json` / env):
+
+```
+Provisioning:LeaseSeconds      = 60   # lease TTL, was 120
+Provisioning:HeartbeatSeconds  = 30   # heartbeat interval
+Provisioning:SafetyNetSeconds  = 60   # max idle before forced re-check
+```
+
+The default lease TTL is now 60s (down from 120s), matching the heartbeat margin documented above. `CrashRecoveryService` on startup still sweeps `in_progress` rows with expired leases; with the shorter TTL, stale rows become claimable within 60s of a worker crash instead of 120s.
+
+## Amendment 2026-05-17 — connection budget
+
+The negative-consequence note above ("the worker holds an open Postgres connection for the lifetime of the process; counts against connection-pool budget on Azure Database for PostgreSQL if you ever migrate off Postgres-in-Docker-Compose") is no longer hypothetical. Per [[0038-managed-postgres]], the portal's operational Postgres now runs on Flexible Server Burstable B1ms. B1ms defaults `max_connections = 50`.
+
+Per saga-worker replica, the steady-state connection cost is approximately: 1 LISTEN connection (held open) + Npgsql pool (default `Maximum Pool Size = 20`, typically 1–3 in active use under thesis load). Portal-api adds its own Npgsql pool. At ≥4 saga-worker replicas (rung 1 of [[0037-saga-scaling-ladder]]) the headroom collapses fast.
+
+Two operator levers when the budget bites:
+
+```
+ALTER SYSTEM SET max_connections = 200;
+-- requires a Flexible Server restart; can be set via the Azure portal
+-- under Server parameters
+```
+
+Or introduce **PgBouncer** as a transaction-pooling front on the VM, in front of the saga-worker replicas (the LISTEN connection cannot go through transaction pooling — it must reach Postgres directly, but the bulk of pool traffic can). PgBouncer is one container in compose; ~5 MB image; documented as the rung-1 trigger-time mitigation in [[0037-saga-scaling-ladder]].
+
+This amendment is documentation only — no code change. The mitigation lever fires at the rung-1 trigger described in [[0037-saga-scaling-ladder]] and [[0038-managed-postgres]].

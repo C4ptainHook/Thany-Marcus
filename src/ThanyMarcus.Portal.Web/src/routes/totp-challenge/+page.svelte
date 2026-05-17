@@ -83,27 +83,17 @@
 
 <style>
   main {
-    font-family: system-ui, -apple-system, sans-serif;
     max-width: 28rem;
-    margin: 4rem auto;
-    padding: 0 1rem;
   }
   label {
-    display: block;
-    margin: 1rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: var(--space-4) 0;
   }
   input {
     display: block;
     width: 100%;
-    padding: 0.5rem;
-    font-size: 1.25rem;
     letter-spacing: 0.2em;
-  }
-  .error {
-    color: #b00020;
-  }
-  button {
-    padding: 0.5rem 1.5rem;
-    font-size: 1rem;
   }
 </style>

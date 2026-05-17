@@ -44,8 +44,15 @@ public static class TotpEndpoints
             var now = clock.GetCurrentInstant();
 
             var row = await db.TotpSecrets.SingleOrDefaultAsync(t => t.UserId == userId, ct);
+
             if (row is { EnabledAt: not null, DisabledAt: null })
-                return Results.Conflict(new { error = "already_enabled" });
+            {
+                if (string.IsNullOrWhiteSpace(body.CurrentCode))
+                    return Results.Json(new { error = "current_code_required" }, statusCode: StatusCodes.Status401Unauthorized);
+                var current = await totp.VerifyChallengeAsync(db, userId, body.CurrentCode, ct);
+                if (current is TotpChallengeResult.Failed)
+                    return Results.Json(new { error = "invalid_current_code" }, statusCode: StatusCodes.Status401Unauthorized);
+            }
 
             var (ciphertext, nonce, tag) = totp.Encrypt(body.Secret);
             if (row is null)
@@ -69,6 +76,7 @@ public static class TotpEndpoints
                 row.Tag = tag;
                 row.EnabledAt = now;
                 row.DisabledAt = null;
+                row.UpdatedAt = now;
             }
             await db.SaveChangesAsync(ct);
 

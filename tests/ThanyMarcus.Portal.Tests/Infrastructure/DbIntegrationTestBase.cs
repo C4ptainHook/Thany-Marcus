@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using NodaTime.Testing;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
+using ThanyMarcus.Shared.Database;
 
 namespace ThanyMarcus.Portal.Tests.Infrastructure;
 

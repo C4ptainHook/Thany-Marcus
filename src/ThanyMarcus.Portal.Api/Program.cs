@@ -23,11 +23,13 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.Callback;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Create;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Destroy;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderMeta;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Status;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
+using ThanyMarcus.Shared.Database;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -224,6 +226,7 @@ app.MapCloudEventsEndpoints();
 app.MapProviderMetaEndpoints();
 app.MapCloudCallbackEndpoints();
 app.MapDestroyCloudEndpoints();
+app.MapPluginTokenEndpoints();
 app.MapCaptchaEndpoints();
 
 app.MapFallbackToFile("index.html");

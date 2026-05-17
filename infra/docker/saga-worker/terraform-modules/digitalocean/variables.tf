@@ -75,21 +75,6 @@ variable "ssh_public_key" {
   default     = ""
 }
 
-variable "compose_url" {
-  description = "URL the droplet fetches docker-compose.yml from at first boot. Typically a pinned raw.githubusercontent.com URL."
-  type        = string
-}
-
-variable "caddyfile_url" {
-  description = "URL the droplet fetches the Caddyfile template from at first boot."
-  type        = string
-}
-
-variable "nginx_conf_url" {
-  description = "URL the droplet fetches the stub cloud-api nginx.conf from at first boot."
-  type        = string
-}
-
 variable "timezone" {
   description = "System timezone passed to timedatectl set-timezone."
   type        = string

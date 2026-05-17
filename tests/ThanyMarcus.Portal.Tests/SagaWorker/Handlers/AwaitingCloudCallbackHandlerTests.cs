@@ -45,7 +45,7 @@ public sealed class AwaitingCloudCallbackHandlerTests(PostgresFixture postgres) 
             ct: ct);
 
         var tracked = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
-        tracked.PhaseStartedAt = Clock.GetCurrentInstant() - Duration.FromMinutes(6);
+        tracked.PhaseStartedAt = Clock.GetCurrentInstant() - Duration.FromMinutes(16);
         await Db.SaveChangesAsync(ct);
         Db.ChangeTracker.Clear();
 

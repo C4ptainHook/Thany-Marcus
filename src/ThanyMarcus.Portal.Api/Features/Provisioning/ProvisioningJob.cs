@@ -1,6 +1,6 @@
 using System.Text.Json;
 using NodaTime;
-using ThanyMarcus.Portal.Api.Infrastructure.Database;
+using ThanyMarcus.Shared.Database;
 
 namespace ThanyMarcus.Portal.Api.Features.Provisioning;
 
@@ -18,6 +18,7 @@ public sealed class ProvisioningJob : IHasUpdatedAt
     public Instant? LeaseExpiresAt { get; set; }
     public string? ClaimedBy { get; set; }
     public short AttemptCount { get; set; }
+    public long TransitionVersion { get; set; }
     public Instant? PhaseStartedAt { get; set; }
     public JsonDocument EventsLog { get; set; } = null!;
     public JsonDocument? TfOutputs { get; set; }

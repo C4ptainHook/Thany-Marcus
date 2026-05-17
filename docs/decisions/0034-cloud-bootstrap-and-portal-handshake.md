@@ -1,6 +1,6 @@
 # ADR-0034: Cloud bootstrap and portal handshake — payloads, cadences, retry budgets
 
-Status: Accepted
+Status: Accepted (event-driven refactor 2026-05-17, CLOUD-001; §5 DNS ordering clarified 2026-05-17, PORTAL-010b)
 Date: 2026-05-16
 
 ## Context
@@ -53,9 +53,10 @@ Body (JSON):
 - **No auth.** `cert_ready` is non-secret. The portal hits this endpoint before it has any admin token in the post-restart / re-poll cases, and threading the token through would force extra wizard-state plumbing for zero security gain.
 - The other `/admin/*` endpoints (e.g. CLOUD-005's `/admin/register-with-portal`) DO require `cloud_admin_token`. `/admin/health` is the one exception.
 - `registration_status` lets the portal surface a separate failure mode (LE worked but the cloud failed to call back) from `failed_cert` (LE didn't work).
-- The cloud-side implementation is two-stage:
-  - **Stub (PORTAL-010 scope):** an alpine `cert-watcher` sidecar watches Caddy's cert dir via `inotify`, flips a JSON file the nginx placeholder serves.
-  - **Real (CLOUD-005):** the Cloud.Api reads cert presence via Caddy's admin API, joins it with its own bootstrap state.
+- The cloud-side implementation (as of CLOUD-001, 2026-05-17):
+  - `cert_ready` is read live from Caddy's admin API at `http://caddy:2019` (path `/pki/ca/local/active-cert/{hostname}` with fallback to `/config/apps/tls/certificates/automate`). No file watcher, no shared volume, no sidecar.
+  - `registration_status` is held in process memory by `BootstrapState`, transitioned by `PortalCallbackService` on success/failure of the callback POST.
+  - The placeholder `nginx + cert-watcher + register-with-portal.sh` chain from PORTAL-010 is **retired** in CLOUD-001.
 
 ### 3. Portal poll cadence (lifts DEC-003)
 
@@ -65,15 +66,19 @@ Body (JSON):
 
 ### 4. Cloud-side retry budget on the registration POST
 
-The `register-with-portal.sh` script (baked into cloud-init) retries the POST 8 times with exponential backoff: 1, 2, 4, 8, 16, 32, 64, 128 s → ~4-min total. After exhaustion, the script writes `registration_status: "failed"` into the `/admin/health` JSON and exits 1; systemd surfaces the failure via `systemctl status thany-cloud-register`.
+The callback is triggered by Caddy's built-in `cert_obtained` event (Caddyfile `events { on cert_obtained exec curl ... }`), which fires once when Let's Encrypt issues the cert. The event hits Cloud.Api at `POST /internal/caddy-events` on the internal Docker network, which dispatches `PortalCallbackService.PostRegistrationAsync` on the host lifetime.
 
-A 4-min budget is short. The portal does not go down for >4 min in the MVP profile (single-VM Compose; restart on crash via systemd). If a thesis demo run requires a longer budget, raise to 24 attempts (~17 min) — but for MVP, accept the 4-min ceiling and offer a manual-retry UX from the wizard (PORTAL-016 owns that flow).
+`PortalCallbackService` retries the POST 8 times with exponential backoff: 1, 2, 4, 8, 16, 32, 64, 128 s → ~4-min total per event firing. On success it flips `BootstrapState.RegistrationStatus = "registered"`; on a permanent 4xx it flips `"failed"`. The semaphore-style gate on `BootstrapState` dedupes concurrent invocations (Caddy fires `cert_obtained` on initial issuance and on every renewal).
 
-The cloud retries only on 5xx and network errors. A 4xx (validation failure on `enrollment_token`) means the registration is permanently broken — retrying cannot help — so the script logs and exits.
+The saga's `awaiting_cloud_callback` timeout was raised from 5 min to **15 min** as part of CLOUD-001 (defense-in-depth: even though the event fires within seconds of LE acquisition, slow LE acquisition itself can push past 5 min).
+
+The cloud retries only on 5xx and network errors. A 4xx (validation failure on `enrollment_token`) means the registration is permanently broken — retrying cannot help — so the service logs and gives up.
+
+**Historical note:** Prior to CLOUD-001, this was a `register-with-portal.sh` shell script wired into a `thany-cloud-register.service` systemd unit, which polled `/admin/health` (a file written by an `inotify`-watching sidecar). That chain coordinated one event through five different polling loops and accumulated four latent bugs during the PORTAL-011a smoke (cert-watcher path, Caddyfile directive ordering, dash-vs-bash `source`, HTTP→HTTPS redirect breaking the script's poll). CLOUD-001 deleted all of it. See PORTAL-011a notes for the failure history.
 
 ### 5. What cloud-init does **NOT** do
 
-- DNS — PORTAL-010b runs the Cloudflare A-record create *before* terraform apply. Cloud-init assumes `${hostname}` resolves to the VM's public IP.
+- DNS — PORTAL-010b runs the Cloudflare A-record create *after* terraform apply, in the `dns_creating` saga phase, because the droplet IP is only known once terraform returns. Cloud-init's LE retries (60 s × 30 min per DEC-003) absorb the DNS-propagation window; the system does not need a pre-create step. The earlier "pre-create" framing in `tickets-2026-05-13.md` line 91 is abandoned.
 - LLM model pulls — CLOUD-007 owns the first-boot Ollama pull. Cloud-init only brings up the placeholder API.
 - DB migrations — CLOUD-002 owns Postgres + pgvector. The PORTAL-010 compose scaffold does not include Postgres at all.
 - TLS termination override — Caddy gets prod LE by default. The `le_acme_ca` terraform var injects a staging-CA override when non-empty (used by `scripts/cloud-init-smoke.sh`).

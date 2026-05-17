@@ -34,9 +34,6 @@ public sealed class TerraformWorkspaceIntegrationTests
                     ["Provisioning:PortalUrl"] = "https://api.test/",
                     ["Provisioning:CloudInit:LeEmail"] = "letsencrypt@example.test",
                     ["Provisioning:CloudInit:ImageTag"] = "test",
-                    ["Provisioning:CloudInit:ComposeUrl"] = "https://example.test/docker-compose.yml",
-                    ["Provisioning:CloudInit:CaddyfileUrl"] = "https://example.test/Caddyfile.tpl",
-                    ["Provisioning:CloudInit:NginxConfUrl"] = "https://example.test/nginx.conf",
                 })
                 .Build();
 

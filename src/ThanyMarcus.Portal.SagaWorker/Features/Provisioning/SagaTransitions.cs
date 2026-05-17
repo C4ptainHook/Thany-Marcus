@@ -7,7 +7,7 @@ using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 
-internal static class SagaTransitions
+public static class SagaTransitions
 {
     public static async Task TransitionAsync(
         PortalDbContext db,
@@ -21,11 +21,13 @@ internal static class SagaTransitions
         CancellationToken ct = default)
     {
         var now = clock.GetCurrentInstant();
+        var owningWorker = job.ClaimedBy;
         job.Status = newStatus;
         job.NextVisibleAt = now + nextVisibleDelay;
         job.PhaseStartedAt = now;
         job.ClaimedBy = null;
         job.LeaseExpiresAt = null;
+        job.TransitionVersion += 1;
         if (tfOutputs is not null)
         {
             job.TfOutputs?.Dispose();
@@ -35,13 +37,22 @@ internal static class SagaTransitions
         {
             cloudMutation(cloud);
         }
-        await db.SaveChangesAsync(ct);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new SagaOwnershipLostException(job.Id, owningWorker, ex);
+        }
+
         await db.Database.ExecuteSqlRawAsync(
             "SELECT pg_notify('provisioning_job_changed', {0})",
             [job.Id.ToString()], ct);
     }
 
-    public static Task RescheduleAsync(
+    public static async Task RescheduleAsync(
         PortalDbContext db,
         IClock clock,
         ProvisioningJob job,
@@ -49,9 +60,18 @@ internal static class SagaTransitions
         CancellationToken ct = default)
     {
         var now = clock.GetCurrentInstant();
+        var owningWorker = job.ClaimedBy;
         job.NextVisibleAt = now + nextVisibleDelay;
         job.ClaimedBy = null;
         job.LeaseExpiresAt = null;
-        return db.SaveChangesAsync(ct);
+        job.TransitionVersion += 1;
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new SagaOwnershipLostException(job.Id, owningWorker, ex);
+        }
     }
 }

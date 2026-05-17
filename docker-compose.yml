@@ -1,22 +1,4 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: portal_dev
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    networks: [portal]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d portal_dev"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   portal-api:
     build:
       context: .
@@ -25,16 +7,13 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Portal: Host=postgres;Port=5432;Username=postgres;Password=postgres;Database=portal_dev
+      ConnectionStrings__Portal: ${PORTAL_DB_CONNECTION_STRING}
       DataProtection__KeyRingPath: /var/lib/portal/data-protection-keys
       Google__ClientId: ${GOOGLE_CLIENT_ID:-}
       Google__ClientSecret: ${GOOGLE_CLIENT_SECRET:-}
     volumes:
       - dp_keys:/var/lib/portal/data-protection-keys
     networks: [portal]
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health/ready || exit 1"]
       interval: 10s
@@ -48,15 +27,12 @@ services:
     restart: unless-stopped
     environment:
       DOTNET_ENVIRONMENT: Production
-      ConnectionStrings__Portal: Host=postgres;Port=5432;Username=postgres;Password=postgres;Database=portal_dev
+      ConnectionStrings__Portal: ${PORTAL_DB_CONNECTION_STRING}
       DataProtection__KeyRingPath: /var/lib/portal/data-protection-keys
       Provisioning__PortalUrl: ${PROVISIONING_PORTAL_URL}
       Provisioning__CloudInit__LeEmail: ${CLOUDINIT_LE_EMAIL:-letsencrypt@thany.click}
       Provisioning__CloudInit__LeAcmeCa: ${CLOUDINIT_LE_ACME_CA:-}
       Provisioning__CloudInit__ImageTag: ${CLOUDINIT_IMAGE_TAG:-main}
-      Provisioning__CloudInit__ComposeUrl: ${CLOUDINIT_COMPOSE_URL}
-      Provisioning__CloudInit__CaddyfileUrl: ${CLOUDINIT_CADDYFILE_URL}
-      Provisioning__CloudInit__NginxConfUrl: ${CLOUDINIT_NGINX_CONF_URL}
       Provisioning__CloudInit__SshPublicKey: ${CLOUDINIT_SSH_PUBLIC_KEY:-}
       Cloudflare__ZoneId: ${CLOUDFLARE_ZONE_ID}
       Cloudflare__ApiToken: ${CLOUDFLARE_API_TOKEN}
@@ -64,9 +40,6 @@ services:
       - dp_keys:/var/lib/portal/data-protection-keys
       - terraform_data:/var/lib/portal/terraform
     networks: [portal]
-    depends_on:
-      postgres:
-        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -87,7 +60,6 @@ services:
         condition: service_healthy
 
 volumes:
-  pg_data:
   dp_keys:
   terraform_data:
   caddy_data:

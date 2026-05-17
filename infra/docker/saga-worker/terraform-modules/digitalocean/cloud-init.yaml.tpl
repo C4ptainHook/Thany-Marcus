@@ -17,7 +17,7 @@ users:
 ssh_pwauth: false
 
 package_update: true
-package_upgrade: true
+package_upgrade: false
 packages:
   - unattended-upgrades
   - ufw
@@ -55,6 +55,7 @@ write_files:
       PORTAL_CALLBACK_URL=${portal_callback_url}
       CLOUD_ADMIN_TOKEN=$${CLOUD_ADMIN_TOKEN}
       JWT_SIGNING_KEY=$${JWT_SIGNING_KEY}
+      POSTGRES_PASSWORD=$${POSTGRES_PASSWORD}
 
   - path: /etc/thany-cloud/Caddyfile.tpl
     owner: root:root
@@ -63,57 +64,26 @@ write_files:
       {
         email $${LE_EMAIL}
         # ACME_CA_PLACEHOLDER
+        admin caddy:2019
+        events {
+          on cert_obtained exec curl -fsS -X POST \
+            http://cloud-api:8080/internal/caddy-events \
+            -H "Content-Type: application/json" \
+            -d '{"event":"cert_obtained","identifier":"{event.data.identifier}"}'
+        }
       }
       $${DOMAIN} {
         encode gzip
-        reverse_proxy /admin/* cloud-api:8080
-        reverse_proxy /api/*   cloud-api:8080
-        respond 404
+        handle /admin/* {
+          reverse_proxy cloud-api:8080
+        }
+        handle /api/* {
+          reverse_proxy cloud-api:8080
+        }
+        handle {
+          respond 404
+        }
       }
-
-  - path: /usr/local/bin/register-with-portal.sh
-    owner: root:root
-    permissions: "0755"
-    content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-      ENV_FILE=/opt/thany-cloud/.env
-      # shellcheck disable=SC1090
-      source "$ENV_FILE"
-
-      DEADLINE=$(( $(date +%s) + 1800 ))
-      while [[ $(date +%s) -lt $DEADLINE ]]; do
-        if curl -fsS "http://127.0.0.1/admin/health" -H "Host: $DOMAIN" \
-             | jq -e '.cert_ready == true' > /dev/null 2>&1; then
-          break
-        fi
-        sleep 5
-      done
-
-      if ! curl -fsS "http://127.0.0.1/admin/health" -H "Host: $DOMAIN" \
-            | jq -e '.cert_ready == true' > /dev/null 2>&1; then
-        echo "Cert not ready after 30 min; aborting registration" >&2
-        exit 1
-      fi
-
-      ATTEMPT=0
-      while (( ATTEMPT < 8 )); do
-        if curl -fsS -X POST "$PORTAL_CALLBACK_URL" \
-             -H 'Content-Type: application/json' \
-             --data "$(jq -n \
-               --arg cid "$CLOUD_ID" \
-               --arg et "$ENROLLMENT_TOKEN" \
-               --arg cat "$CLOUD_ADMIN_TOKEN" \
-               '{cloud_id:$cid, enrollment_token:$et, cloud_admin_token:$cat}')"; then
-          echo "Registered with portal"
-          exit 0
-        fi
-        sleep $(( 2 ** ATTEMPT ))
-        ATTEMPT=$(( ATTEMPT + 1 ))
-      done
-
-      echo "Registration failed after $ATTEMPT attempts" >&2
-      exit 1
 
   - path: /etc/systemd/system/thany-cloud.service
     owner: root:root
@@ -132,25 +102,6 @@ write_files:
       User=${admin_user}
       ExecStart=/usr/bin/docker compose up -d
       ExecStop=/usr/bin/docker compose down
-
-      [Install]
-      WantedBy=multi-user.target
-
-  - path: /etc/systemd/system/thany-cloud-register.service
-    owner: root:root
-    permissions: "0644"
-    content: |
-      [Unit]
-      Description=Register cloud with portal
-      Requires=thany-cloud.service
-      After=thany-cloud.service
-
-      [Service]
-      Type=oneshot
-      RemainAfterExit=yes
-      ExecStart=/usr/local/bin/register-with-portal.sh
-      StandardOutput=append:/var/log/thany-cloud/register.log
-      StandardError=append:/var/log/thany-cloud/register.log
 
       [Install]
       WantedBy=multi-user.target
@@ -176,6 +127,73 @@ write_files:
       Unattended-Upgrade::Automatic-Reboot "true";
       Unattended-Upgrade::Automatic-Reboot-Time "03:30";
 
+  - path: /opt/thany-cloud/docker-compose.yml
+    owner: root:root
+    permissions: "0644"
+    content: |
+      services:
+        caddy:
+          image: caddy:2.7-alpine
+          restart: unless-stopped
+          ports:
+            - "80:80"
+            - "443:443"
+          volumes:
+            - ./Caddyfile:/etc/caddy/Caddyfile:ro
+            - caddy-data:/data
+            - caddy-config:/config
+          depends_on:
+            cloud-api:
+              condition: service_healthy
+          networks: [cloud]
+
+        cloud-api:
+          image: ghcr.io/bboiko/thany-cloud-api:$${IMAGE_TAG:-latest}
+          restart: unless-stopped
+          environment:
+            ASPNETCORE_ENVIRONMENT: Production
+            ASPNETCORE_URLS: "http://+:8080"
+            ConnectionStrings__Cloud: Host=postgres;Port=5432;Username=cloud;Password=$${POSTGRES_PASSWORD};Database=cloud
+            Caddy__AdminUrl: http://caddy:2019
+            Bootstrap__CloudId: $${CLOUD_ID}
+            Bootstrap__Hostname: $${DOMAIN}
+            Bootstrap__EnrollmentToken: $${ENROLLMENT_TOKEN}
+            Bootstrap__CloudAdminToken: $${CLOUD_ADMIN_TOKEN}
+            Bootstrap__PortalCallbackUrl: $${PORTAL_CALLBACK_URL}
+          depends_on:
+            postgres:
+              condition: service_healthy
+          networks: [cloud]
+          healthcheck:
+            test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health/live || exit 1"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+        postgres:
+          image: postgres:16-alpine
+          restart: unless-stopped
+          environment:
+            POSTGRES_USER: cloud
+            POSTGRES_PASSWORD: $${POSTGRES_PASSWORD}
+            POSTGRES_DB: cloud
+          volumes:
+            - pg-data:/var/lib/postgresql/data
+          networks: [cloud]
+          healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U cloud -d cloud"]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+      volumes:
+        caddy-data:
+        caddy-config:
+        pg-data:
+
+      networks:
+        cloud:
+
 runcmd:
   - ufw default deny incoming
   - ufw default allow outgoing
@@ -195,26 +213,25 @@ runcmd:
 
   - openssl rand -hex 32 > /run/cloud-secrets/cloud_admin_token
   - openssl rand -hex 32 > /run/cloud-secrets/jwt_signing_key
-  - chmod 0600 /run/cloud-secrets/cloud_admin_token /run/cloud-secrets/jwt_signing_key
+  - openssl rand -hex 32 > /run/cloud-secrets/postgres_password
+  - chmod 0600 /run/cloud-secrets/cloud_admin_token /run/cloud-secrets/jwt_signing_key /run/cloud-secrets/postgres_password
 
   - |
     set -a
     CLOUD_ADMIN_TOKEN=$(cat /run/cloud-secrets/cloud_admin_token)
     JWT_SIGNING_KEY=$(cat /run/cloud-secrets/jwt_signing_key)
+    POSTGRES_PASSWORD=$(cat /run/cloud-secrets/postgres_password)
     set +a
     envsubst < /etc/thany-cloud/cloud.env.tpl > /opt/thany-cloud/.env
     chown ${admin_user}:${admin_user} /opt/thany-cloud/.env
     chmod 0640 /opt/thany-cloud/.env
 
-  - curl -fsSL "${compose_url}" -o /opt/thany-cloud/docker-compose.yml
-  - curl -fsSL "${caddyfile_url}" -o /etc/thany-cloud/Caddyfile.tpl.remote || true
-  - curl -fsSL "${nginx_conf_url}" -o /opt/thany-cloud/nginx.conf
-  - chown ${admin_user}:${admin_user} /opt/thany-cloud/docker-compose.yml /opt/thany-cloud/nginx.conf
+  - chown ${admin_user}:${admin_user} /opt/thany-cloud/docker-compose.yml
 
   - |
     set -a
     # shellcheck disable=SC1091
-    source /opt/thany-cloud/.env
+    . /opt/thany-cloud/.env
     set +a
     envsubst '$DOMAIN $LE_EMAIL' < /etc/thany-cloud/Caddyfile.tpl > /opt/thany-cloud/Caddyfile
     if [ -n "${le_acme_ca}" ]; then
@@ -224,12 +241,11 @@ runcmd:
 
   - systemctl daemon-reload
   - systemctl enable --now thany-cloud.service
-  - systemctl enable --now thany-cloud-register.service
 
-  - shred -u /run/cloud-secrets/cloud_admin_token /run/cloud-secrets/jwt_signing_key || true
+  - shred -u /run/cloud-secrets/cloud_admin_token /run/cloud-secrets/jwt_signing_key /run/cloud-secrets/postgres_password || true
 
   - systemctl restart ssh
   - systemctl enable --now unattended-upgrades
   - systemctl restart fail2ban || true
 
-final_message: "Cloud-init completed in $UPTIME seconds. Caddy + registration running async."
+final_message: "Cloud-init completed in $UPTIME seconds. Caddy + Cloud.Api running; registration fires on cert_obtained event."

@@ -1,77 +1,139 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { invalidateAll } from '$app/navigation';
   import { fetchCaptchaState } from '$lib/turnstileClient';
   import TurnstileWidget from '$lib/TurnstileWidget.svelte';
+  import CloudIdentityCard from '$lib/CloudIdentityCard.svelte';
+  import CostCard from '$lib/CostCard.svelte';
+  import PluginTokenCard from '$lib/PluginTokenCard.svelte';
+  import DangerZone from '$lib/DangerZone.svelte';
+  import OnboardingChecklist from '$lib/OnboardingChecklist.svelte';
+  import ProvisioningInFlight from '$lib/ProvisioningInFlight.svelte';
+  import {
+    isInFlight, isFailed, isTerminalEmpty,
+    IN_FLIGHT_DESTROY_STATUSES,
+    type CloudHealthz, type CloudStatusResponse,
+  } from '$lib/types/cloud';
   import type { MeResponse } from '$lib/types/auth';
 
-  let { data }: { data: { me: MeResponse | null } } = $props();
+  let {
+    data,
+  }: { data: { me: MeResponse | null; cloud: CloudStatusResponse | null } } = $props();
 
   let captchaRequired = $state(false);
   let siteKey = $state('');
   let turnstileToken = $state('');
 
-  onMount(async () => {
-    if (data.me) return;
-    const state = await fetchCaptchaState('signin');
-    captchaRequired = state.required;
-    siteKey = state.siteKey;
-  });
+  let healthz = $state<CloudHealthz | null>(null);
 
-  function onCaptchaToken(token: string) {
-    turnstileToken = token;
-  }
+  onMount(async () => {
+    if (!data.me) {
+      const state = await fetchCaptchaState('signin');
+      captchaRequired = state.required;
+      siteKey = state.siteKey;
+      return;
+    }
+    if (data.cloud && data.cloud.provisioningStatus === 'succeeded') {
+      try {
+        const r = await fetch(`https://${data.cloud.hostname}/healthz`, { signal: AbortSignal.timeout(3000) });
+        if (r.ok) healthz = (await r.json()) as CloudHealthz;
+      } catch { /* fail soft */ }
+    }
+  });
 
   function signInHref() {
     return captchaRequired && turnstileToken
       ? `/api/auth/signin?turnstile=${encodeURIComponent(turnstileToken)}`
       : '/api/auth/signin';
   }
+
+  function onCaptchaToken(token: string) {
+    turnstileToken = token;
+  }
+
+  let view = $derived.by(() => {
+    if (!data.me) return 'signed-out' as const;
+    if (!data.cloud) return 'onboarding' as const;
+    const s = data.cloud.provisioningStatus;
+    if (isInFlight(s)) {
+      const mode = (IN_FLIGHT_DESTROY_STATUSES as string[]).includes(s) ? 'destroy' : 'create';
+      return { kind: 'in-flight', mode } as const;
+    }
+    if (s === 'succeeded')      return 'dashboard' as const;
+    if (isFailed(s))            return 'failed' as const;
+    if (isTerminalEmpty(s))     return 'empty' as const;
+    return 'onboarding' as const;
+  });
 </script>
 
 <main>
-  <h1>Thany-Marcus Portal</h1>
-  {#if data.me}
-    <p>Signed in as <strong>{data.me.name}</strong> ({data.me.email})</p>
-    {#if data.me.profilePictureUrl}
-      <img src={data.me.profilePictureUrl} alt="" width="64" height="64" />
-    {/if}
-    <p class="muted">TOTP state: {data.me.totp}</p>
-    <p>
-      <a class="primary-button" href="/clouds/new">Create cloud</a>
-    </p>
-    <p>
-      <a href="/settings/security">Security settings</a>
-    </p>
-    <form method="post" action="/api/auth/signout">
-      <button type="submit">Sign out</button>
-    </form>
-  {:else}
+  {#if view === 'signed-out'}
+    <h1>Thany-Marcus</h1>
+    <p class="muted">Your own cloud for Obsidian — provisioned in minutes, destroyed any time.</p>
     {#if captchaRequired && siteKey}
       <TurnstileWidget {siteKey} onToken={onCaptchaToken} />
     {/if}
-    {#if captchaRequired && !turnstileToken}
-      <p><a aria-disabled="true" class="disabled-link">Sign in with Google</a></p>
-    {:else}
-      <p><a href={signInHref()}>Sign in with Google</a></p>
+    <p>
+      {#if captchaRequired && !turnstileToken}
+        <a class="btn-primary disabled" aria-disabled="true">Sign in with Google</a>
+      {:else}
+        <a class="btn btn-primary" href={signInHref()}>Sign in with Google</a>
+      {/if}
+    </p>
+
+  {:else if view === 'onboarding'}
+    {#if data.me}
+      <h1>Welcome, {data.me.name.split(' ')[0]}</h1>
+      <OnboardingChecklist me={data.me} onPassphraseSet={() => invalidateAll()} />
     {/if}
+
+  {:else if typeof view === 'object' && view.kind === 'in-flight'}
+    {#if data.cloud}
+      <ProvisioningInFlight cloud={data.cloud} mode={view.mode} onTerminal={() => invalidateAll()} />
+    {/if}
+
+  {:else if view === 'dashboard'}
+    {#if data.cloud}
+      <CloudIdentityCard cloud={data.cloud} />
+      <CostCard cloud={data.cloud} workerUptimeMonthSeconds={healthz?.workerUptimeMonthSeconds ?? null} />
+      <PluginTokenCard cloudId={data.cloud.cloudId} cloudHostname={data.cloud.hostname} />
+      <DangerZone
+        cloudId={data.cloud.cloudId}
+        hostname={data.cloud.hostname}
+        onDestroyEnqueued={() => invalidateAll()}
+      />
+    {/if}
+
+  {:else if view === 'failed'}
+    {#if data.cloud}
+      <section class="card failure">
+        <h2 class="error">Provisioning failed</h2>
+        <p class="muted">Status: {data.cloud.provisioningStatus}</p>
+        <p>Something went wrong while provisioning your cloud.</p>
+        <p>
+          <a class="btn btn-primary" href="/clouds/new">Try again</a>
+        </p>
+      </section>
+    {/if}
+
+  {:else if view === 'empty'}
+    <section class="card">
+      <h2>Provision your cloud</h2>
+      <p class="muted">You don&rsquo;t have an active cloud right now.</p>
+      <p>
+        <a class="btn btn-primary" href="/clouds/new">Provision cloud</a>
+      </p>
+    </section>
   {/if}
 </main>
 
 <style>
-  h1 {
-    font-size: 2rem;
-    margin-bottom: var(--space-2);
-  }
-  .disabled-link {
-    color: var(--color-disabled);
+  .failure { border-color: var(--error); }
+  .disabled {
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border-color: var(--border);
     cursor: not-allowed;
-  }
-  .primary-button {
-    display: inline-block;
-    padding: var(--space-2) var(--space-3);
-    background: var(--color-text);
-    color: var(--color-bg);
-    border-radius: var(--radius);
     text-decoration: none;
   }
 </style>

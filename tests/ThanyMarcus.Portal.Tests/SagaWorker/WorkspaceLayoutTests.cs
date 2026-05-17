@@ -79,7 +79,7 @@ public sealed class WorkspaceLayoutTests
         tfvars.ShouldContain("\"https://test.example/\"");
         tfvars.ShouldContain("portal_url");
         tfvars.ShouldContain("le_email");
-        tfvars.ShouldContain("compose_url");
+        tfvars.ShouldNotContain("compose_url");
         tfvars.ShouldContain(cloud.Id.ToString());
         tfvars.ShouldContain(cloud.Hostname);
     }
@@ -128,9 +128,6 @@ public sealed class WorkspaceLayoutTests
                 ["Provisioning:PortalUrl"] = portalUrl,
                 ["Provisioning:CloudInit:LeEmail"] = "letsencrypt@example.test",
                 ["Provisioning:CloudInit:ImageTag"] = "test",
-                ["Provisioning:CloudInit:ComposeUrl"] = "https://example.test/docker-compose.yml",
-                ["Provisioning:CloudInit:CaddyfileUrl"] = "https://example.test/Caddyfile.tpl",
-                ["Provisioning:CloudInit:NginxConfUrl"] = "https://example.test/nginx.conf",
             })
             .Build();
 

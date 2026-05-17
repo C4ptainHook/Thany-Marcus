@@ -14,25 +14,37 @@
 
 | Credential | Where to get it | Where it goes |
 |---|---|---|
-| Google OAuth client ID + secret | Google Cloud Console → APIs & Services → Credentials. Authorized redirect URI: `<ngrok-public-url>/signin-google` | `.env` file at repo root |
+| Google OAuth client ID + secret | Google Cloud Console → APIs & Services → Credentials. Authorized redirect URI: `https://dev.thany.click/signin-google` (stable, never changes) | `.env` file at repo root |
 | DigitalOcean API token | DO Cloud → API → Generate New Token. Scope: write (drop everything except the four you need: droplets, volumes, firewalls, monitoring) | Pasted into the wizard's Provider credentials section (step 4 below) |
 | Cloudflare API token | dash.cloudflare.com → My Profile → API Tokens → Create Token → "Edit zone DNS" → Zone: `thany.click` | `.env` file at repo root |
 | Cloudflare Zone ID for `thany.click` | dash.cloudflare.com → `thany.click` → Overview → right sidebar → "Zone ID" | `.env` file at repo root |
-| ngrok auth token (one-time per machine) | dashboard.ngrok.com → Your Authtoken | `ngrok config add-authtoken <token>` |
+| Cloudflare Tunnel `thany-dev` (one-time per machine) | `cloudflared tunnel login` → `cloudflared tunnel create thany-dev` → `cloudflared tunnel route dns thany-dev dev.thany.click` | `~/.cloudflared/cert.pem` + `~/.cloudflared/<tunnel-uuid>.json` |
 
 ### Tools installed
 
 ```bash
 # macOS via brew
-brew install ngrok doctl  # ngrok for public URL; doctl optional for verification
-brew install --cask docker  # Docker Desktop, if not installed
+brew install cloudflared doctl  # cloudflared for stable public URL; doctl optional for verification
+brew install --cask docker      # Docker Desktop, if not installed
 
 # Verify
 docker --version           # 24+
 docker compose version     # v2+
-ngrok version              # 3+
+cloudflared --version      # 2024+
 dotnet --list-runtimes     # net10.0 present (for migrations)
 ```
+
+`~/.cloudflared/config.yml` should look like:
+```yaml
+tunnel: <tunnel-uuid>
+credentials-file: /Users/bboiko/.cloudflared/<tunnel-uuid>.json
+ingress:
+  - hostname: dev.thany.click
+    service: http://localhost:80
+  - service: http_status:404
+```
+
+Run `cloudflared tunnel list` to confirm `thany-dev` exists; if not, follow the prereqs row above to create it. The tunnel UUID is reusable across smokes.
 
 ### `.env` file at repo root
 
@@ -47,27 +59,25 @@ GOOGLE_CLIENT_SECRET=<your-secret>
 CLOUDFLARE_ZONE_ID=<thany.click zone id>
 CLOUDFLARE_API_TOKEN=<cf-token-scoped-to-thany.click-DNS>
 
-# Portal callback URL (filled in step 0.3 once ngrok is up)
-PROVISIONING_PORTAL_URL=
+# Portal callback URL — stable via Cloudflare Tunnel; no per-session edit needed
+PROVISIONING_PORTAL_URL=https://dev.thany.click
 ```
 
-The compose stack reads these. `saga-worker`'s `appsettings.json` defaults are overridden by `Provisioning__PortalUrl`, `Cloudflare__ZoneId`, `Cloudflare__ApiToken` (double-underscore = nested key in .NET config).
-
-**Note:** the current `docker-compose.yml` doesn't yet thread these vars into `saga-worker`. You'll need to add the three `environment:` lines (sub-edit below in step 0.1).
+The compose stack reads these. `saga-worker`'s `appsettings.json` defaults are overridden by `Provisioning__PortalUrl`, `Cloudflare__ZoneId`, `Cloudflare__ApiToken` (double-underscore = nested key in .NET config). The PORTAL-011a bundle already threads these env vars into `saga-worker` — no manual compose edit required.
 
 ---
 
 ## Step 0 — Stack baseline
 
-### 0.1 — wire `.env` vars into `saga-worker`
+### 0.1 — verify `.env` wiring (no edit required)
 
-One-time edit to `docker-compose.yml` if not already done. Under `saga-worker.environment`, add:
+The compose stack reads `PROVISIONING_PORTAL_URL`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN` directly from `.env`. Confirm:
 
-```yaml
-    Provisioning__PortalUrl: ${PROVISIONING_PORTAL_URL}
-    Cloudflare__ZoneId: ${CLOUDFLARE_ZONE_ID}
-    Cloudflare__ApiToken: ${CLOUDFLARE_API_TOKEN}
+```bash
+grep -E "PROVISIONING_PORTAL_URL|CLOUDFLARE_ZONE_ID|CLOUDFLARE_API_TOKEN" .env
 ```
+
+All three should be set. If any is empty, see the credentials table above.
 
 ### 0.2 — bring up postgres + run migrations
 
@@ -87,31 +97,21 @@ docker compose exec -T postgres psql -U postgres -d portal_dev -c "\d provisioni
 # Should show both: user_id uuid NOT NULL, enrollment_token text
 ```
 
-### 0.3 — start ngrok and capture the public URL
+### 0.3 — start the Cloudflare Tunnel
 
 ```bash
-ngrok http 80 --log=stdout > /tmp/ngrok.log &
+cloudflared tunnel run thany-dev > /tmp/cloudflared.log 2>&1 &
 sleep 3
-NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
-echo "ngrok URL: $NGROK_URL"
-# Example: https://abc123-1-2-3-4.ngrok-free.app
+TUNNEL_URL=https://dev.thany.click
+curl -sIo /dev/null -w "tunnel: %{http_code}\n" "$TUNNEL_URL/health/live"
+# Expect: 502 (portal-api not up yet) or 200 once it is. Anything other than 5xx-connect means the tunnel itself is up.
 ```
 
-**Update `.env`** with the ngrok URL:
+The URL is **stable across smokes** — `https://dev.thany.click` is bound to your `thany-dev` tunnel via the one-time `cloudflared tunnel route dns` you ran in prereqs.
 
-```bash
-sed -i.bak "s|^PROVISIONING_PORTAL_URL=.*|PROVISIONING_PORTAL_URL=$NGROK_URL|" .env
-grep PROVISIONING_PORTAL_URL .env
-```
+**Google OAuth redirect URI is also stable**: it's `https://dev.thany.click/signin-google`. Set it once in Google Cloud Console → APIs & Services → Credentials → your OAuth 2.0 Client → Authorized redirect URIs. **No per-smoke edit required** (this is the main reason to use cloudflared over ngrok).
 
-**Update your Google OAuth client's authorized redirect URI** to `${NGROK_URL}/signin-google`:
-
-1. Open [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
-2. Click your OAuth 2.0 Client ID for this project.
-3. Under **Authorized redirect URIs**, add `${NGROK_URL}/signin-google` (paste the full URL including the ngrok subdomain — the trailing path is literally `/signin-google`, not `/signin-google/`).
-4. **Save**.
-
-Google won't accept the OAuth callback otherwise — you'll get `redirect_uri_mismatch` in step 1. **This must be redone every time the ngrok URL changes** (free ngrok rotates URLs across sessions; paid ngrok keeps a stable subdomain).
+If you see `redirect_uri_mismatch` in step 1, that means the entry was never added — go set it now.
 
 ### 0.4 — bring up the rest of the stack
 
@@ -136,13 +136,13 @@ docker compose exec saga-worker terraform -chdir=/app/terraform-modules/digitalo
 # Expect: "Terraform has been successfully initialized!" with no provider download
 ```
 
-### 0.5 — confirm the SPA loads through ngrok
+### 0.5 — confirm the SPA loads through the tunnel
 
 ```bash
-open $NGROK_URL   # or paste into browser
+open $TUNNEL_URL   # or paste https://dev.thany.click into browser
 ```
 
-You should see the landing page with **"Sign in with Google"**. If you hit ngrok's interstitial warning page, click "Visit Site" — ngrok free shows this once per session.
+You should see the landing page with **"Sign in with Google"**. No interstitial — Cloudflare Tunnel routes traffic directly.
 
 ---
 
@@ -153,7 +153,7 @@ In the browser:
 2. Google OAuth flow. Pick your test account.
 3. After redirect you should be back on the landing page, signed in, showing "Signed in as <your name>" + a **Create cloud** button + a "Sign out" form.
 
-If Google's redirect lands on a 400 page, the OAuth redirect URI in Google Cloud Console doesn't match `${NGROK_URL}/signin-google`. Fix it there and reload.
+If Google's redirect lands on a 400 page, the OAuth redirect URI in Google Cloud Console doesn't match `https://dev.thany.click/signin-google`. Fix it there and reload.
 
 **Verify via DB:**
 ```bash
@@ -164,7 +164,7 @@ docker compose exec -T postgres psql -U postgres -d portal_dev -c "SELECT id, em
 
 ## Step 2 — Enable TOTP
 
-1. Navigate to `${NGROK_URL}/settings/security`.
+1. Navigate to `${TUNNEL_URL}/settings/security`.
 2. Click **Enable TOTP**.
 3. Scan QR with your authenticator (or copy the secret).
 4. Enter the 6-digit code → **Verify and enable**.
@@ -206,7 +206,7 @@ The unlock cache TTL is sliding 10 min. The next infra-op within that window won
 
 ## Step 5 — Launch the wizard
 
-1. Navigate to `${NGROK_URL}/` (or click any "back to home" link).
+1. Navigate to `${TUNNEL_URL}/` (or click any "back to home" link).
 2. Click **Create cloud**.
 3. Lands on `/clouds/new`. Target step renders.
 
@@ -351,14 +351,14 @@ HOSTNAME=$(docker compose exec -T postgres psql -U postgres -d portal_dev -tA -c
 COOKIE='YOUR_COOKIE_HERE'
 
 # Unlock (step-up) — passphrase
-curl -s -X POST "$NGROK_URL/api/auth/unlock" \
+curl -s -X POST "$TUNNEL_URL/api/auth/unlock" \
   -H "Cookie: .AspNetCore.Cookies=$COOKIE" \
   -H "content-type: application/json" \
   -d "{\"passphrase\":\"YOUR_PASSPHRASE\"}"
 # Expect: 204
 
 # Destroy
-curl -s -X POST "$NGROK_URL/api/clouds/$CLOUD_ID/destroy" \
+curl -s -X POST "$TUNNEL_URL/api/clouds/$CLOUD_ID/destroy" \
   -H "Cookie: .AspNetCore.Cookies=$COOKIE" \
   -H "content-type: application/json" \
   -d "{\"confirmHostname\":\"$HOSTNAME\"}"
@@ -400,10 +400,11 @@ docker compose down            # stops services, keeps volumes
 docker compose down -v         # nukes volumes (postgres, terraform state, caddy data)
 ```
 
-Stop ngrok:
+Stop the tunnel:
 ```bash
-kill %1   # or pkill ngrok
+kill %1   # or pkill cloudflared
 ```
+(Tunnel state persists on Cloudflare's side — next `cloudflared tunnel run thany-dev` brings the same `dev.thany.click` URL back.)
 
 ---
 
@@ -411,7 +412,7 @@ kill %1   # or pkill ngrok
 
 ### Wizard 401 on Provision after Unlock modal
 
-The cookie domain may not match ngrok's. Check `Set-Cookie` on `/signin-google` response — `Path=/` is required. If you see `Domain=` with a different value, fix the Cookie configuration in Portal.Api Program.cs (PORTAL-003 area).
+The cookie domain may not match `dev.thany.click`. Check `Set-Cookie` on `/signin-google` response — `Path=/` is required. If you see `Domain=` with a different value, fix the Cookie configuration in Portal.Api Program.cs (PORTAL-003 area).
 
 ### Saga stuck at `tf_planning` indefinitely
 
@@ -424,11 +425,12 @@ If empty or expired and the user already navigated away, the `TfPlanningHandler`
 
 ### Saga stuck at `awaiting_cloud_callback` → timeout
 
-Most common: ngrok URL is stale or unreachable from the droplet. Test from your dev machine first:
+Most common: the Cloudflare Tunnel is down on your dev box, or `cloudflared` was killed. Test from your dev machine first:
 ```bash
-curl -v "$NGROK_URL/health/ready"   # should 200
+curl -v "$TUNNEL_URL/health/ready"   # should 200
+pgrep -lf cloudflared                 # should show the running tunnel process
 ```
-Then from inside the droplet (need SSH or DO web console). If the droplet can't resolve/reach the ngrok URL, the cloud-init's `register-with-portal.sh` will exhaust retries and the saga will time out.
+Then from inside the droplet (need SSH or DO web console — droplet's `register-with-portal.sh` log lives at `/var/log/thany-cloud/register.log`). If the droplet can resolve `dev.thany.click` but the tunnel is down on your side, the cloud-init's `register-with-portal.sh` will exhaust retries and the saga will time out.
 
 Less common: `ENROLLMENT_TOKEN` mismatch. Check `events_log`:
 ```bash
@@ -500,6 +502,6 @@ Tag every resource `managed-by-portal` in PORTAL-008's module → bulk delete wi
 - Cloud-side data plane (CLOUD-001..006) — `/admin/health` works (placeholder nginx); `/api/*` returns 404 from Caddy's catch-all.
 - Multi-cloud (PORTAL-009 Azure) — wizard only offers DO.
 - Cloud-list dashboard (PORTAL-012) — `/` only has a "Create cloud" button; no listing of past clouds.
-- Production deployment of the portal itself (PORTAL-017) — runbook uses ngrok against localhost.
+- Production deployment of the portal itself (PORTAL-017) — runbook routes traffic to localhost via Cloudflare Tunnel (`dev.thany.click`).
 
 These are deliberate scope cuts per the 011-bundle handoff.

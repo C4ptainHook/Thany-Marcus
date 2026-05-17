@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using NodaTime;
 
-namespace ThanyMarcus.Portal.Api.Infrastructure.Database;
+namespace ThanyMarcus.Shared.Database;
 
 public sealed class TimestampInterceptor(IClock clock) : SaveChangesInterceptor
 {
