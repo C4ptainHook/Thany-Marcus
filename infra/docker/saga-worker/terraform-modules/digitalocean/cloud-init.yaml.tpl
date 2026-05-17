@@ -148,7 +148,7 @@ write_files:
           networks: [cloud]
 
         cloud-api:
-          image: ghcr.io/bboiko/thany-cloud-api:$${IMAGE_TAG:-latest}
+          image: ghcr.io/c4ptainhook/thany-cloud-api:$${IMAGE_TAG:-latest}
           restart: unless-stopped
           environment:
             ASPNETCORE_ENVIRONMENT: Production
