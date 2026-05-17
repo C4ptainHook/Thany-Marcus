@@ -194,7 +194,7 @@ public sealed class CloudInitTemplateRenderTests
         compose.ShouldContain("caddy:");
         compose.ShouldContain("cloud-api:");
         compose.ShouldContain("postgres:");
-        compose.ShouldContain("ghcr.io/bboiko/thany-cloud-api");
+        compose.ShouldContain("ghcr.io/c4ptainhook/thany-cloud-api");
         compose.ShouldContain("Bootstrap__CloudId");
         compose.ShouldContain("Bootstrap__PortalCallbackUrl");
         compose.ShouldContain("Caddy__AdminUrl: http://caddy:2019");
