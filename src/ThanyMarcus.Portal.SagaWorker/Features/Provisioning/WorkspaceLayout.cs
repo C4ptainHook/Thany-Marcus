@@ -59,9 +59,6 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                 image_tag      = "{cloudInit.ImageTag}"
                 admin_user     = "{cloudInit.AdminUser}"
                 ssh_public_key = "{cloudInit.SshPublicKey}"
-                compose_url    = "{cloudInit.ComposeUrl}"
-                caddyfile_url  = "{cloudInit.CaddyfileUrl}"
-                nginx_conf_url = "{cloudInit.NginxConfUrl}"
                 timezone       = "{cloudInit.Timezone}"
                 """);
         }
@@ -82,9 +79,6 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
             ImageTag:      Require("ImageTag"),
             AdminUser:     section["AdminUser"] ?? "thanyadmin",
             SshPublicKey:  EscapeTfString(section["SshPublicKey"] ?? ""),
-            ComposeUrl:    Require("ComposeUrl"),
-            CaddyfileUrl:  Require("CaddyfileUrl"),
-            NginxConfUrl:  Require("NginxConfUrl"),
             Timezone:      section["Timezone"] ?? "Etc/UTC");
     }
 
@@ -98,9 +92,6 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
         string ImageTag,
         string AdminUser,
         string SshPublicKey,
-        string ComposeUrl,
-        string CaddyfileUrl,
-        string NginxConfUrl,
         string Timezone);
 
     public void SweepTerminal(Instant now, Duration retention)
@@ -168,9 +159,6 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                   image_tag        = var.image_tag
                   admin_user       = var.admin_user
                   ssh_public_key   = var.ssh_public_key
-                  compose_url      = var.compose_url
-                  caddyfile_url    = var.caddyfile_url
-                  nginx_conf_url   = var.nginx_conf_url
                   timezone         = var.timezone
                 """,
                 """
@@ -205,9 +193,6 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                   type    = string
                   default = ""
                 }
-                variable "compose_url"    { type = string }
-                variable "caddyfile_url"  { type = string }
-                variable "nginx_conf_url" { type = string }
                 variable "timezone" {
                   type    = string
                   default = "Etc/UTC"

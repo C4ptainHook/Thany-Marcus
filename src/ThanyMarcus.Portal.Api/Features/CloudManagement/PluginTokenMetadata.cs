@@ -1,5 +1,5 @@
 using NodaTime;
-using ThanyMarcus.Portal.Api.Infrastructure.Database;
+using ThanyMarcus.Shared.Database;
 
 namespace ThanyMarcus.Portal.Api.Features.CloudManagement;
 

@@ -7,13 +7,17 @@ export async function enableInit(): Promise<TotpEnableInit> {
   return r.json();
 }
 
-export async function enableVerify(secret: string, code: string): Promise<TotpEnableVerify> {
+export async function enableVerify(secret: string, code: string, currentCode?: string): Promise<TotpEnableVerify> {
   const r = await fetch('/api/auth/totp/enable/verify', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ secret, code }),
+    body: JSON.stringify({ secret, code, currentCode }),
   });
-  if (!r.ok) throw new Error(`enable/verify failed: ${r.status}`);
+  if (!r.ok) {
+    const err: Error & { status?: number } = new Error(`enable/verify failed: ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
   return r.json();
 }
 

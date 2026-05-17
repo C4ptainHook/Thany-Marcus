@@ -10,38 +10,53 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
-      - cloud-api
+      cloud-api:
+        condition: service_healthy
+    networks: [cloud]
 
   cloud-api:
-    image: nginx:alpine
+    image: ghcr.io/bboiko/thany-cloud-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - cert-status:/etc/nginx/cert-status:ro
     environment:
-      CLOUD_ID: ${CLOUD_ID}
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: "http://+:8080"
+      ConnectionStrings__Cloud: Host=postgres;Port=5432;Username=cloud;Password=${POSTGRES_PASSWORD};Database=cloud
+      Caddy__AdminUrl: http://caddy:2019
+      Bootstrap__CloudId: ${CLOUD_ID}
+      Bootstrap__Hostname: ${DOMAIN}
+      Bootstrap__EnrollmentToken: ${ENROLLMENT_TOKEN}
+      Bootstrap__CloudAdminToken: ${CLOUD_ADMIN_TOKEN}
+      Bootstrap__PortalCallbackUrl: ${PORTAL_CALLBACK_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [cloud]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  cert-watcher:
-    image: alpine:3.19
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
-    command: >
-      sh -c "apk add --no-cache inotify-tools jq >/dev/null &&
-             mkdir -p /shared &&
-             printf '{\"cert_ready\":false,\"cloud_id\":\"%s\",\"registration_status\":\"pending\"}' \"$$CLOUD_ID\" > /shared/cert-status &&
-             while ! ls /caddy-certs/acme-v02.api.letsencrypt.org-directory/$$DOMAIN/$$DOMAIN.crt 2>/dev/null &&
-                   ! ls /caddy-certs/acme-staging-v02.api.letsencrypt.org-directory/$$DOMAIN/$$DOMAIN.crt 2>/dev/null; do
-               sleep 2
-             done &&
-             printf '{\"cert_ready\":true,\"cloud_id\":\"%s\",\"registration_status\":\"pending\"}' \"$$CLOUD_ID\" > /shared/cert-status &&
-             tail -f /dev/null"
-    volumes:
-      - caddy-data:/caddy-certs:ro
-      - cert-status:/shared
     environment:
-      CLOUD_ID: ${CLOUD_ID}
-      DOMAIN: ${DOMAIN}
+      POSTGRES_USER: cloud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: cloud
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [cloud]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloud -d cloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   caddy-data:
   caddy-config:
-  cert-status:
+  pg-data:
+
+networks:
+  cloud:

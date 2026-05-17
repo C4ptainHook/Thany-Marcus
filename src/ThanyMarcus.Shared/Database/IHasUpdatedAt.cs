@@ -1,6 +1,6 @@
 using NodaTime;
 
-namespace ThanyMarcus.Portal.Api.Infrastructure.Database;
+namespace ThanyMarcus.Shared.Database;
 
 public interface IHasUpdatedAt
 {

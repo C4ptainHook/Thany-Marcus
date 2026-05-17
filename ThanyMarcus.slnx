@@ -2,9 +2,11 @@
   <Folder Name="/src/">
     <Project Path="src/ThanyMarcus.Portal.Api/ThanyMarcus.Portal.Api.csproj" />
     <Project Path="src/ThanyMarcus.Portal.SagaWorker/ThanyMarcus.Portal.SagaWorker.csproj" />
+    <Project Path="src/ThanyMarcus.Cloud.Api/ThanyMarcus.Cloud.Api.csproj" />
     <Project Path="src/ThanyMarcus.Shared/ThanyMarcus.Shared.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ThanyMarcus.Portal.Tests/ThanyMarcus.Portal.Tests.csproj" />
+    <Project Path="tests/ThanyMarcus.Cloud.Tests/ThanyMarcus.Cloud.Tests.csproj" />
   </Folder>
 </Solution>

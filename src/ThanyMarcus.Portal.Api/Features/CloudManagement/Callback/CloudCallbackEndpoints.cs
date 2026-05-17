@@ -55,13 +55,19 @@ public static class CloudCallbackEndpoints
             if (job.Status is SagaStatus.AwaitingCert or SagaStatus.Succeeded)
             {
                 await tx.CommitAsync(ct);
-                return Results.Ok(new { idempotent = true });
+                return Results.Ok(new CloudCallbackOkResponse(Idempotent: true));
             }
 
             if (job.Status != SagaStatus.AwaitingCloudCallback)
                 return Results.Conflict(new { error = "wrong_state", current = job.Status });
 
             var now = clock.GetCurrentInstant();
+            // FORK: ADR-0034 §1 specifies plaintext storage of the cloud admin token so that
+            // PORTAL-014's portal→cloud /admin/* proxy can present it in Authorization: Bearer.
+            // Current code stores a SHA-256 hash, which is sufficient for the PORTAL-011 smoke
+            // (AwaitingCloudCallback → AwaitingCert only). PORTAL-014 cannot consume a hash
+            // without a matching change on the cloud side; the decision is tracked as
+            // Q-AdminTokenStorage in plans/cloud-pivot-plan-2026-05-13.md §28 Tier-B.
             cloud.CloudAdminTokenHash = SHA256.HashData(Encoding.UTF8.GetBytes(body.CloudAdminToken));
             cloud.AdminStartedAt = now;
             job.Status = SagaStatus.AwaitingCert;
@@ -78,8 +84,14 @@ public static class CloudCallbackEndpoints
                 "SELECT pg_notify('provisioning_new', {0})",
                 [job.Id.ToString()], ct);
 
-            return Results.Ok(new { ok = true });
+            return Results.Ok(new CloudCallbackOkResponse(Ok: true));
         })
+        .WithName("PostCloudCallback")
+        .Produces<CloudCallbackOkResponse>(StatusCodes.Status200OK)
+        .ProducesProblem(StatusCodes.Status400BadRequest)
+        .ProducesProblem(StatusCodes.Status401Unauthorized)
+        .ProducesProblem(StatusCodes.Status404NotFound)
+        .ProducesProblem(StatusCodes.Status409Conflict)
         .AllowAnonymous()
         .RequireRateLimiting(CloudCallbackPolicies.PerCloudId)
         .RequireRateLimiting(CloudCallbackPolicies.PerIp);

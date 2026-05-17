@@ -60,3 +60,5 @@ What we chose and the shape of the implementation.
 | 0030 | Auth flow — Google SSO + cookie + TOTP + step-up | Accepted |
 | 0031 | Rate limiting + persistent lockout + CAPTCHA | Accepted |
 | 0032 | FK cascade rules + soft-delete on clouds | Accepted |
+| 0037 | Saga scaling ladder | Accepted |
+| 0038 | Portal Postgres on Azure Database for PostgreSQL Flexible Server | Accepted |

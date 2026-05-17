@@ -6,7 +6,7 @@ COPY ["src/ThanyMarcus.Portal.Api/ThanyMarcus.Portal.Api.csproj",               
 COPY ["src/ThanyMarcus.Shared/ThanyMarcus.Shared.csproj",                       "src/ThanyMarcus.Shared/"]
 RUN dotnet restore "src/ThanyMarcus.Portal.SagaWorker/ThanyMarcus.Portal.SagaWorker.csproj"
 COPY src/ src/
-RUN dotnet publish "src/ThanyMarcus.Portal.SagaWorker/ThanyMarcus.Portal.SagaWorker.csproj" -c Release -o /app /p:UseAppHost=false
+RUN dotnet publish "src/ThanyMarcus.Portal.SagaWorker/ThanyMarcus.Portal.SagaWorker.csproj" -c Release -o /app /p:UseAppHost=false /p:SkipSpaBuild=true
 
 FROM hashicorp/terraform:1.7 AS terraform
 

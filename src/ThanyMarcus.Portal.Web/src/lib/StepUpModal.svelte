@@ -67,7 +67,7 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.6);
     z-index: 1000;
   }
   .modal {
@@ -75,31 +75,38 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: white;
-    padding: 1.5rem;
-    border-radius: 8px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+    background: var(--surface);
+    color: var(--text);
+    padding: var(--space-5);
+    border: var(--border-width) solid var(--border);
     min-width: 20rem;
     max-width: 32rem;
     z-index: 1001;
   }
-  input {
+  .modal :global(input) {
     display: block;
     width: 100%;
-    padding: 0.5rem;
-    font-size: 1.1rem;
-    box-sizing: border-box;
+    margin-top: var(--space-2);
   }
   .actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-2);
     justify-content: flex-end;
-    margin-top: 1rem;
-  }
-  button {
-    padding: 0.5rem 1rem;
+    margin-top: var(--space-4);
   }
   .error {
-    color: #b00020;
+    color: var(--error);
+  }
+  @media (max-width: 600px) {
+    .modal {
+      position: fixed;
+      inset: 0;
+      top: 0; left: 0;
+      transform: none;
+      max-width: none;
+      width: 100%;
+      height: 100%;
+      overflow-y: auto;
+    }
   }
 </style>

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
+using ThanyMarcus.Shared.Database;
 using ThanyMarcus.Portal.Tests.Infrastructure;
 using SagaWorkerService = ThanyMarcus.Portal.SagaWorker.SagaWorker;
 

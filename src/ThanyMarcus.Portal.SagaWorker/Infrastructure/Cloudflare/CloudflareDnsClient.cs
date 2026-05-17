@@ -44,13 +44,34 @@ public sealed partial class CloudflareDnsClient(
             var existing = await FindByNameAsync(client, zone, subdomain, ct);
             if (existing is null)
                 throw new CloudflareApiException($"81057 reported for {subdomain} but list query returned no match");
-            return new DnsRecord(existing.Id, subdomain, ip);
+            return await UpdateIpAsync(client, zone, existing, subdomain, ip, ct);
         }
 
         var summary = errEnvelope?.Errors is null
             ? response.StatusCode.ToString()
             : string.Join(';', errEnvelope.Errors.Select(e => $"{e.Code}:{e.Message}"));
         throw new CloudflareApiException($"CreateA failed ({response.StatusCode}): {summary}");
+    }
+
+    private static async Task<DnsRecord> UpdateIpAsync(
+        HttpClient client, string zone, CloudflareDnsRecordDto existing,
+        string subdomain, IPAddress newIp, CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Patch, $"zones/{zone}/dns_records/{existing.Id}")
+        {
+            Content = JsonContent.Create(new { content = newIp.ToString() }),
+        };
+        var response = await client.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var envelope = await response.Content.ReadFromJsonAsync<CloudflareEnvelope<CloudflareDnsRecordDto>>(ct);
+            var summary = envelope?.Errors is null
+                ? response.StatusCode.ToString()
+                : string.Join(';', envelope.Errors.Select(e => $"{e.Code}:{e.Message}"));
+            throw new CloudflareApiException(
+                $"81057 reuse: PATCH content failed ({response.StatusCode}) for record {existing.Id}: {summary}");
+        }
+        return new DnsRecord(existing.Id, subdomain, newIp);
     }
 
     public async Task DeleteAsync(string recordId, string cloudflareToken, CancellationToken ct)

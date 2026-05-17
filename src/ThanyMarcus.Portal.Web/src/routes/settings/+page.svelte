@@ -11,6 +11,8 @@
   let passphraseSet = $state(false);
   let init = $state<TotpEnableInit | null>(null);
   let enableCode = $state('');
+  let currentCode = $state('');
+  let isReset = $state(false);
   let disableCode = $state('');
   let newPassphrase = $state('');
   let confirmPassphrase = $state('');
@@ -64,7 +66,8 @@
 
   async function startEnable() {
     error = null;
-    if (totpState === 'verified' || totpState === 'not-verified') {
+    isReset = totpState === 'verified' || totpState === 'not-verified';
+    if (isReset) {
       if (!confirm('TOTP is already enabled. Re-enabling will replace your secret and invalidate previous backup codes. Continue?')) {
         return;
       }
@@ -72,7 +75,7 @@
     try {
       init = await enableInit();
       phase = 'enabling';
-    } catch (err) {
+    } catch {
       error = 'Failed to start TOTP enable flow.';
     }
   }
@@ -80,15 +83,23 @@
   async function submitEnable(e: SubmitEvent) {
     e.preventDefault();
     if (!init) return;
+    if (isReset && !currentCode.trim()) return;
     error = null;
     try {
-      const result = await enableVerify(init.secret, enableCode.trim());
+      const result = await enableVerify(
+        init.secret,
+        enableCode.trim(),
+        isReset ? currentCode.trim() : undefined,
+      );
       backupCodes = result.backupCodes;
       enableCode = '';
+      currentCode = '';
       init = null;
+      isReset = false;
       phase = 'showing-codes';
     } catch (err) {
-      error = 'Invalid code.';
+      const status = (err as { status?: number } | null)?.status;
+      error = status === 401 ? 'Invalid current code.' : 'Invalid code.';
     }
   }
 
@@ -100,7 +111,7 @@
       disableCode = '';
       phase = 'loading';
       await refreshMe();
-    } catch (err) {
+    } catch {
       error = 'Invalid code.';
     }
   }
@@ -117,12 +128,13 @@
 </script>
 
 <main>
-  <h1>Security</h1>
+  <h1>Settings</h1>
 
   {#if phase === 'loading'}
-    <p>Loading…</p>
+    <p class="muted">Loading…</p>
+
   {:else if phase === 'showing-codes'}
-    <section>
+    <section class="card">
       <h2>Backup codes</h2>
       <p>Save these codes now — they will not be shown again. Each can be used once if you lose your authenticator.</p>
       <ul class="codes">
@@ -130,29 +142,43 @@
           <li>{code}</li>
         {/each}
       </ul>
-      <button type="button" onclick={copyAllCodes}>Copy all</button>
-      <button type="button" onclick={dismissCodes}>I&rsquo;ve saved them</button>
+      <div class="actions">
+        <button class="btn-secondary" type="button" onclick={copyAllCodes}>Copy all</button>
+        <button class="btn-primary" type="button" onclick={dismissCodes}>I&rsquo;ve saved them</button>
+      </div>
     </section>
+
   {:else if phase === 'enabling' && init}
-    <section>
-      <h2>Enable TOTP</h2>
+    <section class="card">
+      <h2>{isReset ? 'Reset TOTP' : 'Enable TOTP'}</h2>
       <p>Scan this code with your authenticator app, then enter the 6-digit code below.</p>
-      <img src={init.qrPngDataUri} alt="TOTP QR code" width="240" height="240" />
+      <img class="qr" src={init.qrPngDataUri} alt="TOTP QR code" width="240" height="240" />
       <details>
         <summary>Or enter the secret manually</summary>
         <code>{init.secret}</code>
       </details>
       <form onsubmit={submitEnable}>
+        {#if isReset}
+          <label>
+            Current code (from your existing authenticator)
+            <input type="text" autocomplete="one-time-code" bind:value={currentCode} required />
+          </label>
+        {/if}
         <label>
-          Code
+          {isReset ? 'New code (from the QR above)' : 'Code'}
           <input type="text" autocomplete="one-time-code" bind:value={enableCode} required />
         </label>
         {#if error}<p class="error">{error}</p>{/if}
-        <button type="submit" disabled={!enableCode.trim()}>Verify and enable</button>
+        <div class="actions">
+          <button class="btn-primary" type="submit" disabled={!enableCode.trim() || (isReset && !currentCode.trim())}>
+            {isReset ? 'Verify and reset' : 'Verify and enable'}
+          </button>
+        </div>
       </form>
     </section>
+
   {:else if phase === 'disabling'}
-    <section>
+    <section class="card">
       <h2>Disable TOTP</h2>
       <p>Enter a current 6-digit code from your authenticator to disable TOTP. Backup codes are not accepted here.</p>
       <form onsubmit={submitDisable}>
@@ -161,24 +187,30 @@
           <input type="text" autocomplete="one-time-code" bind:value={disableCode} required />
         </label>
         {#if error}<p class="error">{error}</p>{/if}
-        <button type="submit" disabled={!disableCode.trim()}>Disable</button>
-        <button type="button" onclick={() => { phase = 'idle'; disableCode = ''; error = null; }}>Cancel</button>
+        <div class="actions">
+          <button class="btn-secondary" type="button" onclick={() => { phase = 'idle'; disableCode = ''; error = null; }}>Cancel</button>
+          <button class="btn-danger" type="submit" disabled={!disableCode.trim()}>Disable</button>
+        </div>
       </form>
     </section>
+
   {:else}
-    <section>
-      <p>TOTP state: <strong>{totpState}</strong></p>
-      {#if totpState === 'verified' || totpState === 'not-verified'}
-        <button type="button" onclick={() => { phase = 'disabling'; }}>Disable TOTP</button>
-        <button type="button" onclick={startEnable}>Reset TOTP</button>
-      {:else}
-        <button type="button" onclick={startEnable}>Enable TOTP</button>
-      {/if}
+    <section class="card">
+      <h2 class="card-title">TWO-FACTOR</h2>
+      <p>TOTP state: <strong class={totpState === 'verified' ? 'success' : ''}>{totpState}</strong></p>
+      <div class="actions">
+        {#if totpState === 'verified' || totpState === 'not-verified'}
+          <button class="btn-secondary" type="button" onclick={() => { phase = 'disabling'; }}>Disable</button>
+          <button class="btn-secondary" type="button" onclick={startEnable}>Reset</button>
+        {:else}
+          <button class="btn-primary" type="button" onclick={startEnable}>Enable TOTP</button>
+        {/if}
+      </div>
     </section>
 
-    {#if !passphraseSet}
-      <section>
-        <h2>Set passphrase</h2>
+    <section class="card">
+      <h2 class="card-title">PASSPHRASE</h2>
+      {#if !passphraseSet}
         <p>The passphrase protects destructive infrastructure operations. You will be asked for it before each destroy or rotate action.</p>
         <form onsubmit={submitPassphrase}>
           <label>
@@ -190,20 +222,20 @@
             <input type="password" autocomplete="new-password" bind:value={confirmPassphrase} required />
           </label>
           {#if passphraseError}<p class="error">{passphraseError}</p>{/if}
-          <button type="submit" disabled={passphraseBusy || !newPassphrase || !confirmPassphrase}>
-            {passphraseBusy ? 'Setting…' : 'Set passphrase'}
-          </button>
+          <div class="actions">
+            <button class="btn-primary" type="submit" disabled={passphraseBusy || !newPassphrase || !confirmPassphrase}>
+              {passphraseBusy ? 'Setting…' : 'Set passphrase'}
+            </button>
+          </div>
         </form>
-      </section>
-    {:else}
-      <section>
-        <p>Passphrase: <strong>set</strong></p>
-      </section>
-    {/if}
+      {:else}
+        <p>Passphrase: <strong class="success">set ✓</strong></p>
+      {/if}
+    </section>
 
     {#if passphraseSet}
-      <section>
-        <h2>Provider credentials</h2>
+      <section class="card">
+        <h2 class="card-title">PROVIDER CREDENTIALS</h2>
         <ProviderTokenSection provider="digitalocean" />
       </section>
     {/if}
@@ -211,37 +243,44 @@
 </main>
 
 <style>
-  main {
-    font-family: system-ui, -apple-system, sans-serif;
-    max-width: 36rem;
-    margin: 4rem auto;
-    padding: 0 1rem;
-  }
   .codes {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 0.5rem;
+    gap: var(--space-2);
     list-style: none;
     padding: 0;
-    font-family: ui-monospace, monospace;
-    font-size: 1.1rem;
+    font-family: var(--font-pixel);
+    font-size: var(--text-base);
+    margin: var(--space-3) 0;
   }
   .codes li {
-    padding: 0.5rem;
-    background: #f5f5f5;
-    border-radius: 4px;
+    padding: var(--space-2);
+    background: var(--surface-2);
     text-align: center;
   }
-  .error {
-    color: #b00020;
+  .actions {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
   }
-  button {
-    padding: 0.5rem 1rem;
-    margin-right: 0.5rem;
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: var(--space-3) 0;
   }
-  input {
+  .qr {
     display: block;
-    padding: 0.5rem;
-    font-size: 1.1rem;
+    background: white;
+    padding: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+  details summary { cursor: pointer; }
+  details code {
+    display: block;
+    font-family: var(--font-pixel);
+    padding: var(--space-2);
+    background: var(--surface-2);
+    margin-top: var(--space-2);
   }
 </style>
