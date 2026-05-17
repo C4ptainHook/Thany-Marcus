@@ -17,8 +17,6 @@ public sealed partial class DnsCreatingHandler(
 {
     public string Phase => SagaStatus.DnsCreating;
 
-    private static readonly Duration AwaitingCallbackTimeout = Duration.FromMinutes(5);
-
     public async Task HandleAsync(ProvisioningJob job, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(job);
@@ -75,7 +73,7 @@ public sealed partial class DnsCreatingHandler(
         });
 
         await SagaTransitions.TransitionAsync(
-            db, clock, job, SagaStatus.AwaitingCloudCallback, AwaitingCallbackTimeout, ct: ct);
+            db, clock, job, SagaStatus.AwaitingCloudCallback, SagaTimeouts.AwaitingCloudCallback, ct: ct);
     }
 
     private static IPAddress? ReadIpFromOutputs(ProvisioningJob job)

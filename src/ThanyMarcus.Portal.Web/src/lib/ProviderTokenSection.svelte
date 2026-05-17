@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { apiFetch, parseProblem } from './http';
 
-  type Props = { provider: 'digitalocean' };
-  let { provider }: Props = $props();
+  type Props = { provider: 'digitalocean'; onSaved?: () => void };
+  let { provider, onSaved }: Props = $props();
 
   interface TokenSummary { provider: string; createdAt: string; updatedAt: string; }
 
@@ -60,6 +60,7 @@
       if (r.status === 204) {
         tokenInput = '';
         await refresh();
+        onSaved?.();
         return;
       }
       const problem = await parseProblem(r);
@@ -134,15 +135,15 @@
 
 <style>
   .provider-row {
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border: var(--border-width) solid var(--border);
     padding: var(--space-3);
     margin: var(--space-3) 0;
+    background: var(--surface-2);
   }
   .actions {
     display: flex;
     gap: var(--space-2);
-    margin-top: var(--space-2);
+    margin-top: var(--space-3);
   }
   label {
     display: flex;
@@ -150,27 +151,32 @@
     gap: var(--space-1);
     margin-bottom: var(--space-2);
   }
-  input {
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    font: inherit;
-  }
   .backdrop {
     position: fixed; inset: 0;
-    background: var(--color-backdrop);
-    z-index: 10;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 990;
   }
   .modal {
     position: fixed;
     top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    padding: var(--space-4);
-    z-index: 11;
-    max-width: 28rem;
+    background: var(--surface);
+    color: var(--text);
+    border: var(--border-width) solid var(--border);
+    padding: var(--space-5);
+    z-index: 991;
+    max-width: 32rem;
   }
-  .danger { color: var(--color-error); }
+  .danger { color: var(--error); border-color: var(--error); }
+  @media (max-width: 600px) {
+    .modal {
+      position: fixed;
+      inset: 0;
+      top: 0; left: 0;
+      transform: none;
+      max-width: none;
+      width: 100%;
+      height: 100%;
+    }
+  }
 </style>

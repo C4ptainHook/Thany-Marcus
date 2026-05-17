@@ -101,3 +101,16 @@ Plan §50 frames the thesis privacy story as "data never leaves user's cloud." P
 - `plans/cloud-pivot-plan-2026-05-13.md §27` — `infra/docker/{portal,cloud}/` deployment layout
 - `plans/cloud-pivot-plan-2026-05-13.md §50` — privacy framing that excludes Cloudflare-proxied user-cloud traffic
 - `plans/tickets-2026-05-13.md` — PORTAL-010, PORTAL-017 own the actual Caddyfile content
+
+## Amendment 2026-05-17 — privacy framing clarified
+
+The original "data never leaves user's cloud" framing (plan §50) was about *user-cloud* data — vault content, knowledge artefacts, processed Markdown, embeddings. It is unchanged: user-cloud traffic still terminates TLS at the user's own Caddy, on the user's own VPS, with no third-party intermediary.
+
+What was implicit, and is now explicit: **portal operational data is not user-cloud data**, and the framing does not extend to it. With the move to Azure Database for PostgreSQL Flexible Server ([[0038-managed-postgres]]), the portal's operational store (user identity, encrypted provider tokens, cloud metadata) now lives on Azure-managed storage. Azure SRE staff have storage-level access to that data.
+
+Two specific clarifications:
+
+- **Provider tokens remain protected at the application layer.** Per [[0030-auth-flow]], provider tokens are encrypted with user-derived DEKs (Argon2id) before any database write. Azure cannot derive the DEK without the user's passphrase.
+- **Cleartext PII on the managed DB is acknowledged and accepted.** User emails, Google `sub` identifiers, and cloud subdomains are stored in cleartext. This is the trade-off for managed durability + automated PITR, and replaces a previously-proposed operator-managed `pg_dump` cron that had its own (worse) operator-trust profile.
+
+The user-cloud side of the framing is therefore narrower than the original wording but still load-bearing: the user's vault content never traverses an intermediary the user did not provision. Portal operational data is a separate concern with a separate trust boundary, now documented in [[0038-managed-postgres]].

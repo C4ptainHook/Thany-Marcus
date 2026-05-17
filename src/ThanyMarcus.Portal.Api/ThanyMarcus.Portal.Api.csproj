@@ -38,7 +38,11 @@
     <PackageReference Include="Konscious.Security.Cryptography.Argon2" />
   </ItemGroup>
 
-  <Target Name="BuildSpa" BeforeTargets="Build" Condition="'$(SkipSpaBuild)' != 'true'">
+  <ItemGroup>
+    <ProjectReference Include="..\ThanyMarcus.Shared\ThanyMarcus.Shared.csproj" />
+  </ItemGroup>
+
+  <Target Name="BuildSpa" BeforeTargets="Build" Condition="'$(BuildSpa)' == 'true'">
     <Exec Command="pnpm install --frozen-lockfile" WorkingDirectory="..\ThanyMarcus.Portal.Web" />
     <Exec Command="pnpm build" WorkingDirectory="..\ThanyMarcus.Portal.Web" />
     <ItemGroup>

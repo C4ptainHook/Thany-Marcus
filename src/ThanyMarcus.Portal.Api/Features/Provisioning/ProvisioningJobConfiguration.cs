@@ -23,6 +23,10 @@ public sealed class ProvisioningJobConfiguration : IEntityTypeConfiguration<Prov
         builder.Property(j => j.Status).IsRequired();
         builder.Property(j => j.NextVisibleAt).IsRequired();
         builder.Property(j => j.AttemptCount).IsRequired();
+        builder.Property(j => j.TransitionVersion)
+            .IsRequired()
+            .HasDefaultValue(0L)
+            .IsConcurrencyToken();
         builder.Property(j => j.EventsLog).HasColumnType("jsonb").IsRequired()
             .HasDefaultValueSql("'[]'::jsonb");
         builder.Property(j => j.TfOutputs).HasColumnType("jsonb");

@@ -1,12 +1,12 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
+using ThanyMarcus.Shared.CloudAdmin;
 
 namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 
@@ -86,12 +86,9 @@ public sealed partial class AwaitingCertHandler(
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", StubCloudAdminToken);
         using var resp = await http.SendAsync(req, ct);
         resp.EnsureSuccessStatusCode();
-        var payload = await resp.Content.ReadFromJsonAsync<HealthResponse>(ct);
+        var payload = await resp.Content.ReadFromJsonAsync<CloudAdminHealthResponse>(ct);
         return payload?.CertReady ?? false;
     }
-
-    private sealed record HealthResponse(
-        [property: JsonPropertyName("cert_ready")] bool CertReady);
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Debug,
         Message = "AwaitingCertHandler poll failed for job {JobId} (will retry)")]

@@ -641,6 +641,16 @@ After provisioning completes, a "Plugin Setup" page shows:
 - The cloud URL
 - Step-by-step instructions to install the Obsidian plugin and paste both into Settings
 
+> **Amendment 2026-05-17 — portal deployment shape**
+>
+> Portal deployment evolved from the "single small DO droplet running everything via Docker Compose" framing above to a three-piece shape: **stateless Azure VM** (portal-api + saga-worker + caddy + dp-keys backup) + **Azure Database for PostgreSQL Flexible Server (Burstable B1ms, 7-day PITR)** for the operational store + **per-user-cloud VPS provisioned via Terraform** for each user's sovereign cloud.
+>
+> The "symmetric with user clouds" framing in the original §23 still applies — but to the *data-plane shape* (each user gets a sovereign cloud) and not to the *control-plane operational store*. The portal's control-plane state is now Azure-managed; user-cloud data remains on user-provisioned VPS. See ADR-0038 for the rationale and trade-offs (cleartext PII on Azure storage; provider tokens still protected by user-derived DEKs).
+>
+> **Optional VM downsize.** Post-migration, the portal VM no longer hosts Postgres, freeing ~500 MB RAM. B2ms → B2s is available as a cost lever (approximately $30/mo savings) once the system has run steady-state on managed PG for a week. Not baked into the migration plan, to keep cutover risk low.
+>
+> Cross-references: ADR-0037 (saga scaling ladder), ADR-0038 (managed Postgres), ADR-0019 amendment (connection budget on Flexible Server), ADR-0027 amendment (privacy framing clarified).
+
 ## 24. Evaluation Plan
 
 Preserved verbatim from 2026-05-13 §23:
@@ -835,6 +845,7 @@ Still open:
 - **Q-Sizing.** Cross-provider size enum (Small/Medium/Large) vs pass-through native names.
 - **Q-ModelSwap.** Behavior when user changes Ollama model mid-flight (drain queue first, or restart and let in-flight fail?).
 - **Q-Secrets.** Distribution of JWT signing key, cloud admin token, etc. into cloud-init without logging.
+- **Q-AdminTokenStorage.** Portal-side storage shape for `cloud_admin_token`. ADR-0034 §1 + §Consequences specifies plaintext at rest so PORTAL-014's portal→cloud `/admin/*` proxy can present it in `Authorization: Bearer <token>` against the cloud's constant-time compare. Current PORTAL-016 code (`CloudCallbackEndpoints.cs:65`) stores `SHA-256(token)` in `clouds.cloud_admin_token_hash`, which is sufficient for the PORTAL-011 smoke (`AwaitingCloudCallback → AwaitingCert`) but blocks PORTAL-014 — a hash cannot be replayed as a bearer credential without a matching cloud-side hash-aware verifier (which doesn't exist). Options: (a) revert to plaintext, (b) store DataProtection-encrypted plaintext (envelope key in portal DPAPI/Azure Key Vault), (c) keep hash and add a cloud-side hash-aware verifier. Decision must land before PORTAL-014; until then the deviation is documented at the storage site via a `// FORK:` marker.
 
 ### Tier C — polish, edge cases
 

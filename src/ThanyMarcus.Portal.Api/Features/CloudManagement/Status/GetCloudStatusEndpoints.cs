@@ -25,28 +25,50 @@ public static class GetCloudStatusEndpoints
             if (cloud is null) return Results.NotFound(new { error = "cloud_not_found" });
             if (cloud.UserId != userId) return Results.Forbid();
 
-            var job = await db.ProvisioningJobs
-                .Where(j => j.CloudId == id)
-                .OrderByDescending(j => j.CreatedAt)
-                .FirstOrDefaultAsync(ct);
-
-            var recentEvents = job is null
-                ? Array.Empty<EventSummary>()
-                : ParseEventsTail(job.EventsLog, RecentEventsTake);
-
-            return Results.Ok(new CloudStatusResponse(
-                CloudId:             cloud.Id,
-                Hostname:            cloud.Hostname,
-                Provider:            cloud.Provider,
-                Region:              cloud.Region,
-                ProvisioningStatus:  cloud.ProvisioningStatus,
-                SucceededAt:         cloud.ProvisioningCompletedAt,
-                DestroyedAt:         cloud.DestroyedAt,
-                CurrentJob:          job is null ? null : new JobSummary(job.Id, job.Kind, job.Status),
-                RecentEvents:        recentEvents));
+            return Results.Ok(await BuildStatusAsync(cloud, db, ct));
         })
         .WithName("GetCloudStatus")
         .RequireAuthorization();
+
+        app.MapGet("/api/clouds/me", async (
+            ClaimsPrincipal user,
+            PortalDbContext db,
+            CancellationToken ct) =>
+        {
+            var userId = Guid.Parse(user.FindFirstValue(AuthClaimTypes.SubUs)!);
+            var cloud = await db.Clouds.IgnoreQueryFilters()
+                .Where(c => c.UserId == userId)
+                .OrderByDescending(c => c.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            if (cloud is null) return Results.NotFound(new { error = "no_cloud" });
+
+            return Results.Ok(await BuildStatusAsync(cloud, db, ct));
+        })
+        .WithName("GetMyCloud")
+        .RequireAuthorization();
+    }
+
+    private static async Task<CloudStatusResponse> BuildStatusAsync(Cloud cloud, PortalDbContext db, CancellationToken ct)
+    {
+        var job = await db.ProvisioningJobs
+            .Where(j => j.CloudId == cloud.Id)
+            .OrderByDescending(j => j.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+
+        var recentEvents = job is null
+            ? Array.Empty<EventSummary>()
+            : ParseEventsTail(job.EventsLog, RecentEventsTake);
+
+        return new CloudStatusResponse(
+            CloudId:             cloud.Id,
+            Hostname:            cloud.Hostname,
+            Provider:            cloud.Provider,
+            Region:              cloud.Region,
+            ProvisioningStatus:  cloud.ProvisioningStatus,
+            SucceededAt:         cloud.ProvisioningCompletedAt,
+            DestroyedAt:         cloud.DestroyedAt,
+            CurrentJob:          job is null ? null : new JobSummary(job.Id, job.Kind, job.Status),
+            RecentEvents:        recentEvents);
     }
 
     internal static IReadOnlyList<EventSummary> ParseEventsTail(JsonDocument log, int take)

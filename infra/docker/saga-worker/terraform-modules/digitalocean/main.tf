@@ -32,9 +32,6 @@ resource "digitalocean_droplet" "cloud" {
     image_tag           = var.image_tag
     admin_user          = var.admin_user
     ssh_public_key      = var.ssh_public_key
-    compose_url         = var.compose_url
-    caddyfile_url       = var.caddyfile_url
-    nginx_conf_url      = var.nginx_conf_url
     timezone            = var.timezone
   })
 

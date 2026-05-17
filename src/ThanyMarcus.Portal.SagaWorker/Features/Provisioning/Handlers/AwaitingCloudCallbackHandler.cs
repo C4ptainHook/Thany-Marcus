@@ -12,8 +12,6 @@ public sealed class AwaitingCloudCallbackHandler(
 {
     public string Phase => SagaStatus.AwaitingCloudCallback;
 
-    private static readonly Duration CallbackTimeout = Duration.FromMinutes(5);
-
     public async Task HandleAsync(ProvisioningJob job, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(job);
@@ -30,7 +28,7 @@ public sealed class AwaitingCloudCallbackHandler(
         var phaseStarted = job.PhaseStartedAt ?? now;
         var age = now - phaseStarted;
 
-        if (age >= CallbackTimeout)
+        if (age >= SagaTimeouts.AwaitingCloudCallback)
         {
             EventsLogAppender.Append(job, clock, Phase, new JsonObject
             {
@@ -44,7 +42,7 @@ public sealed class AwaitingCloudCallbackHandler(
             return;
         }
 
-        var remaining = CallbackTimeout - age;
+        var remaining = SagaTimeouts.AwaitingCloudCallback - age;
         await SagaTransitions.RescheduleAsync(db, clock, job, remaining, ct);
     }
 }

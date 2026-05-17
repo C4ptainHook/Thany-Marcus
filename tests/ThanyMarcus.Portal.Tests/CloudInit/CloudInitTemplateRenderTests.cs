@@ -65,7 +65,7 @@ public sealed class CloudInitTemplateRenderTests
         var vars = SampleVars.Value;
         foreach (var key in new[] { "cloud_id", "hostname", "enrollment_token",
                                     "portal_callback_url", "le_email", "image_tag",
-                                    "admin_user", "ssh_public_key", "compose_url", "timezone" })
+                                    "admin_user", "ssh_public_key", "timezone" })
         {
             rendered.ShouldContain(vars[key], Case.Sensitive, $"variable '{key}' was not interpolated");
         }
@@ -149,61 +149,76 @@ public sealed class CloudInitTemplateRenderTests
         var envTpl = ExtractWriteFile("/etc/thany-cloud/cloud.env.tpl");
         envTpl.ShouldContain("CLOUD_ADMIN_TOKEN=${CLOUD_ADMIN_TOKEN}");
         envTpl.ShouldContain("JWT_SIGNING_KEY=${JWT_SIGNING_KEY}");
+        envTpl.ShouldContain("POSTGRES_PASSWORD=${POSTGRES_PASSWORD}");
         envTpl.ShouldContain($"CLOUD_ID={SampleVars.Value["cloud_id"]}");
         envTpl.ShouldContain($"DOMAIN={SampleVars.Value["hostname"]}");
         envTpl.ShouldContain($"ENROLLMENT_TOKEN={SampleVars.Value["enrollment_token"]}");
     }
 
     [Fact]
-    public void Registration_script_polls_admin_health_then_posts_callback()
+    public void Registration_lives_in_cloud_api_not_in_a_shell_script()
     {
-        var script = ExtractWriteFile("/usr/local/bin/register-with-portal.sh");
-        script.ShouldStartWith("#!/usr/bin/env bash");
-        script.ShouldContain("set -euo pipefail");
-        script.ShouldContain("/admin/health");
-        script.ShouldContain("cert_ready");
-        script.ShouldContain("PORTAL_CALLBACK_URL");
-        script.ShouldContain("enrollment_token");
-        script.ShouldContain("cloud_admin_token");
-        script.ShouldContain("cloud_id");
+        var rendered = Rendered.Value;
+        rendered.ShouldNotContain("/usr/local/bin/register-with-portal.sh");
+        rendered.ShouldNotContain("thany-cloud-register.service");
     }
 
     [Fact]
-    public void Registration_script_bounds_retries_and_backoff()
-    {
-        var script = ExtractWriteFile("/usr/local/bin/register-with-portal.sh");
-        script.ShouldMatch(@"ATTEMPT\s*<\s*8");
-        script.ShouldContain("2 ** ATTEMPT");
-    }
-
-    [Fact]
-    public void Systemd_units_for_compose_and_registration_are_present()
+    public void Systemd_unit_for_compose_is_present()
     {
         var compose = ExtractWriteFile("/etc/systemd/system/thany-cloud.service");
         compose.ShouldContain("ExecStart=/usr/bin/docker compose up -d");
         compose.ShouldContain($"User={SampleVars.Value["admin_user"]}");
-
-        var register = ExtractWriteFile("/etc/systemd/system/thany-cloud-register.service");
-        register.ShouldContain("ExecStart=/usr/local/bin/register-with-portal.sh");
-        register.ShouldContain("Requires=thany-cloud.service");
     }
 
     [Fact]
-    public void Caddyfile_template_pins_le_email_and_reverse_proxies_admin_and_api()
+    public void Caddyfile_template_uses_handle_blocks_and_wires_cert_obtained_event()
     {
         var caddy = ExtractWriteFile("/etc/thany-cloud/Caddyfile.tpl");
         caddy.ShouldContain("email ${LE_EMAIL}");
         caddy.ShouldContain("${DOMAIN}");
-        caddy.ShouldContain("reverse_proxy /admin/* cloud-api:8080");
-        caddy.ShouldContain("reverse_proxy /api/*");
+        caddy.ShouldContain("admin caddy:2019");
+        caddy.ShouldContain("events {");
+        caddy.ShouldContain("on cert_obtained exec");
+        caddy.ShouldContain("/internal/caddy-events");
+        caddy.ShouldContain("handle /admin/* {");
+        caddy.ShouldContain("handle /api/* {");
+        caddy.ShouldContain("reverse_proxy cloud-api:8080");
     }
 
     [Fact]
-    public void Compose_file_fetched_from_pinned_url()
+    public void Compose_file_runs_real_cloud_api_image_with_postgres_and_no_cert_watcher()
+    {
+        var compose = ExtractWriteFile("/opt/thany-cloud/docker-compose.yml");
+        compose.ShouldContain("services:");
+        compose.ShouldContain("caddy:");
+        compose.ShouldContain("cloud-api:");
+        compose.ShouldContain("postgres:");
+        compose.ShouldContain("ghcr.io/bboiko/thany-cloud-api");
+        compose.ShouldContain("Bootstrap__CloudId");
+        compose.ShouldContain("Bootstrap__PortalCallbackUrl");
+        compose.ShouldContain("Caddy__AdminUrl: http://caddy:2019");
+        compose.ShouldNotContain("cert-watcher:");
+        compose.ShouldNotContain("nginx.conf");
+        compose.ShouldNotContain("nginx:alpine");
+    }
+
+    [Fact]
+    public void Runcmd_does_not_curl_compose_or_nginx_assets()
     {
         var runcmd = RuncmdText();
-        runcmd.ShouldContain(SampleVars.Value["compose_url"]);
-        runcmd.ShouldContain("/opt/thany-cloud/docker-compose.yml");
+        runcmd.ShouldNotContain("curl -fsSL \"http", Case.Sensitive);
+        runcmd.ShouldNotContain("compose_url");
+        runcmd.ShouldNotContain("nginx_conf_url");
+    }
+
+    [Fact]
+    public void Runcmd_generates_postgres_password_and_does_not_enable_register_unit()
+    {
+        var runcmd = RuncmdText();
+        runcmd.ShouldContain("/run/cloud-secrets/postgres_password");
+        runcmd.ShouldContain("POSTGRES_PASSWORD=$(cat /run/cloud-secrets/postgres_password)");
+        runcmd.ShouldNotContain("thany-cloud-register");
     }
 
     [Fact]
@@ -220,14 +235,15 @@ public sealed class CloudInitTemplateRenderTests
             ["le_acme_ca"] = "https://acme-staging-v02.api.letsencrypt.org/directory",
         };
         var rendered = RenderWith(vars);
-        rendered.ShouldContain("acme-staging-v02");
+        rendered.ShouldContain("acme_ca https://acme-staging-v02.api.letsencrypt.org/directory");
     }
 
     [Fact]
     public void Le_acme_ca_empty_keeps_prod_endpoint()
     {
         var rendered = Rendered.Value;
-        rendered.ShouldNotContain("acme-staging-v02");
+        rendered.ShouldNotContain("acme_ca https://acme-staging-v02");
+        rendered.ShouldNotContain("acme_ca https://acme-v02");
     }
 
     private static string ExtractWriteFile(string path)
