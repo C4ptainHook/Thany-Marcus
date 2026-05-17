@@ -9,7 +9,7 @@ public sealed class CloudApiFactory : WebApplicationFactory<Program>
     public Guid CloudId { get; } = Guid.CreateVersion7();
     public string Hostname { get; init; } = "test.thany.click";
     public string PortalCallbackUrl { get; set; } = "http://localhost:65535/api/clouds/callback";
-    public string CaddyAdminUrl { get; set; } = "http://localhost:65535";
+    public string CertLiveDir { get; set; } = "/tmp/does-not-exist";
     public string ConnectionString { get; init; } = "";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -19,7 +19,7 @@ public sealed class CloudApiFactory : WebApplicationFactory<Program>
             cfg.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Cloud"]       = ConnectionString,
-                ["Caddy:AdminUrl"]                = CaddyAdminUrl,
+                ["Cert:LiveDir"]                  = CertLiveDir,
                 ["Bootstrap:CloudId"]             = CloudId.ToString(),
                 ["Bootstrap:Hostname"]            = Hostname,
                 ["Bootstrap:EnrollmentToken"]     = "test-enrollment-token",

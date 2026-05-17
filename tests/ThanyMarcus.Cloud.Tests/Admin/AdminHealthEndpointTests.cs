@@ -3,41 +3,32 @@ using System.Net.Http.Json;
 using Shouldly;
 using ThanyMarcus.Cloud.Tests.Infrastructure;
 using ThanyMarcus.Shared.CloudAdmin;
-using WireMock.RequestBuilders;
-using WireMock.ResponseBuilders;
-using WireMock.Server;
 
 namespace ThanyMarcus.Cloud.Tests.Admin;
 
 [Collection(PostgresCollection.Name)]
-public sealed class AdminHealthEndpointTests(PostgresFixture postgres) : IAsyncLifetime
+public sealed class AdminHealthEndpointTests(PostgresFixture postgres) : IDisposable
 {
-    private static readonly string[] AutomatedDomains = ["other.example.com", "test.thany.click"];
+    private readonly string liveDir = Path.Combine(
+        Path.GetTempPath(),
+        "admin-health-" + Guid.NewGuid().ToString("N"));
 
-    private readonly WireMockServer caddy = WireMockServer.Start();
-
-    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
-
-    public ValueTask DisposeAsync()
+    public void Dispose()
     {
-        caddy.Stop();
-        caddy.Dispose();
-        return ValueTask.CompletedTask;
+        try { Directory.Delete(liveDir, recursive: true); }
+        catch (DirectoryNotFoundException) { }
     }
 
     [Fact]
-    public async Task Returns_cert_ready_false_when_caddy_has_no_cert()
+    public async Task Returns_cert_ready_false_when_pem_files_missing()
     {
         var ct = TestContext.Current.CancellationToken;
-        caddy.Given(Request.Create().WithPath("/pki/ca/local/active-cert/test.thany.click").UsingGet())
-            .RespondWith(Response.Create().WithStatusCode(404));
-        caddy.Given(Request.Create().WithPath("/config/apps/tls/certificates/automate").UsingGet())
-            .RespondWith(Response.Create().WithStatusCode(404));
+        Directory.CreateDirectory(liveDir);
 
         await using var factory = new CloudApiFactory
         {
             ConnectionString = postgres.ConnectionString,
-            CaddyAdminUrl = caddy.Urls[0],
+            CertLiveDir      = liveDir,
         };
         using var client = factory.CreateClient();
 
@@ -52,16 +43,17 @@ public sealed class AdminHealthEndpointTests(PostgresFixture postgres) : IAsyncL
     }
 
     [Fact]
-    public async Task Returns_cert_ready_true_when_caddy_active_cert_responds_200()
+    public async Task Returns_cert_ready_true_when_fullchain_and_privkey_present()
     {
         var ct = TestContext.Current.CancellationToken;
-        caddy.Given(Request.Create().WithPath("/pki/ca/local/active-cert/test.thany.click").UsingGet())
-            .RespondWith(Response.Create().WithStatusCode(200).WithBody("{}"));
+        Directory.CreateDirectory(liveDir);
+        await File.WriteAllTextAsync(Path.Combine(liveDir, "fullchain.pem"), "x", ct);
+        await File.WriteAllTextAsync(Path.Combine(liveDir, "privkey.pem"),   "y", ct);
 
         await using var factory = new CloudApiFactory
         {
             ConnectionString = postgres.ConnectionString,
-            CaddyAdminUrl = caddy.Urls[0],
+            CertLiveDir      = liveDir,
         };
         using var client = factory.CreateClient();
 
@@ -73,19 +65,16 @@ public sealed class AdminHealthEndpointTests(PostgresFixture postgres) : IAsyncL
     }
 
     [Fact]
-    public async Task Returns_cert_ready_true_when_certificates_automate_lists_hostname()
+    public async Task Returns_cert_ready_false_when_only_fullchain_present()
     {
         var ct = TestContext.Current.CancellationToken;
-        caddy.Given(Request.Create().WithPath("/pki/ca/local/active-cert/test.thany.click").UsingGet())
-            .RespondWith(Response.Create().WithStatusCode(404));
-        caddy.Given(Request.Create().WithPath("/config/apps/tls/certificates/automate").UsingGet())
-            .RespondWith(Response.Create().WithStatusCode(200)
-                .WithBodyAsJson(AutomatedDomains));
+        Directory.CreateDirectory(liveDir);
+        await File.WriteAllTextAsync(Path.Combine(liveDir, "fullchain.pem"), "x", ct);
 
         await using var factory = new CloudApiFactory
         {
             ConnectionString = postgres.ConnectionString,
-            CaddyAdminUrl = caddy.Urls[0],
+            CertLiveDir      = liveDir,
         };
         using var client = factory.CreateClient();
 
@@ -93,22 +82,19 @@ public sealed class AdminHealthEndpointTests(PostgresFixture postgres) : IAsyncL
             new Uri("/admin/health", UriKind.Relative), ct);
 
         resp.ShouldNotBeNull();
-        resp.CertReady.ShouldBeTrue();
+        resp.CertReady.ShouldBeFalse();
     }
 
     [Fact]
     public async Task Endpoint_requires_no_auth()
     {
         var ct = TestContext.Current.CancellationToken;
-        caddy.Given(Request.Create().WithPath("/pki/ca/local/active-cert/test.thany.click").UsingGet())
-            .RespondWith(Response.Create().WithStatusCode(404));
-        caddy.Given(Request.Create().WithPath("/config/apps/tls/certificates/automate").UsingGet())
-            .RespondWith(Response.Create().WithStatusCode(404));
+        Directory.CreateDirectory(liveDir);
 
         await using var factory = new CloudApiFactory
         {
             ConnectionString = postgres.ConnectionString,
-            CaddyAdminUrl = caddy.Urls[0],
+            CertLiveDir      = liveDir,
         };
         using var client = factory.CreateClient();
 

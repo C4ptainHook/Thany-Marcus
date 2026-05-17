@@ -9,7 +9,6 @@ using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using ThanyMarcus.Cloud.Api.Features.Admin.Health;
 using ThanyMarcus.Cloud.Api.Features.Bootstrap;
-using ThanyMarcus.Cloud.Api.Infrastructure.Caddy;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 
@@ -66,12 +65,7 @@ builder.Services.AddSingleton<BootstrapState>();
 builder.Services.AddHttpClient(PortalCallbackService.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<PortalCallbackService>();
 
-builder.Services.AddHttpClient<CaddyAdminClient>(c =>
-{
-    c.BaseAddress = new Uri(builder.Configuration["Caddy:AdminUrl"] ?? "http://caddy:2019");
-    c.Timeout = TimeSpan.FromSeconds(5);
-});
-builder.Services.AddScoped<CaddyHealthReader>();
+builder.Services.AddSingleton<CertFileReader>();
 
 builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 {
@@ -105,7 +99,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 });
 
 app.MapAdminHealthEndpoint();
-app.MapCaddyEventsEndpoint();
+app.MapCertInstalledEndpoint();
 
 app.MapFallback(() => Results.NotFound());
 

@@ -27,6 +27,9 @@ packages:
   - jq
   - gettext-base
   - ca-certificates
+  - nginx
+  - certbot
+  - python3-certbot-nginx
 
 write_files:
   - path: /etc/ssh/sshd_config.d/01-hardening.conf
@@ -57,32 +60,29 @@ write_files:
       JWT_SIGNING_KEY=$${JWT_SIGNING_KEY}
       POSTGRES_PASSWORD=$${POSTGRES_PASSWORD}
 
-  - path: /etc/thany-cloud/Caddyfile.tpl
+  - path: /etc/thany-cloud/nginx-site.tpl
     owner: root:root
     permissions: "0644"
     content: |
-      {
-        email $${LE_EMAIL}
-        # ACME_CA_PLACEHOLDER
-        admin caddy:2019
-        events {
-          on cert_obtained exec curl -fsS -X POST \
-            http://cloud-api:8080/internal/caddy-events \
-            -H "Content-Type: application/json" \
-            -d '{"event":"cert_obtained","identifier":"{event.data.identifier}"}'
-        }
-      }
-      $${DOMAIN} {
-        encode gzip
-        handle /admin/* {
-          reverse_proxy cloud-api:8080
-        }
-        handle /api/* {
-          reverse_proxy cloud-api:8080
-        }
-        handle {
-          respond 404
-        }
+      server {
+          listen 80;
+          listen [::]:80;
+          server_name $${DOMAIN};
+
+          location /internal/ {
+              return 404;
+          }
+
+          location / {
+              proxy_pass http://127.0.0.1:8080;
+              proxy_set_header Host $$host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade $$http_upgrade;
+              proxy_set_header Connection "upgrade";
+          }
       }
 
   - path: /etc/systemd/system/thany-cloud.service
@@ -112,7 +112,7 @@ write_files:
     content: |
       [thany-cloud-web]
       title=Thany Cloud (HTTP/HTTPS)
-      description=Caddy + LE
+      description=nginx + LE
       ports=80,443/tcp
 
   - path: /etc/apt/apt.conf.d/50unattended-upgrades
@@ -132,34 +132,23 @@ write_files:
     permissions: "0644"
     content: |
       services:
-        caddy:
-          image: caddy:2.7-alpine
-          restart: unless-stopped
-          ports:
-            - "80:80"
-            - "443:443"
-          volumes:
-            - ./Caddyfile:/etc/caddy/Caddyfile:ro
-            - caddy-data:/data
-            - caddy-config:/config
-          depends_on:
-            cloud-api:
-              condition: service_healthy
-          networks: [cloud]
-
         cloud-api:
           image: ghcr.io/c4ptainhook/thany-cloud-api:$${IMAGE_TAG:-latest}
           restart: unless-stopped
+          ports:
+            - "127.0.0.1:8080:8080"
           environment:
             ASPNETCORE_ENVIRONMENT: Production
             ASPNETCORE_URLS: "http://+:8080"
             ConnectionStrings__Cloud: Host=postgres;Port=5432;Username=cloud;Password=$${POSTGRES_PASSWORD};Database=cloud
-            Caddy__AdminUrl: http://caddy:2019
             Bootstrap__CloudId: $${CLOUD_ID}
             Bootstrap__Hostname: $${DOMAIN}
             Bootstrap__EnrollmentToken: $${ENROLLMENT_TOKEN}
             Bootstrap__CloudAdminToken: $${CLOUD_ADMIN_TOKEN}
             Bootstrap__PortalCallbackUrl: $${PORTAL_CALLBACK_URL}
+            Cert__LiveDir: /etc/letsencrypt/live/$${DOMAIN}
+          volumes:
+            - /etc/letsencrypt:/etc/letsencrypt:ro
           depends_on:
             postgres:
               condition: service_healthy
@@ -187,8 +176,6 @@ write_files:
             retries: 10
 
       volumes:
-        caddy-data:
-        caddy-config:
         pg-data:
 
       networks:
@@ -233,14 +220,36 @@ runcmd:
     # shellcheck disable=SC1091
     . /opt/thany-cloud/.env
     set +a
-    envsubst '$DOMAIN $LE_EMAIL' < /etc/thany-cloud/Caddyfile.tpl > /opt/thany-cloud/Caddyfile
-    if [ -n "${le_acme_ca}" ]; then
-      sed -i "s|# ACME_CA_PLACEHOLDER|acme_ca ${le_acme_ca}|" /opt/thany-cloud/Caddyfile
-    fi
-    chown ${admin_user}:${admin_user} /opt/thany-cloud/Caddyfile
+    envsubst '$DOMAIN' < /etc/thany-cloud/nginx-site.tpl > /etc/nginx/sites-available/$DOMAIN
+    ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
+    rm -f /etc/nginx/sites-enabled/default
+    nginx -t
+    systemctl restart nginx
 
   - systemctl daemon-reload
   - systemctl enable --now thany-cloud.service
+
+  - |
+    set -a
+    . /opt/thany-cloud/.env
+    set +a
+    for i in $(seq 1 60); do
+      if curl -fsS -o /dev/null http://127.0.0.1:8080/health/live; then break; fi
+      sleep 2
+    done
+    DEPLOY_HOOK="curl -fsS -X POST http://127.0.0.1:8080/internal/cert-installed -H 'Content-Type: application/json' -d '{\"event\":\"cert_installed\",\"identifier\":\"'$DOMAIN'\"}'"
+    CERTBOT_FLAGS=""
+    if [ "$LE_ACME_CA" = "https://acme-staging-v02.api.letsencrypt.org/directory" ]; then
+      CERTBOT_FLAGS="--staging"
+    fi
+    certbot --nginx \
+      -d "$DOMAIN" \
+      --non-interactive \
+      --agree-tos \
+      -m "$LE_EMAIL" \
+      --redirect \
+      $CERTBOT_FLAGS \
+      --deploy-hook "$DEPLOY_HOOK"
 
   - shred -u /run/cloud-secrets/cloud_admin_token /run/cloud-secrets/jwt_signing_key /run/cloud-secrets/postgres_password || true
 
@@ -248,4 +257,4 @@ runcmd:
   - systemctl enable --now unattended-upgrades
   - systemctl restart fail2ban || true
 
-final_message: "Cloud-init completed in $UPTIME seconds. Caddy + Cloud.Api running; registration fires on cert_obtained event."
+final_message: "Cloud-init completed in $UPTIME seconds. nginx + Cloud.Api running; registration fires on cert install."
