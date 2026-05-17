@@ -83,6 +83,7 @@ internal static class SagaHostBuilder
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackTfHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackDnsHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, DestroyEntryHandler>();
+        builder.Services.AddScoped<CancelHandler>();
         builder.Services.AddScoped<SagaPhaseDispatcher>();
 
         builder.Services.AddSingleton<IHttpClientFactory>(_ => new ScriptedHttpFactory(certPollReady));

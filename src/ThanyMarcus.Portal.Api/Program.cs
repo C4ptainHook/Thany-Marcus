@@ -20,6 +20,7 @@ using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Callback;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Cancel;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Create;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Destroy;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
@@ -226,6 +227,7 @@ app.MapCloudEventsEndpoints();
 app.MapProviderMetaEndpoints();
 app.MapCloudCallbackEndpoints();
 app.MapDestroyCloudEndpoints();
+app.MapCancelCloudEndpoints();
 app.MapPluginTokenEndpoints();
 app.MapCaptchaEndpoints();
 

@@ -89,6 +89,7 @@ public static class Program
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackTfHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackDnsHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, DestroyEntryHandler>();
+        builder.Services.AddScoped<CancelHandler>();
         builder.Services.AddScoped<SagaPhaseDispatcher>();
 
         builder.Services.AddHttpClient(AwaitingCertHandler.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(5));

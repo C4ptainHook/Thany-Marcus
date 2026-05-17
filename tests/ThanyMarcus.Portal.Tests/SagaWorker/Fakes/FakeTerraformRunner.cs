@@ -72,4 +72,13 @@ public sealed class FakeTerraformRunner : ITerraformRunner
             ? new TerraformResult(1, "", "workspace delete boom (fake)")
             : new TerraformResult(0, "", ""));
     }
+
+    private readonly Queue<bool> hasResourcesResults = new();
+    public void QueueHasResources(bool value) => hasResourcesResults.Enqueue(value);
+
+    public Task<bool> HasResourcesAsync(string workdir, CancellationToken ct)
+    {
+        Calls.Add(("state-list", workdir));
+        return Task.FromResult(hasResourcesResults.Count > 0 ? hasResourcesResults.Dequeue() : false);
+    }
 }

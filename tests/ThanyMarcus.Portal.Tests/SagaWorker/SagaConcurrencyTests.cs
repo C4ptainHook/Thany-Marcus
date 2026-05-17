@@ -129,5 +129,8 @@ public sealed class SagaConcurrencyTests(PostgresFixture postgres) : DbIntegrati
 
         public Task<TerraformResult> DeleteWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct) =>
             Task.FromResult(new TerraformResult(0, "", ""));
+
+        public Task<bool> HasResourcesAsync(string workdir, CancellationToken ct) =>
+            Task.FromResult(false);
     }
 }

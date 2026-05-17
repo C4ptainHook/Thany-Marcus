@@ -116,18 +116,18 @@ packages:
 
           location / {
               proxy_pass http://127.0.0.1:8080;
-              proxy_set_header Host $$host;
-              proxy_set_header X-Real-IP $$remote_addr;
-              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
-              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
               proxy_http_version 1.1;
-              proxy_set_header Upgrade $$http_upgrade;
+              proxy_set_header Upgrade $http_upgrade;
               proxy_set_header Connection "upgrade";
           }
       }
 ```
 
-**Important:** `$$host` etc. are nginx variables that survive terraform templatefile `${...}` interp. Single `$` would be eaten. (Same escape pattern legacy `5af3afd` uses for `$host`, `$remote_addr`, `$proxy_add_x_forwarded_for`, `$scheme`, `$http_upgrade`.) `$${DOMAIN}` is the cloud-init `envsubst` target — single `$` survives terraform, double-`${...}` is substituted by `envsubst` at first boot.
+**Important — terraform templatefile escape rules:** terraform's `$$` escape collapses to `$` **only when followed by `{`** (i.e., `$${VAR}` → `${VAR}`). A bare `$host` is NOT a terraform interpolation token (no `{`) and therefore survives terraform unchanged. So nginx variables MUST be written as single `$host`, `$remote_addr`, etc. (matching legacy `5af3afd`). Writing `$$host` is WRONG — terraform leaves it as `$$host` in output, which nginx rejects with `invalid variable name`. `$${DOMAIN}` IS correct because `$` is followed by `{` — terraform collapses it to `${DOMAIN}` for envsubst to consume at first boot.
 
 **Compose `caddy:` service** (lines 134–148) — delete entirely. `cloud-api` service needs adjustments:
 ```yaml
