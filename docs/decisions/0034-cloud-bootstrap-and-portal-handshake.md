@@ -1,6 +1,6 @@
 # ADR-0034: Cloud bootstrap and portal handshake — payloads, cadences, retry budgets
 
-Status: Accepted (event-driven refactor 2026-05-17, CLOUD-001; §5 DNS ordering clarified 2026-05-17, PORTAL-010b)
+Status: Accepted (event-driven refactor 2026-05-17, CLOUD-001; §5 DNS ordering clarified 2026-05-17, PORTAL-010b; nginx + certbot deploy-hook amendment 2026-05-17, CLOUD-001 amendment)
 Date: 2026-05-16
 
 ## Context
@@ -53,10 +53,10 @@ Body (JSON):
 - **No auth.** `cert_ready` is non-secret. The portal hits this endpoint before it has any admin token in the post-restart / re-poll cases, and threading the token through would force extra wizard-state plumbing for zero security gain.
 - The other `/admin/*` endpoints (e.g. CLOUD-005's `/admin/register-with-portal`) DO require `cloud_admin_token`. `/admin/health` is the one exception.
 - `registration_status` lets the portal surface a separate failure mode (LE worked but the cloud failed to call back) from `failed_cert` (LE didn't work).
-- The cloud-side implementation (as of CLOUD-001, 2026-05-17):
-  - `cert_ready` is read live from Caddy's admin API at `http://caddy:2019` (path `/pki/ca/local/active-cert/{hostname}` with fallback to `/config/apps/tls/certificates/automate`). No file watcher, no shared volume, no sidecar.
+- The cloud-side implementation (as of the CLOUD-001 amendment, 2026-05-17):
+  - `cert_ready` is sourced by `CertFileReader` checking `File.Exists` on `${Cert:LiveDir}/fullchain.pem` and `privkey.pem` (default `/etc/letsencrypt/live/{hostname}`). The directory is bind-mounted read-only into the `cloud-api` container from the host. **This supersedes the Caddy admin API source described in the original CLOUD-001.**
   - `registration_status` is held in process memory by `BootstrapState`, transitioned by `PortalCallbackService` on success/failure of the callback POST.
-  - The placeholder `nginx + cert-watcher + register-with-portal.sh` chain from PORTAL-010 is **retired** in CLOUD-001.
+  - The placeholder `nginx + cert-watcher + register-with-portal.sh` chain from PORTAL-010 was retired in the initial CLOUD-001 (Caddy-based) cut; the amendment re-introduces host-level nginx but the cert-watcher / shell-script chain stays gone — certbot's `--deploy-hook` replaces it.
 
 ### 3. Portal poll cadence (lifts DEC-003)
 
@@ -66,9 +66,11 @@ Body (JSON):
 
 ### 4. Cloud-side retry budget on the registration POST
 
-The callback is triggered by Caddy's built-in `cert_obtained` event (Caddyfile `events { on cert_obtained exec curl ... }`), which fires once when Let's Encrypt issues the cert. The event hits Cloud.Api at `POST /internal/caddy-events` on the internal Docker network, which dispatches `PortalCallbackService.PostRegistrationAsync` on the host lifetime.
+The callback is triggered by certbot's `--deploy-hook` (`certbot --nginx ... --deploy-hook 'curl http://127.0.0.1:8080/internal/cert-installed ...'`), which fires once when Let's Encrypt issues the cert and again on every successful renewal. The hook hits Cloud.Api at `POST /internal/cert-installed` on the host loopback (the container publishes `127.0.0.1:8080:8080` only), which dispatches `PortalCallbackService.PostRegistrationAsync` on the host lifetime.
 
-`PortalCallbackService` retries the POST 8 times with exponential backoff: 1, 2, 4, 8, 16, 32, 64, 128 s → ~4-min total per event firing. On success it flips `BootstrapState.RegistrationStatus = "registered"`; on a permanent 4xx it flips `"failed"`. The semaphore-style gate on `BootstrapState` dedupes concurrent invocations (Caddy fires `cert_obtained` on initial issuance and on every renewal).
+`PortalCallbackService` retries the POST 8 times with exponential backoff: 1, 2, 4, 8, 16, 32, 64, 128 s → ~4-min total per event firing. On success it flips `BootstrapState.RegistrationStatus = "registered"`; on a permanent 4xx it flips `"failed"`. The semaphore-style gate on `BootstrapState` dedupes concurrent invocations (deploy-hook re-fires on every renewal).
+
+**Amendment (2026-05-17):** the trigger mechanism changed from Caddy `events { on cert_obtained exec ... }` (which required the unbundled `caddy-events-exec` plugin and failed in the PORTAL-011 smokes) to certbot's built-in `--deploy-hook`. Payload shape (`{event, identifier}`), endpoint semantics (anonymous, identifier-matched, fire-and-forget POST to `PortalCallbackService`), retry budget, and dedup behavior are all preserved. The endpoint was renamed `/internal/caddy-events` → `/internal/cert-installed`.
 
 The saga's `awaiting_cloud_callback` timeout was raised from 5 min to **15 min** as part of CLOUD-001 (defense-in-depth: even though the event fires within seconds of LE acquisition, slow LE acquisition itself can push past 5 min).
 
@@ -81,7 +83,8 @@ The cloud retries only on 5xx and network errors. A 4xx (validation failure on `
 - DNS — PORTAL-010b runs the Cloudflare A-record create *after* terraform apply, in the `dns_creating` saga phase, because the droplet IP is only known once terraform returns. Cloud-init's LE retries (60 s × 30 min per DEC-003) absorb the DNS-propagation window; the system does not need a pre-create step. The earlier "pre-create" framing in `tickets-2026-05-13.md` line 91 is abandoned.
 - LLM model pulls — CLOUD-007 owns the first-boot Ollama pull. Cloud-init only brings up the placeholder API.
 - DB migrations — CLOUD-002 owns Postgres + pgvector. The PORTAL-010 compose scaffold does not include Postgres at all.
-- TLS termination override — Caddy gets prod LE by default. The `le_acme_ca` terraform var injects a staging-CA override when non-empty (used by `scripts/cloud-init-smoke.sh`).
+- TLS termination override — certbot uses prod LE by default. The `le_acme_ca` terraform var, when set to the LE staging URL, threads `--staging` into the cloud-init `certbot --nginx` invocation (used by `scripts/cloud-init-smoke.sh`). The `--nginx` plugin does not accept arbitrary ACME server URLs, so only the prod/staging toggle is supported.
+- **Caddy reverse-proxy (ADR-0027) retired for user-cloud control plane; nginx + certbot adopted (2026-05-17 amendment).** Caddy may still be used in other deployment contexts (the portal deployment in `docker-compose.yml` continues to use Caddy) but is not the reverse proxy on the user cloud.
 
 ## Consequences
 

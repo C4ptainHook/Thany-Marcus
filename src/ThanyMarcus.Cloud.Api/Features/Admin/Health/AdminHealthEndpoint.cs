@@ -6,13 +6,12 @@ namespace ThanyMarcus.Cloud.Api.Features.Admin.Health;
 public static class AdminHealthEndpoint
 {
     public static void MapAdminHealthEndpoint(this IEndpointRouteBuilder app) =>
-        app.MapGet("/admin/health", async (
-            CaddyHealthReader caddy,
+        app.MapGet("/admin/health", (
+            CertFileReader cert,
             BootstrapState bootstrap,
-            BootstrapOptions opts,
-            CancellationToken ct) =>
+            BootstrapOptions opts) =>
         {
-            var certReady = await caddy.IsCertReadyAsync(opts.Hostname, ct).ConfigureAwait(false);
+            var certReady = cert.IsCertReady();
             return Results.Ok(new CloudAdminHealthResponse(
                 CertReady:          certReady,
                 CloudId:            opts.CloudId,

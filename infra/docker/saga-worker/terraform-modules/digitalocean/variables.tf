@@ -14,7 +14,7 @@ variable "size" {
 }
 
 variable "hostname" {
-  description = "Fully-qualified hostname (e.g. abc12345.thany.click). Used for droplet name + cloud-init bootstrap + Caddy/LE config."
+  description = "Fully-qualified hostname (e.g. abc12345.thany.click). Used for droplet name + cloud-init bootstrap + nginx/LE config."
   type        = string
 }
 
@@ -48,7 +48,7 @@ variable "image_slug" {
 }
 
 variable "le_email" {
-  description = "Let's Encrypt account email used by Caddy's ACME registration."
+  description = "Let's Encrypt account email used by certbot's ACME registration."
   type        = string
 }
 

@@ -3,22 +3,19 @@ using Microsoft.Extensions.Hosting;
 
 namespace ThanyMarcus.Cloud.Api.Features.Bootstrap;
 
-public static partial class CaddyEventsEndpoint
+public static partial class CertInstalledEndpoint
 {
-    public const string CertObtainedEvent = "cert_obtained";
-
-    public static void MapCaddyEventsEndpoint(this IEndpointRouteBuilder app) =>
-        app.MapPost("/internal/caddy-events", (
-            CaddyEventPayload body,
+    public static void MapCertInstalledEndpoint(this IEndpointRouteBuilder app) =>
+        app.MapPost("/internal/cert-installed", (
+            CertInstalledPayload body,
             PortalCallbackService callback,
             BootstrapOptions opts,
             IHostApplicationLifetime lifetime,
-            ILogger<CaddyEventPayloadLog> log) =>
+            ILogger<CertInstalledPayloadLog> log) =>
         {
-            LogReceived(log, body.Event, body.Identifier ?? "(none)");
+            LogReceived(log, body.Identifier ?? "(none)");
 
-            if (body.Event != CertObtainedEvent ||
-                !string.Equals(body.Identifier, opts.Hostname, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(body.Identifier, opts.Hostname, StringComparison.OrdinalIgnoreCase))
             {
                 return Results.NoContent();
             }
@@ -37,20 +34,20 @@ public static partial class CaddyEventsEndpoint
 
             return Results.NoContent();
         })
-        .WithName("CaddyEvents")
+        .WithName("CertInstalled")
         .AllowAnonymous();
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Information,
-        Message = "CaddyEvents: received {Event} for {Identifier}")]
-    private static partial void LogReceived(ILogger logger, string @event, string identifier);
+        Message = "CertInstalled: received event for {Identifier}")]
+    private static partial void LogReceived(ILogger logger, string identifier);
 
     [LoggerMessage(EventId = 2, Level = LogLevel.Error,
-        Message = "CaddyEvents: background callback dispatch failed")]
+        Message = "CertInstalled: background callback dispatch failed")]
     private static partial void LogBackgroundFailure(ILogger logger, Exception ex);
 
-    internal sealed class CaddyEventPayloadLog;
+    internal sealed class CertInstalledPayloadLog;
 }
 
-public sealed record CaddyEventPayload(
-    [property: JsonPropertyName("event")] string Event,
+public sealed record CertInstalledPayload(
+    [property: JsonPropertyName("event")] string? Event,
     [property: JsonPropertyName("identifier")] string? Identifier);

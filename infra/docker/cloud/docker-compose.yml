@@ -1,32 +1,21 @@
 services:
-  caddy:
-    image: caddy:2.7-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      cloud-api:
-        condition: service_healthy
-    networks: [cloud]
-
   cloud-api:
     image: ghcr.io/c4ptainhook/thany-cloud-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: "http://+:8080"
       ConnectionStrings__Cloud: Host=postgres;Port=5432;Username=cloud;Password=${POSTGRES_PASSWORD};Database=cloud
-      Caddy__AdminUrl: http://caddy:2019
       Bootstrap__CloudId: ${CLOUD_ID}
       Bootstrap__Hostname: ${DOMAIN}
       Bootstrap__EnrollmentToken: ${ENROLLMENT_TOKEN}
       Bootstrap__CloudAdminToken: ${CLOUD_ADMIN_TOKEN}
       Bootstrap__PortalCallbackUrl: ${PORTAL_CALLBACK_URL}
+      Cert__LiveDir: /etc/letsencrypt/live/${DOMAIN}
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,8 +43,6 @@ services:
       retries: 10
 
 volumes:
-  caddy-data:
-  caddy-config:
   pg-data:
 
 networks:

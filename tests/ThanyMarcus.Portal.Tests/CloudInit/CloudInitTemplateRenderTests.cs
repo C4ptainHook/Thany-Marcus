@@ -51,11 +51,10 @@ public sealed class CloudInitTemplateRenderTests
     }
 
     [Fact]
-    public void Preserves_runtime_envsubst_placeholders_for_caddyfile()
+    public void Preserves_runtime_envsubst_placeholders()
     {
         var rendered = Rendered.Value;
         rendered.ShouldContain("${DOMAIN}");
-        rendered.ShouldContain("${LE_EMAIL}");
     }
 
     [Fact]
@@ -87,13 +86,14 @@ public sealed class CloudInitTemplateRenderTests
     }
 
     [Fact]
-    public void Installs_envsubst_jq_curl_and_hardening_packages()
+    public void Installs_required_packages_including_nginx_and_certbot()
     {
         var packages = ((IEnumerable<object>)Parsed.Value["packages"])
             .Select(p => p.ToString()!)
             .ToHashSet();
         foreach (var required in new[] { "ufw", "fail2ban", "unattended-upgrades",
-                                         "curl", "jq", "gettext-base", "ca-certificates", "gnupg" })
+                                         "curl", "jq", "gettext-base", "ca-certificates", "gnupg",
+                                         "nginx", "certbot", "python3-certbot-nginx" })
         {
             packages.ShouldContain(required);
         }
@@ -172,42 +172,99 @@ public sealed class CloudInitTemplateRenderTests
     }
 
     [Fact]
-    public void Caddyfile_template_uses_handle_blocks_and_wires_cert_obtained_event()
+    public void Nginx_site_template_proxies_to_loopback_and_blocks_internal_path()
     {
-        var caddy = ExtractWriteFile("/etc/thany-cloud/Caddyfile.tpl");
-        caddy.ShouldContain("email ${LE_EMAIL}");
-        caddy.ShouldContain("${DOMAIN}");
-        caddy.ShouldContain("admin caddy:2019");
-        caddy.ShouldContain("events {");
-        caddy.ShouldContain("on cert_obtained exec");
-        caddy.ShouldContain("/internal/caddy-events");
-        caddy.ShouldContain("handle /admin/* {");
-        caddy.ShouldContain("handle /api/* {");
-        caddy.ShouldContain("reverse_proxy cloud-api:8080");
+        var site = ExtractWriteFile("/etc/thany-cloud/nginx-site.tpl");
+        site.ShouldContain("listen 80;");
+        site.ShouldContain("server_name ${DOMAIN};");
+        site.ShouldContain("proxy_pass http://127.0.0.1:8080;");
+        site.ShouldContain("location /internal/");
+        site.ShouldContain("return 404;");
+        site.ShouldContain("proxy_set_header Host $host;");
+        site.ShouldContain("proxy_set_header X-Forwarded-Proto $scheme;");
+        site.ShouldNotContain("listen 443");
     }
 
     [Fact]
-    public void Compose_file_runs_real_cloud_api_image_with_postgres_and_no_cert_watcher()
+    public void Cloud_init_does_not_reference_caddy_anywhere()
+    {
+        var rendered = Rendered.Value;
+        rendered.ShouldNotContain("caddy", Case.Insensitive);
+        rendered.ShouldNotContain("Caddyfile");
+        rendered.ShouldNotContain("events.handlers.exec");
+        rendered.ShouldNotContain("cert_obtained");
+        rendered.ShouldNotContain("/internal/caddy-events");
+    }
+
+    [Fact]
+    public void Compose_file_runs_cloud_api_with_loopback_port_and_letsencrypt_mount()
     {
         var compose = ExtractWriteFile("/opt/thany-cloud/docker-compose.yml");
         compose.ShouldContain("services:");
-        compose.ShouldContain("caddy:");
         compose.ShouldContain("cloud-api:");
         compose.ShouldContain("postgres:");
         compose.ShouldContain("ghcr.io/c4ptainhook/thany-cloud-api");
         compose.ShouldContain("Bootstrap__CloudId");
         compose.ShouldContain("Bootstrap__PortalCallbackUrl");
-        compose.ShouldContain("Caddy__AdminUrl: http://caddy:2019");
+        compose.ShouldContain("Cert__LiveDir: /etc/letsencrypt/live/${DOMAIN}");
+        compose.ShouldContain("\"127.0.0.1:8080:8080\"");
+        compose.ShouldContain("/etc/letsencrypt:/etc/letsencrypt:ro");
+        compose.ShouldNotContain("caddy:");
+        compose.ShouldNotContain("Caddy__AdminUrl");
+        compose.ShouldNotContain("caddy-data");
+        compose.ShouldNotContain("caddy-config");
         compose.ShouldNotContain("cert-watcher:");
-        compose.ShouldNotContain("nginx.conf");
         compose.ShouldNotContain("nginx:alpine");
+    }
+
+    [Fact]
+    public void Compose_does_not_publish_cloud_api_to_public_interface()
+    {
+        var compose = ExtractWriteFile("/opt/thany-cloud/docker-compose.yml");
+        compose.ShouldNotMatch(@"^\s*-\s*""8080:8080""");
+        compose.ShouldNotMatch(@"^\s*-\s*""0\.0\.0\.0:8080:8080""");
+    }
+
+    [Fact]
+    public void Runcmd_renders_nginx_site_and_restarts_nginx()
+    {
+        var runcmd = RuncmdText();
+        runcmd.ShouldContain("envsubst '$DOMAIN' < /etc/thany-cloud/nginx-site.tpl");
+        runcmd.ShouldContain("/etc/nginx/sites-available/$DOMAIN");
+        runcmd.ShouldContain("/etc/nginx/sites-enabled/$DOMAIN");
+        runcmd.ShouldContain("rm -f /etc/nginx/sites-enabled/default");
+        runcmd.ShouldContain("nginx -t");
+        runcmd.ShouldContain("systemctl restart nginx");
+    }
+
+    [Fact]
+    public void Runcmd_invokes_certbot_with_deploy_hook_targeting_cert_installed()
+    {
+        var runcmd = RuncmdText();
+        runcmd.ShouldContain("certbot --nginx");
+        runcmd.ShouldContain("--deploy-hook");
+        runcmd.ShouldContain("--non-interactive");
+        runcmd.ShouldContain("--agree-tos");
+        runcmd.ShouldContain("--redirect");
+        runcmd.ShouldContain("/internal/cert-installed");
+        runcmd.ShouldContain("http://127.0.0.1:8080/internal/cert-installed");
+        runcmd.ShouldContain("http://127.0.0.1:8080/health/live");
+    }
+
+    [Fact]
+    public void Runcmd_orders_docker_stack_before_certbot_run()
+    {
+        var runcmdText = RuncmdText();
+        var systemdIdx = runcmdText.IndexOf("systemctl enable --now thany-cloud.service", StringComparison.Ordinal);
+        var certbotIdx = runcmdText.IndexOf("certbot --nginx", StringComparison.Ordinal);
+        systemdIdx.ShouldBeGreaterThanOrEqualTo(0);
+        certbotIdx.ShouldBeGreaterThan(systemdIdx);
     }
 
     [Fact]
     public void Runcmd_does_not_curl_compose_or_nginx_assets()
     {
         var runcmd = RuncmdText();
-        runcmd.ShouldNotContain("curl -fsSL \"http", Case.Sensitive);
         runcmd.ShouldNotContain("compose_url");
         runcmd.ShouldNotContain("nginx_conf_url");
     }
@@ -228,22 +285,22 @@ public sealed class CloudInitTemplateRenderTests
     }
 
     [Fact]
-    public void Le_acme_ca_override_is_threaded_through_when_set()
+    public void Le_acme_ca_staging_url_threads_staging_flag_into_certbot()
     {
         var vars = new Dictionary<string, string>(SampleVars.Value)
         {
             ["le_acme_ca"] = "https://acme-staging-v02.api.letsencrypt.org/directory",
         };
         var rendered = RenderWith(vars);
-        rendered.ShouldContain("acme_ca https://acme-staging-v02.api.letsencrypt.org/directory");
+        rendered.ShouldContain("https://acme-staging-v02.api.letsencrypt.org/directory");
+        rendered.ShouldContain("CERTBOT_FLAGS=\"--staging\"");
     }
 
     [Fact]
-    public void Le_acme_ca_empty_keeps_prod_endpoint()
+    public void Le_acme_ca_empty_does_not_add_staging_flag_unconditionally()
     {
         var rendered = Rendered.Value;
-        rendered.ShouldNotContain("acme_ca https://acme-staging-v02");
-        rendered.ShouldNotContain("acme_ca https://acme-v02");
+        rendered.ShouldNotMatch(@"CERTBOT_FLAGS=""--staging""\s*$");
     }
 
     private static string ExtractWriteFile(string path)

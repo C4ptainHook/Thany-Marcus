@@ -102,6 +102,12 @@ Plan §50 frames the thesis privacy story as "data never leaves user's cloud." P
 - `plans/cloud-pivot-plan-2026-05-13.md §50` — privacy framing that excludes Cloudflare-proxied user-cloud traffic
 - `plans/tickets-2026-05-13.md` — PORTAL-010, PORTAL-017 own the actual Caddyfile content
 
+## Amendment 2026-05-17 — Caddy retired for user-cloud control plane
+
+User clouds no longer use Caddy. The CLOUD-001 amendment ([[0034-cloud-bootstrap-and-portal-handshake]] §2, §4) replaced the Caddy + `events.handlers.exec` reverse-proxy and cert-event chain with **nginx-on-host + certbot `--deploy-hook`**. The driver was a design defect in the original CLOUD-001 cut: the `events { on cert_obtained exec curl ... }` directive requires the third-party `caddy-events-exec` plugin which is not bundled in `caddy:2.7-alpine`, breaking every PORTAL-011 smoke. Rather than custom-build a Caddy image with the plugin, the amendment adopts the legacy nginx + certbot pattern (modeled on the n8n droplet provisioning at commit `5af3afd`), which is battle-tested on the exact stack (apt-installed nginx + `certbot --nginx` + Docker app behind it on a DO droplet), uses purpose-built primitives (`--deploy-hook` is a first-class certbot feature), and removes a plugin dependency.
+
+The privacy framing (no third-party TLS terminator) is unchanged — nginx + certbot also terminate TLS locally on the user's VPS with their own keys. **Caddy is retained for the portal deployment** (`docker-compose.yml`); the one-Caddyfile-pattern argument from this ADR's original Decision section no longer applies on the user-cloud side.
+
 ## Amendment 2026-05-17 — privacy framing clarified
 
 The original "data never leaves user's cloud" framing (plan §50) was about *user-cloud* data — vault content, knowledge artefacts, processed Markdown, embeddings. It is unchanged: user-cloud traffic still terminates TLS at the user's own Caddy, on the user's own VPS, with no third-party intermediary.
