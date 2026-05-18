@@ -40,6 +40,9 @@ public static class CloudEventsEndpoints
             await using var conn = await connFactory.OpenAsync(ct);
             await using (var listen = new NpgsqlCommand("LISTEN provisioning_job_changed;", conn))
                 await listen.ExecuteNonQueryAsync(ct);
+            await using (var listen2 = new NpgsqlCommand(
+                $"LISTEN {PostgresProvisioningEventBus.PluginTokenIssuedChannel};", conn))
+                await listen2.ExecuteNonQueryAsync(ct);
 
             var state = await LoadJobStateAsync(db, id, cloud, ct);
             foreach (var evt in translator.InitialEvents(state))
@@ -56,6 +59,16 @@ public static class CloudEventsEndpoints
 
             conn.Notification += async (_, args) =>
             {
+                if (args.Channel == PostgresProvisioningEventBus.PluginTokenIssuedChannel)
+                {
+                    var evt = TryParsePluginTokenIssued(args.Payload, id);
+                    if (evt is not null)
+                    {
+                        await WriteSseAsync(http.Response, evt, ct);
+                    }
+                    return;
+                }
+
                 if (!Guid.TryParse(args.Payload, out var changedJobId)) return;
                 if (state is null || state.JobId != changedJobId) return;
                 var current = await LoadJobStateAsync(db, id, cloud, ct);
@@ -112,6 +125,28 @@ public static class CloudEventsEndpoints
         var payload = $": {comment}\n\n";
         await response.Body.WriteAsync(Encoding.UTF8.GetBytes(payload), ct);
         await response.Body.FlushAsync(ct);
+    }
+
+    private static WizardSseEvent.PluginTokenIssuedEvent? TryParsePluginTokenIssued(string payload, Guid expectedCloudId)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("cloudId", out var idProp)
+                || !Guid.TryParse(idProp.GetString(), out var cloudId)
+                || cloudId != expectedCloudId)
+            {
+                return null;
+            }
+            var rawToken = root.GetProperty("rawToken").GetString() ?? "";
+            var deepLink = root.GetProperty("deepLink").GetString() ?? "";
+            return WizardSseEvent.PluginTokenIssued(rawToken, deepLink);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static async Task RunHeartbeatAsync(HttpResponse response, CancellationToken ct)

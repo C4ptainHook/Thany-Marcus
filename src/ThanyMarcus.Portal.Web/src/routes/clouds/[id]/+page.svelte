@@ -24,6 +24,7 @@
       awaiting_cloud_callback: 'pending',
       cloud_registered: 'pending',
       awaiting_cert: 'pending',
+      issuing_plugin_token: 'pending',
     };
     const currentIdx = PhaseOrder.indexOf(c.provisioningStatus as PhaseName);
     if (currentIdx >= 0) {

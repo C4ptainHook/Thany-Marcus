@@ -9,6 +9,7 @@
   import DangerZone from '$lib/DangerZone.svelte';
   import OnboardingChecklist from '$lib/OnboardingChecklist.svelte';
   import ProvisioningInFlight from '$lib/ProvisioningInFlight.svelte';
+  import PluginTokenReveal from '$lib/PluginTokenReveal.svelte';
   import {
     isInFlight, isFailed, isTerminalEmpty,
     IN_FLIGHT_DESTROY_STATUSES,
@@ -90,6 +91,11 @@
   {:else if typeof view === 'object' && view.kind === 'in-flight'}
     {#if data.cloud}
       <ProvisioningInFlight cloud={data.cloud} mode={view.mode} onTerminal={() => invalidateAll()} />
+      {#if view.mode === 'create'}
+        <!-- FORK: task #22's success-view layout owns the surrounding chrome; this reveal is
+             a self-contained slot that listens to the same SSE channel for plugin_token_issued. -->
+        <PluginTokenReveal cloudId={data.cloud.cloudId} />
+      {/if}
     {/if}
 
   {:else if view === 'dashboard'}

@@ -27,7 +27,7 @@ public sealed class SagaStatusTests
     }
 
     [Fact]
-    public void Terminal_set_membership_is_exactly_8_states()
+    public void Terminal_set_membership_is_exactly_9_states()
     {
         SagaStatus.Terminal.ShouldBe(new[]
         {
@@ -36,6 +36,7 @@ public sealed class SagaStatusTests
             SagaStatus.FailedDns,
             SagaStatus.FailedCallback,
             SagaStatus.FailedCert,
+            SagaStatus.FailedPluginToken,
             SagaStatus.FailedDestroy,
             SagaStatus.Cancelled,
             SagaStatus.RolledBack,

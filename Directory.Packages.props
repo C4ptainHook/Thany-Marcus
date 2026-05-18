@@ -62,5 +62,20 @@
 
     <!-- WireMock for CloudflareDnsClient tests (PORTAL-010b). -->
     <PackageVersion Include="WireMock.Net" Version="1.7.*" />
+
+    <!-- S3-compatible storage (DO Spaces, R2, MinIO) for IArtifactStore (CLOUD-002). -->
+    <PackageVersion Include="AWSSDK.S3" Version="4.*" />
+    <PackageVersion Include="Testcontainers.Minio" Version="4.*" />
+
+    <!-- URL extraction: Readability port + HTML→Markdown (CLOUD-002 Pass B). AngleSharp pulled transitively. -->
+    <PackageVersion Include="SmartReader" Version="0.10.*" />
+    <PackageVersion Include="ReverseMarkdown" Version="4.*" />
+
+    <!-- LLM (CLOUD-002 Pass B): Microsoft.Extensions.AI.IChatClient abstraction +
+         LlmTornado multi-provider adapter (30+ native providers including Anthropic).
+         Provider swap is a ChatModel argument change; no parallel client per vendor. -->
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.*" />
+    <PackageVersion Include="LlmTornado" Version="3.*" />
+    <PackageVersion Include="LlmTornado.Microsoft.Extensions.AI" Version="1.*" />
   </ItemGroup>
 </Project>

@@ -20,6 +20,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Respawn" />
     <PackageReference Include="NodaTime" />
     <PackageReference Include="NodaTime.Testing" />
     <PackageReference Include="WireMock.Net" />

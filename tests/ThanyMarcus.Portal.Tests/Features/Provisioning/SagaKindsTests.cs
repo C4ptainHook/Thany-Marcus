@@ -10,11 +10,12 @@ public sealed class SagaKindsTests
     {
         SagaKinds.Create.ShouldBe("create");
         SagaKinds.Destroy.ShouldBe("destroy");
+        SagaKinds.Cancel.ShouldBe("cancel");
     }
 
     [Fact]
-    public void All_contains_both_kinds()
+    public void All_contains_known_kinds()
     {
-        SagaKinds.All.ShouldBe(new[] { SagaKinds.Create, SagaKinds.Destroy }, ignoreOrder: true);
+        SagaKinds.All.ShouldBe(new[] { SagaKinds.Create, SagaKinds.Destroy, SagaKinds.Cancel }, ignoreOrder: true);
     }
 }

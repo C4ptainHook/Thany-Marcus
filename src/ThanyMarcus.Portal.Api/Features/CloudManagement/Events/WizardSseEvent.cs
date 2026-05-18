@@ -14,6 +14,8 @@ public abstract record WizardSseEvent(string Type)
         : WizardSseEvent("cloud_failed");
     public sealed record CloudRolledBackEvent(string Reason)
         : WizardSseEvent("cloud_rolled_back");
+    public sealed record PluginTokenIssuedEvent(string RawToken, string DeepLink)
+        : WizardSseEvent("plugin_token_issued");
 
     public static PhaseStartedEvent PhaseStarted(string phase, string at) => new(phase, at);
     public static PhaseCompletedEvent PhaseCompleted(string phase, string at) => new(phase, at);
@@ -24,4 +26,6 @@ public abstract record WizardSseEvent(string Type)
     public static CloudFailedEvent CloudFailed(string terminalStatus, string reason, string message)
         => new(terminalStatus, reason, message);
     public static CloudRolledBackEvent CloudRolledBack(string reason) => new(reason);
+    public static PluginTokenIssuedEvent PluginTokenIssued(string rawToken, string deepLink)
+        => new(rawToken, deepLink);
 }

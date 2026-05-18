@@ -11,4 +11,5 @@ public interface ITerraformRunner
     Task<JsonDocument> OutputJsonAsync(string workdir, CancellationToken ct);
     Task ForceUnlockAsync(string workdir, string lockId, CancellationToken ct);
     Task<TerraformResult> DeleteWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct);
+    Task<bool> HasResourcesAsync(string workdir, CancellationToken ct);
 }

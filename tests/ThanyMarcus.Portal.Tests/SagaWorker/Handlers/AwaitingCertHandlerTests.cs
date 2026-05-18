@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NodaTime;
 using Shouldly;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 using ThanyMarcus.Portal.Tests.Infrastructure;
@@ -15,7 +16,7 @@ namespace ThanyMarcus.Portal.Tests.SagaWorker.Handlers;
 public sealed class AwaitingCertHandlerTests(PostgresFixture postgres) : DbIntegrationTestBase(postgres)
 {
     [Fact]
-    public async Task Cert_ready_transitions_to_succeeded_and_sets_cloud_completion()
+    public async Task Cert_ready_transitions_to_issuing_plugin_token()
     {
         var ct = TestContext.Current.CancellationToken;
         var dp = new EphemeralDataProtectionProvider();
@@ -27,15 +28,15 @@ public sealed class AwaitingCertHandlerTests(PostgresFixture postgres) : DbInteg
         var handler = new AwaitingCertHandler(
             Db, Clock,
             BuildHttpFactory(returnCertReady: true),
+            new StubAdminTokenAccessor(),
             NullLogger<AwaitingCertHandler>.Instance);
 
         await handler.HandleAsync(job, ct);
         Db.ChangeTracker.Clear();
 
         var reloaded = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
-        reloaded.Status.ShouldBe(SagaStatus.Succeeded);
-        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
-        reloadedCloud.ProvisioningCompletedAt.ShouldNotBeNull();
+        reloaded.Status.ShouldBe(SagaStatus.IssuingPluginToken);
+        _ = cloud;
     }
 
     [Fact]
@@ -56,6 +57,7 @@ public sealed class AwaitingCertHandlerTests(PostgresFixture postgres) : DbInteg
         var handler = new AwaitingCertHandler(
             Db, Clock,
             BuildHttpFactory(returnCertReady: false),
+            new StubAdminTokenAccessor(),
             NullLogger<AwaitingCertHandler>.Instance);
 
         await handler.HandleAsync(job, ct);
@@ -84,6 +86,7 @@ public sealed class AwaitingCertHandlerTests(PostgresFixture postgres) : DbInteg
         var handler = new AwaitingCertHandler(
             Db, Clock,
             BuildHttpFactory(returnCertReady: false),
+            new StubAdminTokenAccessor(),
             NullLogger<AwaitingCertHandler>.Instance);
 
         await handler.HandleAsync(job, ct);
@@ -95,6 +98,12 @@ public sealed class AwaitingCertHandlerTests(PostgresFixture postgres) : DbInteg
 
     private static ScriptedHttpFactory BuildHttpFactory(bool returnCertReady) =>
         new(returnCertReady);
+
+    private sealed class StubAdminTokenAccessor : ICloudAdminTokenAccessor
+    {
+        public Task<string?> GetPlaintextAsync(Guid cloudId, CancellationToken ct)
+            => Task.FromResult<string?>("stub-cloud-admin-token");
+    }
 
     private sealed class ScriptedHttpFactory(bool certReady) : IHttpClientFactory
     {

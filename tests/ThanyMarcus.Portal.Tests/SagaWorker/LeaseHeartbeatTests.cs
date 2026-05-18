@@ -150,5 +150,8 @@ public sealed class LeaseHeartbeatTests(PostgresFixture postgres) : DbIntegratio
 
         public Task<TerraformResult> DeleteWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct) =>
             Task.FromResult(new TerraformResult(0, "", ""));
+
+        public Task<bool> HasResourcesAsync(string workdir, CancellationToken ct) =>
+            Task.FromResult(false);
     }
 }

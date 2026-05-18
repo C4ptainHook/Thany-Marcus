@@ -34,6 +34,11 @@ public static class PluginTokenEndpoints
         })
         .RequireAuthorization();
 
+        // FORK: this endpoint becomes the rotation path once PORTAL-012 builds the cloud-detail
+        // UI. Until then, the saga's IssuingPluginTokenHandler is the only path that issues a
+        // working plugin token (it also syncs the hash to the cloud's plugin_tokens table).
+        // Calling this endpoint today writes portal-side metadata only — the cloud will not
+        // recognize the resulting token. Wired to the rotation TOTP gate already.
         app.MapPost("/api/clouds/{id:guid}/plugin-tokens", async (
             Guid id,
             ClaimsPrincipal user,
@@ -59,7 +64,7 @@ public static class PluginTokenEndpoints
             }
 
             var raw = "tm_" + RandomNumberGenerator.GetHexString(64).ToLowerInvariant();
-            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
 
             var meta = new PluginTokenMetadata
             {

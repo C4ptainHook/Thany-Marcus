@@ -8,22 +8,24 @@ public static class SagaStatus
     public const string DnsCreating           = "dns_creating";
     public const string AwaitingCloudCallback = "awaiting_cloud_callback";
     public const string AwaitingCert          = "awaiting_cert";
+    public const string IssuingPluginToken    = "issuing_plugin_token";
     public const string RollingBackTf         = "rolling_back_tf";
     public const string RollingBackDns        = "rolling_back_dns";
     public const string Destroying            = "destroying";
 
-    public const string Succeeded       = "succeeded";
-    public const string FailedTf        = "failed_tf";
-    public const string FailedDns       = "failed_dns";
-    public const string FailedCallback  = "failed_callback";
-    public const string FailedCert      = "failed_cert";
-    public const string FailedDestroy   = "failed_destroy";
-    public const string Cancelled       = "cancelled";
-    public const string RolledBack      = "rolled_back";
+    public const string Succeeded          = "succeeded";
+    public const string FailedTf           = "failed_tf";
+    public const string FailedDns          = "failed_dns";
+    public const string FailedCallback     = "failed_callback";
+    public const string FailedCert         = "failed_cert";
+    public const string FailedPluginToken  = "failed_plugin_token";
+    public const string FailedDestroy      = "failed_destroy";
+    public const string Cancelled          = "cancelled";
+    public const string RolledBack         = "rolled_back";
 
     public static readonly IReadOnlyList<string> Terminal =
     [
-        Succeeded, FailedTf, FailedDns, FailedCallback, FailedCert, FailedDestroy, Cancelled, RolledBack,
+        Succeeded, FailedTf, FailedDns, FailedCallback, FailedCert, FailedPluginToken, FailedDestroy, Cancelled, RolledBack,
     ];
 
     private static readonly HashSet<string> TerminalSet = new(Terminal, StringComparer.Ordinal);

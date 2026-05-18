@@ -53,6 +53,22 @@ public sealed partial class TerraformRunner(IConfiguration config, ILogger<Terra
             ImmutableDictionary<string, string>.Empty, ct);
     }
 
+    public async Task<bool> HasResourcesAsync(string workdir, CancellationToken ct)
+    {
+        if (!Directory.Exists(workdir))
+        {
+            return false;
+        }
+        var result = await RunAsync(workdir,
+            ["state", "list", "-no-color"],
+            ImmutableDictionary<string, string>.Empty, ct);
+        if (!result.Success)
+        {
+            return false;
+        }
+        return !string.IsNullOrWhiteSpace(result.Stdout);
+    }
+
     public async Task ForceUnlockAsync(string workdir, string lockId, CancellationToken ct)
     {
         var result = await RunAsync(workdir, ["force-unlock", "-force", lockId], ImmutableDictionary<string, string>.Empty, ct);

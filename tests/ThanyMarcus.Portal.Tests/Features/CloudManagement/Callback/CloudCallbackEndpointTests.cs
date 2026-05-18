@@ -1,14 +1,17 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using NodaTime;
 using Npgsql;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Callback;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Tests.Infrastructure;
 
@@ -179,9 +182,11 @@ public sealed class CloudCallbackEndpointTests(PostgresFixture postgres) : Facto
         reloadedJob.EventsLog.RootElement.GetRawText().ShouldContain("cloud_registered");
 
         var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
-        reloadedCloud.CloudAdminTokenHash.ShouldNotBeNull();
-        reloadedCloud.CloudAdminTokenHash!.ShouldBe(
-            SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("the-admin-token")));
+        reloadedCloud.EncryptedCloudAdminToken.ShouldNotBeNull();
+        var dpp = Factory.Services.GetRequiredService<IDataProtectionProvider>();
+        var protector = dpp.CreateProtector(CloudAdminTokenAccessor.DataProtectionPurpose);
+        var plaintext = Encoding.UTF8.GetString(protector.Unprotect(reloadedCloud.EncryptedCloudAdminToken!));
+        plaintext.ShouldBe("the-admin-token");
         reloadedCloud.AdminStartedAt.ShouldNotBeNull();
     }
 

@@ -375,10 +375,6 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("cert_started_at");
 
-                    b.Property<byte[]>("CloudAdminTokenHash")
-                        .HasColumnType("bytea")
-                        .HasColumnName("cloud_admin_token_hash");
-
                     b.Property<Instant>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -390,6 +386,10 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                     b.Property<Instant?>("DnsStartedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("dns_started_at");
+
+                    b.Property<byte[]>("EncryptedCloudAdminToken")
+                        .HasColumnType("bytea")
+                        .HasColumnName("encrypted_cloud_admin_token");
 
                     b.Property<string>("Hostname")
                         .IsRequired()
@@ -500,9 +500,9 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("revoked_at");
 
-                    b.Property<string>("TokenHash")
+                    b.Property<byte[]>("TokenHash")
                         .IsRequired()
-                        .HasColumnType("text")
+                        .HasColumnType("bytea")
                         .HasColumnName("token_hash");
 
                     b.Property<Instant>("UpdatedAt")

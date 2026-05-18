@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.CloudAdmin;
@@ -14,6 +15,7 @@ public sealed partial class AwaitingCertHandler(
     PortalDbContext db,
     IClock clock,
     IHttpClientFactory httpFactory,
+    ICloudAdminTokenAccessor adminTokens,
     ILogger<AwaitingCertHandler> log) : ISagaPhaseHandler
 {
     public string Phase => SagaStatus.AwaitingCert;
@@ -24,7 +26,6 @@ public sealed partial class AwaitingCertHandler(
     private static readonly Duration FastCadence    = Duration.FromSeconds(5);
     private static readonly Duration SlowCadence    = Duration.FromSeconds(30);
     private static readonly Duration FastWindow     = Duration.FromSeconds(60);
-    private const string StubCloudAdminToken       = "stub-cloud-admin-token";
 
     public async Task HandleAsync(ProvisioningJob job, CancellationToken ct)
     {
@@ -68,10 +69,9 @@ public sealed partial class AwaitingCertHandler(
 
         if (certReady)
         {
-            cloud.ProvisioningCompletedAt = clock.GetCurrentInstant();
             EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["event"] = "cert_ready" });
             await SagaTransitions.TransitionAsync(
-                db, clock, job, SagaStatus.Succeeded, Duration.Zero, ct: ct);
+                db, clock, job, SagaStatus.IssuingPluginToken, Duration.Zero, ct: ct);
             return;
         }
 
@@ -81,9 +81,13 @@ public sealed partial class AwaitingCertHandler(
 
     private async Task<bool> PollHealthAsync(Cloud cloud, CancellationToken ct)
     {
+        var adminToken = await adminTokens.GetPlaintextAsync(cloud.Id, ct);
         using var http = httpFactory.CreateClient(HttpClientName);
         using var req = new HttpRequestMessage(HttpMethod.Get, $"https://{cloud.Hostname}/admin/health");
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", StubCloudAdminToken);
+        if (!string.IsNullOrEmpty(adminToken))
+        {
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+        }
         using var resp = await http.SendAsync(req, ct);
         resp.EnsureSuccessStatusCode();
         var payload = await resp.Content.ReadFromJsonAsync<CloudAdminHealthResponse>(ct);

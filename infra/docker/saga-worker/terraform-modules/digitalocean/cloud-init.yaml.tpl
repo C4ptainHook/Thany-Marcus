@@ -56,6 +56,12 @@ write_files:
       IMAGE_TAG=${image_tag}
       ENROLLMENT_TOKEN=${enrollment_token}
       PORTAL_CALLBACK_URL=${portal_callback_url}
+      STORAGE_PROVIDER=${storage_provider}
+      STORAGE_ENDPOINT=${storage_endpoint}
+      STORAGE_REGION=${storage_region}
+      STORAGE_BUCKET=${storage_bucket}
+      STORAGE_ACCESS_KEY_ID=${storage_access_key_id}
+      STORAGE_ACCESS_KEY_SECRET=${storage_access_secret}
       CLOUD_ADMIN_TOKEN=$${CLOUD_ADMIN_TOKEN}
       JWT_SIGNING_KEY=$${JWT_SIGNING_KEY}
       POSTGRES_PASSWORD=$${POSTGRES_PASSWORD}
@@ -75,12 +81,12 @@ write_files:
 
           location / {
               proxy_pass http://127.0.0.1:8080;
-              proxy_set_header Host $$host;
-              proxy_set_header X-Real-IP $$remote_addr;
-              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
-              proxy_set_header X-Forwarded-Proto $$scheme;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
               proxy_http_version 1.1;
-              proxy_set_header Upgrade $$http_upgrade;
+              proxy_set_header Upgrade $http_upgrade;
               proxy_set_header Connection "upgrade";
           }
       }
@@ -146,6 +152,12 @@ write_files:
             Bootstrap__EnrollmentToken: $${ENROLLMENT_TOKEN}
             Bootstrap__CloudAdminToken: $${CLOUD_ADMIN_TOKEN}
             Bootstrap__PortalCallbackUrl: $${PORTAL_CALLBACK_URL}
+            Storage__Provider: $${STORAGE_PROVIDER}
+            Storage__Endpoint: $${STORAGE_ENDPOINT}
+            Storage__Region: $${STORAGE_REGION}
+            Storage__Bucket: $${STORAGE_BUCKET}
+            Storage__AccessKeyId: $${STORAGE_ACCESS_KEY_ID}
+            Storage__AccessKeySecret: $${STORAGE_ACCESS_KEY_SECRET}
             Cert__LiveDir: /etc/letsencrypt/live/$${DOMAIN}
           volumes:
             - /etc/letsencrypt:/etc/letsencrypt:ro
