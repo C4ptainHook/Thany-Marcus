@@ -41,8 +41,8 @@ public sealed partial class IssuingPluginTokenHandler(
                 ["error"] = "missing_admin_token",
             });
             job.LastError = "missing_admin_token";
-            await SagaTransitions.TransitionAsync(
-                db, clock, job, SagaStatus.FailedPluginToken, Duration.Zero, ct: ct);
+            await SagaTransitions.TransitionToTerminalAsync(
+                db, clock, job, cloud, SagaStatus.FailedPluginToken, ct);
             return;
         }
 
@@ -70,8 +70,8 @@ public sealed partial class IssuingPluginTokenHandler(
             var nonRetryable = ex.StatusCode is 400 or 401;
             if (nonRetryable || job.AttemptCount >= opts.MaxAttempts)
             {
-                await SagaTransitions.TransitionAsync(
-                    db, clock, job, SagaStatus.FailedPluginToken, Duration.Zero, ct: ct);
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, SagaStatus.FailedPluginToken, ct);
                 return;
             }
 
@@ -103,8 +103,8 @@ public sealed partial class IssuingPluginTokenHandler(
         await db.SaveChangesAsync(ct);
         await eventBus.PublishPluginTokenIssuedAsync(cloud.Id, raw, deepLink, ct);
 
-        await SagaTransitions.TransitionAsync(
-            db, clock, job, SagaStatus.Succeeded, Duration.Zero, ct: ct);
+        await SagaTransitions.TransitionToTerminalAsync(
+            db, clock, job, cloud, SagaStatus.Succeeded, ct);
     }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,

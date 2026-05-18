@@ -5,7 +5,7 @@ namespace ThanyMarcus.Shared.PluginApi;
 
 public sealed record SyncPullResponse(
     [property: JsonPropertyName("items")]     IReadOnlyList<SyncPullItem> Items,
-    [property: JsonPropertyName("nextSince")] DateTimeOffset NextSince);
+    [property: JsonPropertyName("nextSince")] DateTimeOffset? NextSince);
 
 public sealed record SyncPullItem(
     [property: JsonPropertyName("noteId")]            Guid NoteId,

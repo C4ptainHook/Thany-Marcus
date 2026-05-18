@@ -54,8 +54,8 @@ public sealed partial class TfApplyingHandler(
                     ["error"] = "step_up_required_but_not_unlocked",
                 });
                 job.LastError = "step-up unlock expired or missing";
-                await SagaTransitions.TransitionAsync(
-                    db, clock, job, SagaStatus.FailedTf, Duration.Zero, ct: ct);
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, SagaStatus.FailedTf, ct);
                 return;
             }
 
@@ -67,8 +67,8 @@ public sealed partial class TfApplyingHandler(
                     ["error"] = "provider_token_not_found",
                 });
                 job.LastError = $"no provider token for {cloud.Provider}";
-                await SagaTransitions.TransitionAsync(
-                    db, clock, job, SagaStatus.FailedTf, Duration.Zero, ct: ct);
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, SagaStatus.FailedTf, ct);
                 return;
             }
 
@@ -88,8 +88,8 @@ public sealed partial class TfApplyingHandler(
                 {
                     EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["error"] = "re_init_failed" });
                     job.LastError = "terraform init (recovery) failed";
-                    await SagaTransitions.TransitionAsync(
-                        db, clock, job, SagaStatus.FailedTf, Duration.Zero, ct: ct);
+                    await SagaTransitions.TransitionToTerminalAsync(
+                        db, clock, job, cloud, SagaStatus.FailedTf, ct);
                     return;
                 }
 
@@ -100,8 +100,8 @@ public sealed partial class TfApplyingHandler(
                 {
                     EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["error"] = "re_plan_failed" });
                     job.LastError = "terraform plan (recovery) failed";
-                    await SagaTransitions.TransitionAsync(
-                        db, clock, job, SagaStatus.FailedTf, Duration.Zero, ct: ct);
+                    await SagaTransitions.TransitionToTerminalAsync(
+                        db, clock, job, cloud, SagaStatus.FailedTf, ct);
                     return;
                 }
             }

@@ -42,7 +42,7 @@ public static class SyncPullEndpoint
         {
             return Results.Ok(new SyncPullResponse(
                 Items: Array.Empty<SyncPullItem>(),
-                NextSince: sinceInstant.ToDateTimeOffset()));
+                NextSince: null));
         }
 
         var noteIds = notes.Select(n => n.Id).ToList();

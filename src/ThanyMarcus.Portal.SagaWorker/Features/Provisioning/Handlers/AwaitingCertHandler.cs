@@ -51,8 +51,8 @@ public sealed partial class AwaitingCertHandler(
                 ["age_seconds"] = (long)age.TotalSeconds,
             });
             job.LastError = "cert provisioning deadline exceeded";
-            await SagaTransitions.TransitionAsync(
-                db, clock, job, SagaStatus.FailedCert, Duration.Zero, ct: ct);
+            await SagaTransitions.TransitionToTerminalAsync(
+                db, clock, job, cloud, SagaStatus.FailedCert, ct);
             return;
         }
 

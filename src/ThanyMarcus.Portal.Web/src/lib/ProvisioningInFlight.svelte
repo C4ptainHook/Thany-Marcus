@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { subscribeToEvents } from './sse';
+  import { apiFetch, parseProblem } from './http';
   import StatusPill from './StatusPill.svelte';
   import { PhaseOrder, type PhaseName, type WizardSseEvent } from './types/provisioning';
   import type { CloudStatusResponse } from './types/cloud';
@@ -35,6 +36,53 @@
 
   let phases = $state(buildInitial(initial, untrack(() => mode) === 'create' ? PhaseOrder : (DESTROY_PHASES as string[])));
   let terminalMessage = $state<string | null>(null);
+
+  let confirming = $state(false);
+  let confirmHost = $state('');
+  let cancelBusy = $state(false);
+  let cancelError = $state<string | null>(null);
+  let cancelRequested = $state(false);
+
+  function startConfirm() {
+    confirming = true;
+    confirmHost = '';
+    cancelError = null;
+  }
+
+  function dismissConfirm() {
+    confirming = false;
+    confirmHost = '';
+    cancelError = null;
+  }
+
+  async function submitCancel() {
+    if (confirmHost !== initial.hostname) {
+      cancelError = 'Hostname does not match.';
+      return;
+    }
+    cancelBusy = true;
+    cancelError = null;
+    try {
+      const r = await apiFetch(`/api/clouds/${initial.cloudId}/cancel`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmHostname: initial.hostname }),
+      });
+      if (r.status === 202 || r.status === 410) {
+        confirming = false;
+        cancelRequested = true;
+        return;
+      }
+      const problem = await parseProblem(r);
+      cancelError = problem?.error
+        ? `Cancel failed: ${problem.error}`
+        : `Cancel failed (HTTP ${r.status}).`;
+    } catch {
+      cancelError = 'Network error. Try again.';
+    } finally {
+      cancelBusy = false;
+    }
+  }
 
   function update(phase: string, s: PhaseState) {
     phases = { ...phases, [phase]: s };
@@ -106,7 +154,39 @@
   {#if terminalMessage}
     <p class="error">{terminalMessage}</p>
   {/if}
+
+  {#if mode === 'create' && !terminalMessage}
+    {#if cancelRequested}
+      <p class="muted">Cancellation requested — finalizing on the server…</p>
+    {:else}
+      <div class="actions">
+        <button class="btn-danger" type="button" onclick={startConfirm}>Abort provisioning</button>
+      </div>
+    {/if}
+  {/if}
 </section>
+
+{#if confirming}
+  <div class="cm-backdrop" role="presentation" onclick={dismissConfirm}></div>
+  <div class="cm-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-title">
+    <h2 id="cancel-title">Abort provisioning?</h2>
+    <p>
+      Stop the in-flight provisioning for <code class="mono">{initial.hostname}</code> and tear down
+      anything already created on the provider. You can start over afterwards.
+    </p>
+    <label>
+      Type the hostname to confirm
+      <input type="text" autocomplete="off" bind:value={confirmHost} placeholder={initial.hostname} />
+    </label>
+    {#if cancelError}<p class="error">{cancelError}</p>{/if}
+    <div class="cm-actions">
+      <button class="btn-secondary" type="button" onclick={dismissConfirm} disabled={cancelBusy}>Keep going</button>
+      <button class="btn-danger"    type="button" onclick={submitCancel}    disabled={cancelBusy || confirmHost !== initial.hostname}>
+        {cancelBusy ? 'Aborting…' : 'Abort provisioning'}
+      </button>
+    </div>
+  </div>
+{/if}
 
 <style>
   .phase-list {
@@ -116,5 +196,51 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
+  }
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--space-4);
+  }
+  .cm-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 990;
+  }
+  .cm-modal {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--surface);
+    color: var(--text);
+    padding: var(--space-5);
+    border: var(--border-width) solid var(--error);
+    max-width: 36rem;
+    z-index: 991;
+  }
+  .cm-modal label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-3);
+  }
+  .cm-modal input { width: 100%; box-sizing: border-box; }
+  .cm-actions {
+    display: flex;
+    gap: var(--space-2);
+    justify-content: flex-end;
+    margin-top: var(--space-4);
+  }
+  .mono { font-family: var(--font-pixel); }
+  @media (max-width: 600px) {
+    .cm-modal {
+      position: fixed;
+      inset: 0;
+      top: 0; left: 0;
+      transform: none;
+      max-width: none;
+      width: 100%;
+      height: 100%;
+    }
   }
 </style>

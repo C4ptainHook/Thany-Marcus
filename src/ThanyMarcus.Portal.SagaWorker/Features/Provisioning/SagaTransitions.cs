@@ -9,6 +9,26 @@ namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 
 public static class SagaTransitions
 {
+    public static Task TransitionToTerminalAsync(
+        PortalDbContext db,
+        IClock clock,
+        ProvisioningJob job,
+        Cloud cloud,
+        string terminalStatus,
+        CancellationToken ct = default)
+    {
+        if (!SagaStatus.IsTerminal(terminalStatus))
+        {
+            throw new ArgumentException(
+                $"'{terminalStatus}' is not a terminal saga status", nameof(terminalStatus));
+        }
+        return TransitionAsync(
+            db, clock, job, terminalStatus, Duration.Zero,
+            cloud: cloud,
+            cloudMutation: c => c.ProvisioningStatus = terminalStatus,
+            ct: ct);
+    }
+
     public static async Task TransitionAsync(
         PortalDbContext db,
         IClock clock,
