@@ -12,3 +12,7 @@ if [[ -z "${DOCKER_HOST:-}" ]] && command -v podman >/dev/null 2>&1; then
     export TESTCONTAINERS_RYUK_DISABLED="${TESTCONTAINERS_RYUK_DISABLED:-true}"
   fi
 fi
+
+if [[ "${CI:-}" == "true" ]]; then
+  export TESTCONTAINERS_RYUK_DISABLED="${TESTCONTAINERS_RYUK_DISABLED:-true}"
+fi
