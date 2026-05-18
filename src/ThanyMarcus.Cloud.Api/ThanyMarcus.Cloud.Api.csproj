@@ -32,6 +32,13 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Process" />
     <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" />
+
+    <PackageReference Include="AWSSDK.S3" />
+    <PackageReference Include="SmartReader" />
+    <PackageReference Include="ReverseMarkdown" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="LlmTornado" />
+    <PackageReference Include="LlmTornado.Microsoft.Extensions.AI" />
   </ItemGroup>
 
   <ItemGroup>

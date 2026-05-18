@@ -1,3 +1,6 @@
+using Amazon.Runtime;
+using Amazon.S3;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +12,16 @@ using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using ThanyMarcus.Cloud.Api.Features.Admin.Health;
 using ThanyMarcus.Cloud.Api.Features.Bootstrap;
+using ThanyMarcus.Cloud.Api.Features.Ingest;
+using ThanyMarcus.Cloud.Api.Features.PluginAuth;
+using ThanyMarcus.Cloud.Api.Features.Processing;
+using ThanyMarcus.Cloud.Api.Features.Settings;
+using ThanyMarcus.Cloud.Api.Features.Sync;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
+using ThanyMarcus.Cloud.Api.Infrastructure.Extraction;
+using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
+using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sweepers;
 using ThanyMarcus.Shared.Database;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -67,6 +79,56 @@ builder.Services.AddSingleton<PortalCallbackService>();
 
 builder.Services.AddSingleton<CertFileReader>();
 
+builder.Services.AddSingleton(_ => new StorageOptions
+{
+    Provider        = builder.Configuration["Storage:Provider"]        ?? StorageProviders.S3,
+    Endpoint        = builder.Configuration["Storage:Endpoint"]        ?? "",
+    Region          = builder.Configuration["Storage:Region"]          ?? "",
+    Bucket          = builder.Configuration["Storage:Bucket"]          ?? "",
+    AccessKeyId     = builder.Configuration["Storage:AccessKeyId"]     ?? "",
+    AccessKeySecret = builder.Configuration["Storage:AccessKeySecret"] ?? "",
+});
+
+builder.Services.AddSingleton<IAmazonS3>(sp =>
+{
+    var o = sp.GetRequiredService<StorageOptions>();
+    var creds = new BasicAWSCredentials(o.AccessKeyId, o.AccessKeySecret);
+    var cfg = new AmazonS3Config
+    {
+        ServiceURL     = o.Endpoint,
+        AuthenticationRegion = o.Region,
+        ForcePathStyle = false,
+    };
+    return new AmazonS3Client(creds, cfg);
+});
+
+builder.Services.AddSingleton<IArtifactStore, S3ArtifactStore>();
+
+builder.Services.AddScoped<IPluginTokenAuthenticator, PluginTokenAuthenticator>();
+builder.Services.AddScoped<RequirePluginAuthFilter>();
+builder.Services.AddScoped<RequireCloudAdminTokenFilter>();
+
+builder.Services.AddHttpClient(UrlExtractor.HttpClientName);
+builder.Services.AddSingleton<IUrlExtractor, UrlExtractor>();
+builder.Services.AddSingleton<IImageExtractor, NotImplementedImageExtractor>();
+builder.Services.AddSingleton<IVoiceExtractor, NotImplementedVoiceExtractor>();
+builder.Services.AddSingleton<IFileExtractor, NotImplementedFileExtractor>();
+
+builder.Services.AddSingleton(_ =>
+    builder.Configuration.GetSection("Llm").Get<LlmOptions>() ?? new LlmOptions());
+builder.Services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
+
+builder.Services.AddScoped<IIngestJobHandler, CompositeIngestHandler>();
+builder.Services.AddHostedService<IngestSagaWorker>();
+builder.Services.AddHostedService<OrphanIngestSweeper>();
+
+var dpKeysDir = builder.Configuration["DataProtection:KeyRingPath"]
+    ?? Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys");
+Directory.CreateDirectory(dpKeysDir);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dpKeysDir))
+    .SetApplicationName("ThanyMarcus.Cloud");
+
 builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 {
     opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
@@ -82,6 +144,8 @@ builder.Services.AddHealthChecks()
         tags: ["ready"]);
 
 var app = builder.Build();
+
+await ApplyMigrationsAsync(app);
 
 app.UseForwardedHeaders();
 
@@ -101,8 +165,19 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 app.MapAdminHealthEndpoint();
 app.MapCertInstalledEndpoint();
 
+app.MapIngestEndpoints();
+app.MapSyncPullEndpoint();
+app.MapAdminSettingsEndpoints();
+
 app.MapFallback(() => Results.NotFound());
 
 await app.RunAsync();
+
+static async Task ApplyMigrationsAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<CloudDbContext>();
+    await db.Database.MigrateAsync();
+}
 
 public partial class Program;
