@@ -11,6 +11,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using ThanyMarcus.Cloud.Api.Features.Admin.Health;
+using ThanyMarcus.Cloud.Api.Features.Admin.PluginTokens;
 using ThanyMarcus.Cloud.Api.Features.Bootstrap;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
@@ -168,6 +169,7 @@ app.MapCertInstalledEndpoint();
 app.MapIngestEndpoints();
 app.MapSyncPullEndpoint();
 app.MapAdminSettingsEndpoints();
+app.MapAdminPluginTokenEndpoints();
 
 app.MapFallback(() => Results.NotFound());
 

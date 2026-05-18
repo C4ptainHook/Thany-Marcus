@@ -18,6 +18,7 @@ public static class DestroyCloudEndpoints
             SagaStatus.Succeeded,
             SagaStatus.AwaitingCert,
             SagaStatus.FailedCert,
+            SagaStatus.FailedPluginToken,
         };
 
     public static void MapDestroyCloudEndpoints(this IEndpointRouteBuilder app)

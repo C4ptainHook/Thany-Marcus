@@ -12,6 +12,8 @@ using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
+using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloud;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloudflare;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 
@@ -60,6 +62,8 @@ public static class Program
 
         builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
         builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
+        builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
+        builder.Services.AddScoped<IProvisioningEventBus, PostgresProvisioningEventBus>();
 
         builder.Services.AddSingleton<ITerraformRunner, TerraformRunner>();
         builder.Services.AddSingleton<WorkspaceLayout>();
@@ -86,6 +90,7 @@ public static class Program
         builder.Services.AddScoped<ISagaPhaseHandler, DnsCreatingHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, AwaitingCloudCallbackHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, AwaitingCertHandler>();
+        builder.Services.AddScoped<ISagaPhaseHandler, IssuingPluginTokenHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackTfHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackDnsHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, DestroyEntryHandler>();
@@ -93,6 +98,15 @@ public static class Program
         builder.Services.AddScoped<SagaPhaseDispatcher>();
 
         builder.Services.AddHttpClient(AwaitingCertHandler.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(5));
+
+        builder.Services.Configure<PluginTokenSyncOptions>(
+            builder.Configuration.GetSection(PluginTokenSyncOptions.SectionName));
+        builder.Services.AddSingleton<IPortalToCloudPluginTokenClient, PortalToCloudPluginTokenClient>();
+        var pluginTokenOpts = builder.Configuration
+            .GetSection(PluginTokenSyncOptions.SectionName)
+            .Get<PluginTokenSyncOptions>() ?? new PluginTokenSyncOptions();
+        builder.Services.AddHttpClient(PortalToCloudPluginTokenClient.HttpClientName, c =>
+            c.Timeout = TimeSpan.FromSeconds(pluginTokenOpts.HttpTimeoutSeconds));
 
         builder.Services.AddHostedService<CrashRecoveryService>();
         builder.Services.AddHostedService<SagaWorker>();

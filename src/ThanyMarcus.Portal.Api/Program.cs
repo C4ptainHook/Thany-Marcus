@@ -92,11 +92,13 @@ builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
 builder.Services.AddHostedService<InfraOpUnlockSweepService>();
 
 builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
+builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
 builder.Services.AddScoped<EnqueueGuard>();
 builder.Services.AddSingleton<EnrollmentTokenGenerator>();
 builder.Services.AddSingleton<IRandomHexProvider, CryptoRandomHexProvider>();
 builder.Services.AddScoped<HostnameGenerator>();
 builder.Services.AddScoped<SagaEventTranslator>();
+builder.Services.AddScoped<IProvisioningEventBus, PostgresProvisioningEventBus>();
 builder.Services.AddSingleton<NpgsqlConnectionFactory>();
 
 builder.Services.AddAuthentication(opts =>
@@ -229,6 +231,7 @@ app.MapCloudCallbackEndpoints();
 app.MapDestroyCloudEndpoints();
 app.MapCancelCloudEndpoints();
 app.MapPluginTokenEndpoints();
+app.MapRetryPluginTokenEndpoint();
 app.MapCaptchaEndpoints();
 
 app.MapFallbackToFile("index.html");

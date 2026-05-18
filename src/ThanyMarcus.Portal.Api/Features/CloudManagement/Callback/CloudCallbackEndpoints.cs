@@ -3,10 +3,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
@@ -22,6 +24,7 @@ public static class CloudCallbackEndpoints
             Guid cloudId,
             CloudCallbackRequest body,
             PortalDbContext db,
+            IDataProtectionProvider dpp,
             IClock clock,
             CancellationToken ct) =>
         {
@@ -62,13 +65,9 @@ public static class CloudCallbackEndpoints
                 return Results.Conflict(new { error = "wrong_state", current = job.Status });
 
             var now = clock.GetCurrentInstant();
-            // FORK: ADR-0034 §1 specifies plaintext storage of the cloud admin token so that
-            // PORTAL-014's portal→cloud /admin/* proxy can present it in Authorization: Bearer.
-            // Current code stores a SHA-256 hash, which is sufficient for the PORTAL-011 smoke
-            // (AwaitingCloudCallback → AwaitingCert only). PORTAL-014 cannot consume a hash
-            // without a matching change on the cloud side; the decision is tracked as
-            // Q-AdminTokenStorage in plans/cloud-pivot-plan-2026-05-13.md §28 Tier-B.
-            cloud.CloudAdminTokenHash = SHA256.HashData(Encoding.UTF8.GetBytes(body.CloudAdminToken));
+            var protector = dpp.CreateProtector(CloudAdminTokenAccessor.DataProtectionPurpose);
+            cloud.EncryptedCloudAdminToken =
+                protector.Protect(Encoding.UTF8.GetBytes(body.CloudAdminToken));
             cloud.AdminStartedAt = now;
             job.Status = SagaStatus.AwaitingCert;
             job.NextVisibleAt = now;

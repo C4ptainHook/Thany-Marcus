@@ -152,7 +152,7 @@ public sealed partial class RollingBackTfHandler(
         cloud.DestroyedAt        = now;
         cloud.ProvisioningStatus = SagaStatus.RolledBack;
         cloud.VmIp               = null;
-        cloud.CloudAdminTokenHash = null;
+        cloud.EncryptedCloudAdminToken = null;
         cloud.TerraformWorkspace = null;
 
         var revoked = await db.PluginTokenMetadata

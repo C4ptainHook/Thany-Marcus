@@ -21,6 +21,7 @@ public sealed class SagaEventTranslator(IClock clock)
             SagaStatus.DnsCreating,
             SagaStatus.AwaitingCloudCallback,
             SagaStatus.AwaitingCert,
+            SagaStatus.IssuingPluginToken,
         };
 
     public IEnumerable<WizardSseEvent> InitialEvents(JobStateSnapshot? state)

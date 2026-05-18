@@ -35,8 +35,8 @@ public sealed class DestroyEndToEndTests(PostgresFixture postgres) : DbIntegrati
             trackedCloud.VmIp = "203.0.113.1";
             trackedCloud.TerraformWorkspace = cloud.Id.ToString();
             Db.PluginTokenMetadata.AddRange(
-                new PluginTokenMetadata { CloudId = cloud.Id, Name = "t1", TokenHash = $"h1-{Guid.NewGuid():N}", CreatedAt = now, UpdatedAt = now },
-                new PluginTokenMetadata { CloudId = cloud.Id, Name = "t2", TokenHash = $"h2-{Guid.NewGuid():N}", CreatedAt = now, UpdatedAt = now });
+                new PluginTokenMetadata { CloudId = cloud.Id, Name = "t1", TokenHash = Guid.NewGuid().ToByteArray(), CreatedAt = now, UpdatedAt = now },
+                new PluginTokenMetadata { CloudId = cloud.Id, Name = "t2", TokenHash = Guid.NewGuid().ToByteArray(), CreatedAt = now, UpdatedAt = now });
 
             var trackedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
             trackedJob.EventsLog.Dispose();

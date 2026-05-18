@@ -8,11 +8,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
+using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloud;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloudflare;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 using ThanyMarcus.Portal.Tests.SagaWorker.Fakes;
@@ -32,6 +34,7 @@ internal static class SagaHostBuilder
         bool certPollReady = true,
         IDataProtectionProvider? dataProtectionProvider = null,
         IClock? clock = null,
+        IPortalToCloudPluginTokenClient? pluginTokenCloudClient = null,
         Action<Dictionary<string, string?>>? extraConfig = null)
     {
         var builder = Host.CreateApplicationBuilder();
@@ -70,6 +73,10 @@ internal static class SagaHostBuilder
 
         builder.Services.AddSingleton<IInfraOpUnlockCache>(new StubInfraOpUnlockCache());
         builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
+        builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
+        builder.Services.AddScoped<IProvisioningEventBus, PostgresProvisioningEventBus>();
+        builder.Services.AddSingleton(pluginTokenCloudClient ?? new StubPluginTokenCloudClient());
+        builder.Services.Configure<PluginTokenSyncOptions>(o => { o.MaxAttempts = 3; o.HttpTimeoutSeconds = 10; });
 
         builder.Services.AddSingleton(runner);
         builder.Services.AddSingleton(cloudflare);
@@ -80,6 +87,7 @@ internal static class SagaHostBuilder
         builder.Services.AddScoped<ISagaPhaseHandler, DnsCreatingHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, AwaitingCloudCallbackHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, AwaitingCertHandler>();
+        builder.Services.AddScoped<ISagaPhaseHandler, IssuingPluginTokenHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackTfHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackDnsHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, DestroyEntryHandler>();
@@ -97,6 +105,13 @@ internal static class SagaHostBuilder
     private sealed class ScriptedHttpFactory(bool certReady) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new(new ScriptedHandler(certReady));
+    }
+
+    private sealed class StubPluginTokenCloudClient : IPortalToCloudPluginTokenClient
+    {
+        public Task<Guid> PostAsync(string cloudUrl, string cloudAdminToken,
+            byte[] tokenHashBytes, string label, CancellationToken ct)
+            => Task.FromResult(Guid.CreateVersion7());
     }
 
     private sealed class ScriptedHandler(bool certReady) : HttpMessageHandler

@@ -2,10 +2,10 @@ export type Provider = 'digitalocean' | 'hetzner' | 'azure';
 export type JobKind = 'create' | 'destroy';
 export type ProvisioningStatus =
   | 'pending' | 'tf_planning' | 'tf_applying' | 'dns_creating'
-  | 'awaiting_cloud_callback' | 'awaiting_cert' | 'succeeded'
+  | 'awaiting_cloud_callback' | 'awaiting_cert' | 'issuing_plugin_token' | 'succeeded'
   | 'destroying' | 'rolling_back_dns' | 'rolling_back_tf'
   | 'rolled_back' | 'failed_tf' | 'failed_dns' | 'failed_callback'
-  | 'failed_cert' | 'failed_destroy' | 'cancelled';
+  | 'failed_cert' | 'failed_plugin_token' | 'failed_destroy' | 'cancelled';
 
 export type WorkerState = 'warm' | 'waking' | 'idle';
 
@@ -49,6 +49,7 @@ export const IN_FLIGHT_CREATE_STATUSES: ProvisioningStatus[] = [
   'dns_creating',
   'awaiting_cloud_callback',
   'awaiting_cert',
+  'issuing_plugin_token',
 ];
 
 export const IN_FLIGHT_DESTROY_STATUSES: ProvisioningStatus[] = [
@@ -62,6 +63,7 @@ export const FAILED_STATUSES: ProvisioningStatus[] = [
   'failed_dns',
   'failed_callback',
   'failed_cert',
+  'failed_plugin_token',
   'failed_destroy',
 ];
 

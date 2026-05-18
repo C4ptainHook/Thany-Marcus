@@ -20,7 +20,7 @@ public sealed class PluginTokenMetadataTests(PostgresFixture postgres) : DbInteg
         {
             CloudId = cloud.Id,
             Name = "primary",
-            TokenHash = "h1",
+            TokenHash = new byte[] { 0x01 },
             CreatedAt = now,
             UpdatedAt = now,
         });
