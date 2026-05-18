@@ -21,7 +21,7 @@ public sealed class PluginTokenAuthenticatorTests(PostgresFixture postgres) : IA
     {
         await postgres.ResetAsync();
         var opts = new DbContextOptionsBuilder<CloudDbContext>()
-            .UseNpgsql(postgres.ConnectionString, npg => npg.UseNodaTime())
+            .UseNpgsql(postgres.ConnectionString, npg => npg.UseNodaTime().UseVector())
             .UseSnakeCaseNamingConvention()
             .AddInterceptors(new TimestampInterceptor(new FakeClock(Instant.FromUtc(2026, 5, 18, 0, 0))))
             .Options;

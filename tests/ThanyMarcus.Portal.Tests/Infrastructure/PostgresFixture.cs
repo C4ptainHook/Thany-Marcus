@@ -8,7 +8,7 @@ namespace ThanyMarcus.Portal.Tests.Infrastructure;
 
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    public PostgreSqlContainer Container { get; } = new PostgreSqlBuilder("postgres:16-alpine")
+    public PostgreSqlContainer Container { get; } = new PostgreSqlBuilder("pgvector/pgvector:pg16")
         .Build();
 
     public string ConnectionString => Container.GetConnectionString();

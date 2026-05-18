@@ -1,5 +1,7 @@
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
 using NodaTime;
+using Pgvector;
 using ThanyMarcus.Shared.Database;
 
 namespace ThanyMarcus.Cloud.Api.Features.Ingest;
@@ -14,10 +16,19 @@ public sealed class Note : IHasUpdatedAt
 
     public string? RelativePath { get; set; }
     public string? BodyOutput { get; set; }
-    public string? SuggestedProject { get; set; }
     public string[]? Tags { get; set; }
     public string? LlmMode { get; set; }
     public JsonDocument? Provenance { get; set; }
+
+    public Vector? Embedding { get; set; }
+    public Instant? DeletedAt { get; set; }
+    public bool IsHub { get; set; }
+    public Guid? ProjectId { get; set; }
+    public Guid? HubEntityId { get; set; }
+    public long TransitionVersion { get; set; }
+
+    [NotMapped]
+    public string? SuggestedProject { get; set; }
 
     public Instant CreatedAt { get; init; }
     public Instant UpdatedAt { get; set; }

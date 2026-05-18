@@ -37,6 +37,10 @@ public sealed class AttachmentConfiguration : IEntityTypeConfiguration<Attachmen
         builder.Property(a => a.Extra).HasColumnType("jsonb").IsRequired()
             .HasDefaultValueSql("'{}'::jsonb");
 
+        builder.Property(a => a.ParentAttachmentId);
+        builder.Property(a => a.ExtractionCacheKey);
+        builder.Property(a => a.Url);
+
         builder.Property(a => a.CreatedAt).IsRequired();
         builder.Property(a => a.UpdatedAt).IsRequired();
 
@@ -44,7 +48,17 @@ public sealed class AttachmentConfiguration : IEntityTypeConfiguration<Attachmen
         builder.HasIndex(a => new { a.NoteId, a.ClientAttachmentId }).IsUnique();
         builder.HasIndex(a => a.StorageKey).IsUnique();
 
+        builder.HasIndex(a => a.ParentAttachmentId)
+            .HasDatabaseName("ix_attachments_parent");
+
+        builder.HasIndex(a => new { a.Sha256, a.ExtractionCacheKey })
+            .HasDatabaseName("ix_attachments_cache")
+            .HasFilter("extracted_text IS NOT NULL");
+
         builder.HasOne<Note>().WithMany().HasForeignKey(a => a.NoteId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne<Attachment>().WithMany().HasForeignKey(a => a.ParentAttachmentId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }

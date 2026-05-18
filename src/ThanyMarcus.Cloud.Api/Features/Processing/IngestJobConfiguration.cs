@@ -11,11 +11,19 @@ public sealed class IngestJobConfiguration : IEntityTypeConfiguration<IngestJob>
         builder.ToTable("ingest_jobs", t =>
         {
             t.HasCheckConstraint("ck_ingest_jobs_status",
-                "status IN ('queued','processing','succeeded','dead_lettered')");
+                "status IN (" +
+                "'processing'," +
+                "'queued','extracting_attachments','composing','routing'," +
+                "'extracting_entities','embedding','succeeded'," +
+                "'failed_extraction','failed_composition','failed_route'," +
+                "'failed_entities','failed_embedding','dead_lettered')");
+            t.HasCheckConstraint("ck_ingest_jobs_kind",
+                "kind IN ('capture','hub_regen','reprocess')");
         });
         builder.HasKey(j => j.Id);
 
         builder.Property(j => j.NoteId).IsRequired();
+        builder.Property(j => j.Kind).IsRequired().HasDefaultValue(IngestJobKind.Capture);
         builder.Property(j => j.Status).IsRequired();
         builder.Property(j => j.Attempts).IsRequired();
         builder.Property(j => j.LastError);
@@ -24,6 +32,9 @@ public sealed class IngestJobConfiguration : IEntityTypeConfiguration<IngestJob>
         builder.Property(j => j.ScheduledAt).IsRequired();
         builder.Property(j => j.StartedAt);
         builder.Property(j => j.FinishedAt);
+        builder.Property(j => j.EventsLog).HasColumnType("jsonb").IsRequired()
+            .HasDefaultValueSql("'[]'::jsonb");
+        builder.Property(j => j.TransitionVersion).IsRequired().HasDefaultValue(0L);
         builder.Property(j => j.CreatedAt).IsRequired();
         builder.Property(j => j.UpdatedAt).IsRequired();
 
@@ -31,7 +42,14 @@ public sealed class IngestJobConfiguration : IEntityTypeConfiguration<IngestJob>
             .HasDatabaseName("ix_ingest_jobs_queued_scheduled_at")
             .HasFilter("status = 'queued'");
 
-        builder.HasIndex(j => j.NoteId);
+        builder.HasIndex([nameof(IngestJob.NoteId)], "ix_ingest_jobs_note_id")
+            .HasDatabaseName("ix_ingest_jobs_note_id");
+
+        builder.HasIndex([nameof(IngestJob.NoteId)], "ix_ingest_jobs_active_per_note")
+            .HasDatabaseName("ix_ingest_jobs_active_per_note")
+            .IsUnique()
+            .HasFilter("status NOT IN ('succeeded','failed_extraction','failed_composition'," +
+                       "'failed_route','failed_entities','failed_embedding','dead_lettered')");
 
         builder.HasOne<Note>().WithMany().HasForeignKey(j => j.NoteId)
             .OnDelete(DeleteBehavior.Cascade);

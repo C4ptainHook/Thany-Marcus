@@ -57,7 +57,7 @@ builder.Services.AddDbContext<CloudDbContext>((sp, opts) => opts
     .UseNpgsql(
         builder.Configuration.GetConnectionString("Cloud")
             ?? throw new InvalidOperationException("ConnectionStrings:Cloud not configured"),
-        npg => npg.UseNodaTime())
+        npg => npg.UseNodaTime().UseVector())
     .UseSnakeCaseNamingConvention()
     .AddInterceptors(sp.GetRequiredService<TimestampInterceptor>()));
 

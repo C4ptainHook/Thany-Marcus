@@ -120,7 +120,7 @@ public sealed class OrphanIngestSweeperTests(PostgresFixture postgres)
         sc.AddSingleton(clock);
         sc.AddSingleton<TimestampInterceptor>();
         sc.AddDbContext<CloudDbContext>((sp, opts) => opts
-            .UseNpgsql(postgres.ConnectionString, npg => npg.UseNodaTime())
+            .UseNpgsql(postgres.ConnectionString, npg => npg.UseNodaTime().UseVector())
             .UseSnakeCaseNamingConvention()
             .AddInterceptors(sp.GetRequiredService<TimestampInterceptor>()));
         sc.AddSingleton<Cloud.Api.Infrastructure.Storage.IArtifactStore>(store);

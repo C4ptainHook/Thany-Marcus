@@ -39,6 +39,9 @@
     <PackageReference Include="Microsoft.Extensions.AI" />
     <PackageReference Include="LlmTornado" />
     <PackageReference Include="LlmTornado.Microsoft.Extensions.AI" />
+
+    <PackageReference Include="Pgvector" />
+    <PackageReference Include="Pgvector.EntityFrameworkCore" />
   </ItemGroup>
 
   <ItemGroup>

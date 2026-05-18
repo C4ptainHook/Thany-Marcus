@@ -11,7 +11,7 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Clo
             ?? "Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=cloud_design";
 
         var options = new DbContextOptionsBuilder<CloudDbContext>()
-            .UseNpgsql(connectionString, npg => npg.UseNodaTime())
+            .UseNpgsql(connectionString, npg => npg.UseNodaTime().UseVector())
             .UseSnakeCaseNamingConvention()
             .Options;
 

@@ -41,6 +41,7 @@ resource "digitalocean_droplet" "cloud" {
     storage_bucket        = digitalocean_spaces_bucket.artifacts.name
     storage_access_key_id = digitalocean_spaces_key.artifacts.access_key
     storage_access_secret = digitalocean_spaces_key.artifacts.secret_key
+    ollama_pull_tag       = var.ollama_pull_tag
   })
 
   lifecycle {

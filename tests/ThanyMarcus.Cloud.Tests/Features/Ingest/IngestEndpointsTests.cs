@@ -192,7 +192,7 @@ public sealed class IngestEndpointsTests(PostgresFixture postgres)
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
 
         var opts = new DbContextOptionsBuilder<CloudDbContext>()
-            .UseNpgsql(postgres.ConnectionString, npg => npg.UseNodaTime())
+            .UseNpgsql(postgres.ConnectionString, npg => npg.UseNodaTime().UseVector())
             .UseSnakeCaseNamingConvention()
             .Options;
         await using var db = new CloudDbContext(opts);

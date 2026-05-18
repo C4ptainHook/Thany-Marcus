@@ -77,5 +77,9 @@
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.*" />
     <PackageVersion Include="LlmTornado" Version="3.*" />
     <PackageVersion Include="LlmTornado.Microsoft.Extensions.AI" Version="1.*" />
+
+    <!-- pgvector EF mapping (CLOUD-SCHEMA-V2). -->
+    <PackageVersion Include="Pgvector" Version="0.3.*" />
+    <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.*" />
   </ItemGroup>
 </Project>

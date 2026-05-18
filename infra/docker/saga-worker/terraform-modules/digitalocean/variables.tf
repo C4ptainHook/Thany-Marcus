@@ -80,3 +80,9 @@ variable "timezone" {
   type        = string
   default     = "Etc/UTC"
 }
+
+variable "ollama_pull_tag" {
+  description = "Ollama model tag to pre-pull at cloud-init time. Must match the tag the VlmWorker requests at runtime. Default targets MiniCPM-V 4.6 Q4_K_M from the openbmb community namespace (4.6 has not landed in library/minicpm-v yet)."
+  type        = string
+  default     = "openbmb/minicpm-v4.6:q4_K_M"
+}
