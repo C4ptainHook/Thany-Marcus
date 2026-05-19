@@ -48,8 +48,8 @@ public sealed partial class TfPlanningHandler(
                     ["error"] = "step_up_required_but_not_unlocked",
                 });
                 job.LastError = "step-up unlock expired or missing";
-                await SagaTransitions.TransitionAsync(
-                    db, clock, job, SagaStatus.FailedTf, Duration.Zero, ct: ct);
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, SagaStatus.FailedTf, ct);
                 return;
             }
 
@@ -62,8 +62,8 @@ public sealed partial class TfPlanningHandler(
                     ["provider"] = cloud.Provider,
                 });
                 job.LastError = $"no provider token for {cloud.Provider}";
-                await SagaTransitions.TransitionAsync(
-                    db, clock, job, SagaStatus.FailedTf, Duration.Zero, ct: ct);
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, SagaStatus.FailedTf, ct);
                 return;
             }
 
@@ -87,8 +87,8 @@ public sealed partial class TfPlanningHandler(
                     ["exit_code"] = initResult.ExitCode,
                 });
                 job.LastError = "terraform init failed";
-                await SagaTransitions.TransitionAsync(
-                    db, clock, job, SagaStatus.FailedTf, Duration.Zero, ct: ct);
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, SagaStatus.FailedTf, ct);
                 return;
             }
 
@@ -105,8 +105,8 @@ public sealed partial class TfPlanningHandler(
                     ["exit_code"] = planResult.ExitCode,
                 });
                 job.LastError = "terraform plan failed";
-                await SagaTransitions.TransitionAsync(
-                    db, clock, job, SagaStatus.FailedTf, Duration.Zero, ct: ct);
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, SagaStatus.FailedTf, ct);
                 return;
             }
 

@@ -16,11 +16,19 @@ using ThanyMarcus.Cloud.Api.Features.Bootstrap;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
+using ThanyMarcus.Cloud.Api.Features.Processing.Composing;
+using ThanyMarcus.Cloud.Api.Features.Processing.Composing.Renderers;
+using ThanyMarcus.Cloud.Api.Features.Processing.Phases;
+using ThanyMarcus.Cloud.Api.Features.Processing.Specialists;
 using ThanyMarcus.Cloud.Api.Features.Settings;
 using ThanyMarcus.Cloud.Api.Features.Sync;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Cloud.Api.Infrastructure.Extraction;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
+using ThanyMarcus.Cloud.Api.Infrastructure.Ffmpeg;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Embedding;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight;
 using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sweepers;
 using ThanyMarcus.Shared.Database;
@@ -57,7 +65,7 @@ builder.Services.AddDbContext<CloudDbContext>((sp, opts) => opts
     .UseNpgsql(
         builder.Configuration.GetConnectionString("Cloud")
             ?? throw new InvalidOperationException("ConnectionStrings:Cloud not configured"),
-        npg => npg.UseNodaTime())
+        npg => npg.UseNodaTime().UseVector())
     .UseSnakeCaseNamingConvention()
     .AddInterceptors(sp.GetRequiredService<TimestampInterceptor>()));
 
@@ -111,17 +119,138 @@ builder.Services.AddScoped<RequireCloudAdminTokenFilter>();
 
 builder.Services.AddHttpClient(UrlExtractor.HttpClientName);
 builder.Services.AddSingleton<IUrlExtractor, UrlExtractor>();
+
+builder.Services.AddHttpClient(RealUrlFetcherClient.HttpClientName, c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("IngestSaga:Sidecars:Url:GetTimeoutSeconds", 10));
+});
+builder.Services.AddHttpClient(OllamaClientNames.Vlm, c =>
+{
+    c.BaseAddress = new Uri(
+        builder.Configuration["IngestSaga:Sidecars:Ollama:BaseUrl"]
+            ?? "http://localhost:11434");
+    c.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("IngestSaga:Sidecars:Ollama:RequestTimeoutSeconds", 90));
+});
+
+builder.Services.AddSingleton(_ => new DoclingOptions
+{
+    BaseUrl              = builder.Configuration["IngestSaga:Sidecars:Docling:BaseUrl"] ?? "http://docling:5001",
+    HealthPath           = builder.Configuration["IngestSaga:Sidecars:Docling:HealthPath"] ?? "/health",
+    ConvertSourcePath    = builder.Configuration["IngestSaga:Sidecars:Docling:ConvertSourcePath"] ?? "/v1alpha/convert/source",
+    RequestTimeoutSeconds = builder.Configuration.GetValue("IngestSaga:Sidecars:Docling:RequestTimeoutSeconds", 120),
+});
+builder.Services.AddHttpClient(DoclingHttpClient.HttpClientName, (sp, c) =>
+{
+    var o = sp.GetRequiredService<DoclingOptions>();
+    c.BaseAddress = new Uri(o.BaseUrl);
+    c.Timeout     = TimeSpan.FromSeconds(o.RequestTimeoutSeconds);
+});
+
+builder.Services.AddSingleton(_ => new DocumentFilterOptions
+{
+    MaxSizeBytes = builder.Configuration.GetValue("IngestSaga:Filters:Document:MaxSizeBytes", 52428800L),
+    MaxPageCount = builder.Configuration.GetValue("IngestSaga:Filters:Document:MaxPageCount", 200),
+});
+builder.Services.AddSingleton<IDocumentPreflighter, PdfPreflighter>();
+
+builder.Services.AddSingleton(_ => new ParakeetOptions
+{
+    BaseUrl              = builder.Configuration["IngestSaga:Sidecars:Parakeet:BaseUrl"] ?? "http://parakeet:5092",
+    HealthPath           = builder.Configuration["IngestSaga:Sidecars:Parakeet:HealthPath"] ?? "/health",
+    TranscribePath       = builder.Configuration["IngestSaga:Sidecars:Parakeet:TranscribePath"] ?? "/v1/audio/transcriptions",
+    RequestTimeoutSeconds = builder.Configuration.GetValue("IngestSaga:Sidecars:Parakeet:RequestTimeoutSeconds", 180),
+});
+builder.Services.AddHttpClient(ParakeetHttpClient.HttpClientName, (sp, c) =>
+{
+    var o = sp.GetRequiredService<ParakeetOptions>();
+    c.BaseAddress = new Uri(o.BaseUrl);
+    c.Timeout     = TimeSpan.FromSeconds(o.RequestTimeoutSeconds);
+});
+
+builder.Services.AddSingleton(_ => new AudioFilterOptions
+{
+    MaxSizeBytes        = builder.Configuration.GetValue("IngestSaga:Filters:Audio:MaxSizeBytes", 209_715_200L),
+    MaxDurationSeconds  = builder.Configuration.GetValue("IngestSaga:Filters:Audio:MaxDurationSeconds", 600),
+    SilenceRmsThreshold = builder.Configuration.GetValue("IngestSaga:Filters:Audio:SilenceRmsThreshold", 0.005f),
+    SilenceWindowMs     = builder.Configuration.GetValue("IngestSaga:Filters:Audio:SilenceWindowMs", 100),
+});
+
+builder.Services.AddSingleton(_ => new VideoFilterOptions
+{
+    MaxDurationSeconds      = builder.Configuration.GetValue("IngestSaga:Filters:Video:MaxDurationSeconds", 300),
+    KeyframeIntervalSeconds = builder.Configuration.GetValue("IngestSaga:Filters:Video:KeyframeIntervalSeconds", 5),
+    MaxKeyframes            = builder.Configuration.GetValue("IngestSaga:Filters:Video:MaxKeyframes", 60),
+    JpegQuality             = builder.Configuration.GetValue("IngestSaga:Filters:Video:JpegQuality", 85),
+});
+
+builder.Services.AddSingleton<IFfmpegRunner, FfmpegRunner>();
+builder.Services.AddSingleton<IFfprobeRunner, FfprobeRunner>();
+builder.Services.AddSingleton<IAudioPreflighter, AudioPreflighter>();
+
+builder.Services.AddHttpClient(FfmpegVideoSplitterClient.HttpClientName, c =>
+{
+    c.Timeout = TimeSpan.FromMinutes(
+        builder.Configuration.GetValue("IngestSaga:Sidecars:VideoSplitter:DownloadTimeoutMinutes", 5));
+});
+
+builder.Services.AddScoped<AttachmentExtractionCache>();
 builder.Services.AddSingleton<IImageExtractor, NotImplementedImageExtractor>();
 builder.Services.AddSingleton<IVoiceExtractor, NotImplementedVoiceExtractor>();
 builder.Services.AddSingleton<IFileExtractor, NotImplementedFileExtractor>();
 
-builder.Services.AddSingleton(_ =>
-    builder.Configuration.GetSection("Llm").Get<LlmOptions>() ?? new LlmOptions());
+builder.Services.Configure<LlmIntelligenceOptions>(builder.Configuration.GetSection("LlmIntelligence"));
+builder.Services.PostConfigure<LlmIntelligenceOptions>(o =>
+    o.OllamaTag = builder.Configuration["IngestSaga:Models:Vlm:OllamaTag"] ?? o.OllamaTag);
+builder.Services.AddHttpClient<SafeLlmClient>((sp, client) =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["IngestSaga:Sidecars:Ollama:BaseUrl"] ?? "http://localhost:11434");
+    client.Timeout = TimeSpan.FromMinutes(2);
+});
+builder.Services.AddSingleton<ILlmClient>(sp => sp.GetRequiredService<SafeLlmClient>());
 builder.Services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
+builder.Services.AddScoped<LlmEventAppender>();
 
-builder.Services.AddScoped<IIngestJobHandler, CompositeIngestHandler>();
-builder.Services.AddHostedService<IngestSagaWorker>();
+builder.Services.Configure<GraniteEmbeddingOptions>(
+    builder.Configuration.GetSection("IngestSaga:Models:Embedding"));
+builder.Services.AddSingleton<IEmbeddingClient, GraniteEmbeddingClient>();
+builder.Services.AddHostedService<GraniteEmbeddingWarmupService>();
+builder.Services.AddScoped<IVlmClient, OllamaVlmClient>();
+builder.Services.AddSingleton<IDoclingClient, DoclingHttpClient>();
+builder.Services.AddSingleton<IParakeetClient, ParakeetHttpClient>();
+builder.Services.AddScoped<IUrlFetcherClient, RealUrlFetcherClient>();
+builder.Services.AddSingleton<IVideoSplitterClient, FfmpegVideoSplitterClient>();
+
+builder.Services.AddScoped<IIngestEventBus, PostgresIngestEventBus>();
+builder.Services.AddSingleton<IngestSseTranslator>();
+builder.Services.AddScoped<JobStateTransitions>();
+builder.Services.AddScoped<ProvenanceMaterializer>();
+
+builder.Services.AddSingleton<IAttachmentRenderer, UrlRenderer>();
+builder.Services.AddSingleton<IAttachmentRenderer, ImageRenderer>();
+builder.Services.AddSingleton<IAttachmentRenderer, AudioRenderer>();
+builder.Services.AddSingleton<IAttachmentRenderer, VideoRenderer>();
+builder.Services.AddSingleton<IAttachmentRenderer, DocumentRenderer>();
+builder.Services.AddSingleton<FailedHiddenRenderer>();
+builder.Services.AddSingleton<CompositeNoteComposer>();
+
+builder.Services.AddScoped<IPhaseHandler, ExtractingAttachmentsHandler>();
+builder.Services.AddScoped<IPhaseHandler, ComposingHandler>();
+builder.Services.AddScoped<IPhaseHandler, RoutingHandler>();
+builder.Services.AddScoped<IPhaseHandler, ExtractingEntitiesHandler>();
+builder.Services.AddScoped<IPhaseHandler, EmbeddingHandler>();
+builder.Services.AddScoped<CancelHandler>();
+builder.Services.AddScoped<HubGenerationHandler>();
+builder.Services.AddScoped<IngestPhaseDispatcher>();
+builder.Services.AddHostedService<JobOrchestratorWorker>();
 builder.Services.AddHostedService<OrphanIngestSweeper>();
+builder.Services.AddHostedService<VlmWorker>();
+builder.Services.AddHostedService<DoclingWorker>();
+builder.Services.AddHostedService<ParakeetWorker>();
+builder.Services.AddHostedService<UrlFetcherWorker>();
+builder.Services.AddHostedService<VideoSplitterWorker>();
 
 var dpKeysDir = builder.Configuration["DataProtection:KeyRingPath"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys");
@@ -167,7 +296,11 @@ app.MapAdminHealthEndpoint();
 app.MapCertInstalledEndpoint();
 
 app.MapIngestEndpoints();
+app.MapReprocessEndpoint();
+app.MapNoteDeleteEndpoint();
 app.MapSyncPullEndpoint();
+app.MapSyncPushEndpoint();
+app.MapSyncEventsEndpoint();
 app.MapAdminSettingsEndpoints();
 app.MapAdminPluginTokenEndpoints();
 

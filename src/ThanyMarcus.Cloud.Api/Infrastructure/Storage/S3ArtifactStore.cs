@@ -86,6 +86,36 @@ public sealed class S3ArtifactStore : IArtifactStore
             Key        = key,
         }, ct).ConfigureAwait(false);
 
+    public async Task<Stream> OpenReadAsync(string key, CancellationToken ct)
+    {
+        var resp = await client.GetObjectAsync(new GetObjectRequest
+        {
+            BucketName = options.Bucket,
+            Key        = key,
+        }, ct).ConfigureAwait(false);
+        return resp.ResponseStream;
+    }
+
+    public async Task UploadBytesAsync(
+        string key, byte[] bytes, string mimeType, bool finalized, CancellationToken ct)
+    {
+        var req = new PutObjectRequest
+        {
+            BucketName  = options.Bucket,
+            Key         = key,
+            InputStream = new MemoryStream(bytes),
+            ContentType = mimeType,
+            AutoCloseStream = true,
+        };
+        if (finalized)
+        {
+            // Bucket-lifecycle rule (CLOUD-002) sweeps finalized=false after 24h; opt children
+            // out by tagging at PUT-time — separate PUT-tagging races the lifecycle.
+            req.TagSet.Add(new Amazon.S3.Model.Tag { Key = "finalized", Value = "true" });
+        }
+        await client.PutObjectAsync(req, ct).ConfigureAwait(false);
+    }
+
     private static string TrimEtag(string? etag) =>
         (etag ?? "").Trim('"');
 }

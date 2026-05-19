@@ -39,8 +39,9 @@ resource "digitalocean_droplet" "cloud" {
     storage_endpoint      = local.bucket_endpoint
     storage_region        = var.region
     storage_bucket        = digitalocean_spaces_bucket.artifacts.name
-    storage_access_key_id = digitalocean_spaces_access_key.artifacts.access_key
-    storage_access_secret = digitalocean_spaces_access_key.artifacts.secret_key
+    storage_access_key_id = digitalocean_spaces_key.artifacts.access_key
+    storage_access_secret = digitalocean_spaces_key.artifacts.secret_key
+    ollama_pull_tag       = var.ollama_pull_tag
   })
 
   lifecycle {
@@ -72,29 +73,7 @@ resource "digitalocean_spaces_bucket_cors_configuration" "artifacts" {
   }
 }
 
-resource "digitalocean_spaces_bucket_object_lifecycle_configuration" "artifacts" {
-  bucket = digitalocean_spaces_bucket.artifacts.id
-  region = digitalocean_spaces_bucket.artifacts.region
-
-  rule {
-    id     = "expire-unfinalized-after-24h"
-    status = "Enabled"
-
-    filter {
-      prefix = "notes/"
-      tag {
-        key   = "finalized"
-        value = "false"
-      }
-    }
-
-    expiration {
-      days = 1
-    }
-  }
-}
-
-resource "digitalocean_spaces_access_key" "artifacts" {
+resource "digitalocean_spaces_key" "artifacts" {
   name = "${local.resource_name}-spaces-key"
 
   grant {

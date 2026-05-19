@@ -54,3 +54,6 @@ venv/
 claude.md
 *.pyc
 __pycache__/
+
+# Granite Embedding R2 ONNX + tokenizer staged for dev (see scripts/download-granite-model.sh).
+src/ThanyMarcus.Cloud.Api/models/

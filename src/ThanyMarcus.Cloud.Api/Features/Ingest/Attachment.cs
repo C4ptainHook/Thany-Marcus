@@ -27,6 +27,10 @@ public sealed class Attachment : IHasUpdatedAt
 
     public JsonDocument Extra { get; set; } = null!;
 
+    public Guid? ParentAttachmentId { get; set; }
+    public string? ExtractionCacheKey { get; set; }
+    public string? Url { get; set; }
+
     public Instant CreatedAt { get; init; }
     public Instant UpdatedAt { get; set; }
 }

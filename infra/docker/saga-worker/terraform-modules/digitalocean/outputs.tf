@@ -30,12 +30,12 @@ output "bucket_endpoint" {
 
 output "access_key_id" {
   description = "Scoped Spaces access key id. Written into the cloud-api compose env; sensitive."
-  value       = digitalocean_spaces_access_key.artifacts.access_key
+  value       = digitalocean_spaces_key.artifacts.access_key
   sensitive   = true
 }
 
 output "access_key_secret" {
   description = "Scoped Spaces access key secret. Written into the cloud-api compose env; sensitive."
-  value       = digitalocean_spaces_access_key.artifacts.secret_key
+  value       = digitalocean_spaces_key.artifacts.secret_key
   sensitive   = true
 }

@@ -4,25 +4,29 @@ public interface ILlmClient
 {
     string Mode { get; }
     string ModelName { get; }
-    Task<CompositeEnrichmentResult> EnrichCompositeAsync(
-        CompositeEnrichmentRequest request,
-        CancellationToken ct);
+    string ModelVersion { get; }
+    Task<T> CompleteAsync<T>(
+        PromptId promptId,
+        object inputContext,
+        CancellationToken ct) where T : class;
 }
 
-public sealed record CompositeEnrichmentRequest(
-    string Body,
-    IReadOnlyList<AttachmentText> Attachments);
+public sealed record PromptId(string Name, string Version)
+{
+    public override string ToString() => $"{Name}-{Version}";
+}
 
-public sealed record AttachmentText(Guid AttachmentId, string Kind, string ExtractedText);
+public sealed class LlmStructuredOutputException : Exception
+{
+    public PromptId PromptId { get; }
+    public int Attempts { get; }
 
-public sealed record CompositeEnrichmentResult(
-    string? SuggestedProject,
-    IReadOnlyList<WikilinkAnchor> BodyAnchors,
-    IReadOnlyList<AttachmentAnchors> AttachmentAnchors,
-    IReadOnlyList<string> Tags,
-    int? InputTokens,
-    int? OutputTokens);
+    public LlmStructuredOutputException(PromptId pid, int attempts, Exception? inner = null)
+        : base($"LLM output failed to parse after {attempts} attempts for prompt {pid}", inner)
+    {
+        PromptId = pid;
+        Attempts = attempts;
+    }
+}
 
-public sealed record WikilinkAnchor(string Text, int Start, int End, string Target);
-
-public sealed record AttachmentAnchors(Guid AttachmentId, IReadOnlyList<WikilinkAnchor> Anchors);
+public interface IUnsafeLlmClient : ILlmClient { }

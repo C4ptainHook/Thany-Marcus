@@ -77,5 +77,27 @@
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.*" />
     <PackageVersion Include="LlmTornado" Version="3.*" />
     <PackageVersion Include="LlmTornado.Microsoft.Extensions.AI" Version="1.*" />
+
+    <!-- pgvector EF mapping (CLOUD-SCHEMA-V2). -->
+    <PackageVersion Include="Pgvector" Version="0.3.*" />
+    <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.*" />
+
+    <!-- Image decode + EXIF + pHash for VLM pre-flight (CLOUD-PROCESSORS-LIGHT). -->
+    <PackageVersion Include="SixLabors.ImageSharp" Version="3.*" />
+    <PackageVersion Include="CoenM.ImageSharp.ImageHash" Version="1.*" />
+
+    <!-- PDF page-count + size preflight for Docling (CLOUD-PROCESSORS-HEAVY Pass A). -->
+    <PackageVersion Include="PdfPig" Version="0.1.*" />
+
+    <!-- WAV decoding for silence-VAD audio preflight (CLOUD-PROCESSORS-HEAVY Pass B). -->
+    <PackageVersion Include="NAudio.Core" Version="2.2.*" />
+
+    <!-- Embedding (CLOUD-EMBEDDING handoff #8): in-process Granite Embedding R2 ONNX.
+         Tokenizers.DotNet wraps HF tokenizers (Rust) and loads tokenizer.json directly;
+         Microsoft.ML.Tokenizers 1.0.x lacks an equivalent CreateFromConfig API. -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.20.*" />
+    <PackageVersion Include="Tokenizers.DotNet" Version="1.4.*" />
+    <PackageVersion Include="Tokenizers.DotNet.runtime.osx-arm64" Version="1.4.*" />
+    <PackageVersion Include="Tokenizers.DotNet.runtime.linux-x64" Version="1.4.*" />
   </ItemGroup>
 </Project>

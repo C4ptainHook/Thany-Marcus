@@ -336,6 +336,45 @@ If the cert is invalid: check `docker compose logs caddy` *on the user's cloud* 
 
 ---
 
+## Step 11.5 — Verify sidecars on the provisioned cloud
+
+SSH into the cloud (or use the DO web console) and confirm the 3 model-serving sidecars are healthy and reachable from `cloud-api` over the private bridge network.
+
+```bash
+ssh thanyadmin@<random8>.thany.click
+
+# 1. Four user-cloud services should be Up and healthy (cloud-api, postgres, ollama, docling, parakeet)
+docker compose -f /opt/thany-cloud/docker-compose.yml ps
+# Expect: 5 services, all (healthy)
+
+# 2. From inside cloud-api, hit each sidecar by its bridge-network service name
+docker exec thany-cloud-cloud-api-1 wget -q -O- http://ollama:11434/api/version
+# Expect: {"version":"<v>"}
+
+docker exec thany-cloud-cloud-api-1 wget -q -O- http://docling:5001/health
+# Expect: 200 OK with a HealthCheckResponse body
+
+docker exec thany-cloud-cloud-api-1 wget -q -O- http://parakeet:5092/health
+# Expect: {"status":"ok"}
+
+# 3. Volumes present and populated
+docker volume ls | grep thany-cloud
+# Expect: thany-cloud_ollama-models, thany-cloud_docling-models, thany-cloud_pg-data
+# (No parakeet-models volume — the parakeet :0.3.0-int8 image ships models baked in at /models)
+
+docker volume inspect thany-cloud_ollama-models --format '{{ .Mountpoint }}' | sudo xargs du -sh
+# Expect: ~2 GB (MiniCPM-V 4.6 Q4_K_M pre-pulled)
+
+# 4. Confirm sidecar ports are NOT exposed publicly
+sudo ss -tlnp | grep -E ':(11434|5001|5092)\b' || echo "OK: sidecars not on public interface"
+sudo ufw status | grep -E '^(11434|5001|5092)' || echo "OK: ufw has no sidecar allow rules"
+# Expect: both echo their "OK" lines; only 22/80/443 open per ufw status
+```
+
+The exact docker compose project name prefix (`thany-cloud-` vs `thany-cloud_`) depends on the systemd unit's invocation; adjust the container/volume name accordingly.
+
+---
+
 ## Step 12 — Destroy via PORTAL-015
 
 The SPA doesn't have a Destroy button yet (PORTAL-012 territory). Drive it via curl from the host:

@@ -4,6 +4,8 @@ services:
       context: .
       dockerfile: infra/docker/portal-api/Dockerfile
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
@@ -46,24 +48,9 @@ services:
           cpus: '1.5'
           memory: 4G
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports: ["80:80", "443:443"]
-    volumes:
-      - ./infra/docker/caddy/Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    networks: [portal]
-    depends_on:
-      portal-api:
-        condition: service_healthy
-
 volumes:
   dp_keys:
   terraform_data:
-  caddy_data:
-  caddy_config:
 
 networks:
   portal:

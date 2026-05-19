@@ -36,9 +36,21 @@
     <PackageReference Include="AWSSDK.S3" />
     <PackageReference Include="SmartReader" />
     <PackageReference Include="ReverseMarkdown" />
-    <PackageReference Include="Microsoft.Extensions.AI" />
-    <PackageReference Include="LlmTornado" />
-    <PackageReference Include="LlmTornado.Microsoft.Extensions.AI" />
+    <PackageReference Include="Pgvector" />
+    <PackageReference Include="Pgvector.EntityFrameworkCore" />
+
+    <PackageReference Include="SixLabors.ImageSharp" />
+    <PackageReference Include="CoenM.ImageSharp.ImageHash" />
+
+    <PackageReference Include="PdfPig" />
+    <PackageReference Include="NAudio.Core" />
+
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <PackageReference Include="Tokenizers.DotNet" />
+    <PackageReference Include="Tokenizers.DotNet.runtime.osx-arm64" />
+    <PackageReference Include="Tokenizers.DotNet.runtime.linux-x64" />
+
+    <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <ItemGroup>

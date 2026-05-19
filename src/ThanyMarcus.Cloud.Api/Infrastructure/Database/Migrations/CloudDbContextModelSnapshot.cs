@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NodaTime;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using Pgvector;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 
 #nullable disable
@@ -22,7 +23,150 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                 .HasAnnotation("ProductVersion", "10.0.8")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+
+            modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Entities.Entity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.PrimitiveCollection<string[]>("Aliases")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("aliases")
+                        .HasDefaultValueSql("'{}'::text[]");
+
+                    b.Property<string>("CanonicalName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("canonical_name");
+
+                    b.Property<Instant>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Instant?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<Vector>("Embedding")
+                        .HasColumnType("vector(256)")
+                        .HasColumnName("embedding");
+
+                    b.Property<Guid?>("HubNoteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("hub_note_id");
+
+                    b.Property<bool>("IsProvisional")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_provisional");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<int>("MentionCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("mention_count");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source");
+
+                    b.Property<Instant>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("VaultFolder")
+                        .HasColumnType("text")
+                        .HasColumnName("vault_folder");
+
+                    b.HasKey("Id")
+                        .HasName("pk_entities");
+
+                    b.HasIndex("Embedding")
+                        .HasDatabaseName("ix_entities_embedding");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Embedding"), "hnsw");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Embedding"), new[] { "vector_cosine_ops" });
+
+                    b.HasIndex("Kind", "CanonicalName")
+                        .IsUnique()
+                        .HasDatabaseName("ix_entities_kind_canonical_name")
+                        .HasFilter("deleted_at IS NULL");
+
+                    b.HasIndex("Kind", "Source")
+                        .HasDatabaseName("ix_entities_kind_source");
+
+                    b.ToTable("entities", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_entities_kind", "kind IN ('person','organization','project','place','concept','other')");
+
+                            t.HasCheckConstraint("ck_entities_source", "source IN ('user','llm')");
+                        });
+                });
+
+            modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Entities.Mention", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AnchorText")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("anchor_text");
+
+                    b.Property<float?>("Confidence")
+                        .HasColumnType("real")
+                        .HasColumnName("confidence");
+
+                    b.Property<Instant>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("EndOffset")
+                        .HasColumnType("integer")
+                        .HasColumnName("end_offset");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("entity_id");
+
+                    b.Property<Guid>("NoteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("note_id");
+
+                    b.Property<int>("StartOffset")
+                        .HasColumnType("integer")
+                        .HasColumnName("start_offset");
+
+                    b.HasKey("Id")
+                        .HasName("pk_mentions");
+
+                    b.HasIndex("EntityId")
+                        .HasDatabaseName("ix_mentions_entity_id");
+
+                    b.HasIndex("NoteId")
+                        .HasDatabaseName("ix_mentions_note_id");
+
+                    b.ToTable("mentions", (string)null);
+                });
 
             modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Ingest.Attachment", b =>
                 {
@@ -55,6 +199,10 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("extracted_text");
 
+                    b.Property<string>("ExtractionCacheKey")
+                        .HasColumnType("text")
+                        .HasColumnName("extraction_cache_key");
+
                     b.Property<string>("ExtractionError")
                         .HasColumnType("text")
                         .HasColumnName("extraction_error");
@@ -82,6 +230,10 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                     b.Property<Guid>("NoteId")
                         .HasColumnType("uuid")
                         .HasColumnName("note_id");
+
+                    b.Property<Guid?>("ParentAttachmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_attachment_id");
 
                     b.Property<string>("Sha256")
                         .HasColumnType("text")
@@ -111,11 +263,18 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
+                    b.Property<string>("Url")
+                        .HasColumnType("text")
+                        .HasColumnName("url");
+
                     b.HasKey("Id")
                         .HasName("pk_attachments");
 
                     b.HasIndex("NoteId")
                         .HasDatabaseName("ix_attachments_note_id");
+
+                    b.HasIndex("ParentAttachmentId")
+                        .HasDatabaseName("ix_attachments_parent");
 
                     b.HasIndex("StorageKey")
                         .IsUnique()
@@ -124,6 +283,10 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                     b.HasIndex("NoteId", "ClientAttachmentId")
                         .IsUnique()
                         .HasDatabaseName("ix_attachments_note_id_client_attachment_id");
+
+                    b.HasIndex("Sha256", "ExtractionCacheKey")
+                        .HasDatabaseName("ix_attachments_cache")
+                        .HasFilter("extracted_text IS NOT NULL");
 
                     b.ToTable("attachments", null, t =>
                         {
@@ -141,6 +304,10 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<string>("BodyHash")
+                        .HasColumnType("text")
+                        .HasColumnName("body_hash");
 
                     b.Property<string>("BodyInput")
                         .IsRequired()
@@ -163,9 +330,31 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<Instant?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<Vector>("Embedding")
+                        .HasColumnType("vector(256)")
+                        .HasColumnName("embedding");
+
+                    b.Property<Guid?>("HubEntityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("hub_entity_id");
+
+                    b.Property<bool>("IsHub")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_hub");
+
                     b.Property<string>("LlmMode")
                         .HasColumnType("text")
                         .HasColumnName("llm_mode");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
 
                     b.Property<JsonDocument>("Provenance")
                         .HasColumnType("jsonb")
@@ -180,13 +369,15 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("status");
 
-                    b.Property<string>("SuggestedProject")
-                        .HasColumnType("text")
-                        .HasColumnName("suggested_project");
-
                     b.PrimitiveCollection<string[]>("Tags")
                         .HasColumnType("text[]")
                         .HasColumnName("tags");
+
+                    b.Property<long>("TransitionVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L)
+                        .HasColumnName("transition_version");
 
                     b.Property<Instant>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -197,7 +388,25 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
 
                     b.HasIndex("ClientNoteId")
                         .IsUnique()
-                        .HasDatabaseName("ix_notes_client_note_id");
+                        .HasDatabaseName("ix_notes_client_note_id")
+                        .HasFilter("client_note_id IS NOT NULL");
+
+                    b.HasIndex("Embedding")
+                        .HasDatabaseName("ix_notes_embedding");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Embedding"), "hnsw");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Embedding"), new[] { "vector_cosine_ops" });
+
+                    b.HasIndex("HubEntityId")
+                        .HasDatabaseName("ix_notes_hub_entity")
+                        .HasFilter("is_hub");
+
+                    b.HasIndex("ProjectId")
+                        .HasDatabaseName("ix_notes_project");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("ix_notes_updated_at")
+                        .HasFilter("deleted_at IS NULL OR status = 'ready'");
 
                     b.HasIndex("Status", "UpdatedAt")
                         .HasDatabaseName("ix_notes_status_updated_at");
@@ -245,6 +454,103 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                     b.ToTable("plugin_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Processing.ExtractionTask", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AttachmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("attachment_id");
+
+                    b.Property<short>("Attempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0)
+                        .HasColumnName("attempts");
+
+                    b.Property<Instant>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<JsonDocument>("EventsLog")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("events_log")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
+                    b.Property<Instant?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<Guid>("IngestJobId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("ingest_job_id");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error");
+
+                    b.Property<Instant?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasColumnType("text")
+                        .HasColumnName("lease_owner");
+
+                    b.Property<Instant>("ScheduledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scheduled_at");
+
+                    b.Property<Instant?>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TargetSidecar")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("target_sidecar");
+
+                    b.Property<long>("TransitionVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L)
+                        .HasColumnName("transition_version");
+
+                    b.Property<Instant>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_extraction_tasks");
+
+                    b.HasIndex("AttachmentId")
+                        .HasDatabaseName("ix_extraction_tasks_attachment_id");
+
+                    b.HasIndex("IngestJobId")
+                        .HasDatabaseName("ix_extraction_tasks_ingest_job_id");
+
+                    b.HasIndex("TargetSidecar", "Status", "ScheduledAt")
+                        .HasDatabaseName("ix_extraction_tasks_claim")
+                        .HasFilter("status IN ('queued','processing')");
+
+                    b.ToTable("extraction_tasks", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_extraction_tasks_status", "status IN ('queued','processing','succeeded','failed','skipped')");
+
+                            t.HasCheckConstraint("ck_extraction_tasks_target_sidecar", "target_sidecar IN ('ollama','docling','parakeet','url','video')");
+                        });
+                });
+
             modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Processing.IngestJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -260,9 +566,23 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<JsonDocument>("EventsLog")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("events_log")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
                     b.Property<Instant?>("FinishedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("finished_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("capture")
+                        .HasColumnName("kind");
 
                     b.Property<string>("LastError")
                         .HasColumnType("text")
@@ -293,6 +613,12 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("status");
 
+                    b.Property<long>("TransitionVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L)
+                        .HasColumnName("transition_version");
+
                     b.Property<Instant>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -300,16 +626,23 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                     b.HasKey("Id")
                         .HasName("pk_ingest_jobs");
 
-                    b.HasIndex("NoteId")
-                        .HasDatabaseName("ix_ingest_jobs_note_id");
-
                     b.HasIndex("Status", "ScheduledAt")
                         .HasDatabaseName("ix_ingest_jobs_queued_scheduled_at")
                         .HasFilter("status = 'queued'");
 
+                    b.HasIndex(new[] { "NoteId" }, "ix_ingest_jobs_active_per_note")
+                        .IsUnique()
+                        .HasDatabaseName("ix_ingest_jobs_active_per_note")
+                        .HasFilter("status NOT IN ('succeeded','failed_extraction','failed_composition','failed_route','failed_entities','failed_embedding','dead_lettered')");
+
+                    b.HasIndex(new[] { "NoteId" }, "ix_ingest_jobs_note_id")
+                        .HasDatabaseName("ix_ingest_jobs_note_id");
+
                     b.ToTable("ingest_jobs", null, t =>
                         {
-                            t.HasCheckConstraint("ck_ingest_jobs_status", "status IN ('queued','processing','succeeded','dead_lettered')");
+                            t.HasCheckConstraint("ck_ingest_jobs_kind", "kind IN ('capture','hub_regen','reprocess','user_edit_embed')");
+
+                            t.HasCheckConstraint("ck_ingest_jobs_status", "status IN ('queued','extracting_attachments','composing','routing','extracting_entities','embedding','succeeded','failed_extraction','failed_composition','failed_route','failed_entities','failed_embedding','dead_lettered')");
                         });
                 });
 
@@ -358,6 +691,23 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Entities.Mention", b =>
+                {
+                    b.HasOne("ThanyMarcus.Cloud.Api.Features.Entities.Entity", null)
+                        .WithMany()
+                        .HasForeignKey("EntityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_mentions_entities_entity_id");
+
+                    b.HasOne("ThanyMarcus.Cloud.Api.Features.Ingest.Note", null)
+                        .WithMany()
+                        .HasForeignKey("NoteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_mentions_notes_note_id");
+                });
+
             modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Ingest.Attachment", b =>
                 {
                     b.HasOne("ThanyMarcus.Cloud.Api.Features.Ingest.Note", null)
@@ -366,6 +716,44 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_attachments_notes_note_id");
+
+                    b.HasOne("ThanyMarcus.Cloud.Api.Features.Ingest.Attachment", null)
+                        .WithMany()
+                        .HasForeignKey("ParentAttachmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_attachments_attachments_parent_attachment_id");
+                });
+
+            modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Ingest.Note", b =>
+                {
+                    b.HasOne("ThanyMarcus.Cloud.Api.Features.Entities.Entity", null)
+                        .WithMany()
+                        .HasForeignKey("HubEntityId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_notes_entities_hub_entity_id");
+
+                    b.HasOne("ThanyMarcus.Cloud.Api.Features.Entities.Entity", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_notes_entities_project_id");
+                });
+
+            modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Processing.ExtractionTask", b =>
+                {
+                    b.HasOne("ThanyMarcus.Cloud.Api.Features.Ingest.Attachment", null)
+                        .WithMany()
+                        .HasForeignKey("AttachmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_extraction_tasks_attachments_attachment_id");
+
+                    b.HasOne("ThanyMarcus.Cloud.Api.Features.Processing.IngestJob", null)
+                        .WithMany()
+                        .HasForeignKey("IngestJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_extraction_tasks_ingest_jobs_ingest_job_id");
                 });
 
             modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Processing.IngestJob", b =>

@@ -71,14 +71,14 @@ public sealed partial class RollingBackTfHandler(
 
                     if (!destroyResult.Success)
                     {
-                        await HandleDestroyFailureAsync(job, ct);
+                        await HandleDestroyFailureAsync(job, cloud, ct);
                         return;
                     }
                 }
                 else
                 {
                     EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["error"] = "rollback_init_failed" });
-                    await HandleDestroyFailureAsync(job, ct);
+                    await HandleDestroyFailureAsync(job, cloud, ct);
                     return;
                 }
             }
@@ -106,8 +106,8 @@ public sealed partial class RollingBackTfHandler(
                     ["rollback_reason"] = reason ?? "(unknown)",
                 });
 
-                await SagaTransitions.TransitionAsync(
-                    db, clock, job, terminal, Duration.Zero, ct: ct);
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, terminal, ct);
             }
         }
         finally
@@ -117,7 +117,7 @@ public sealed partial class RollingBackTfHandler(
         }
     }
 
-    private async Task HandleDestroyFailureAsync(ProvisioningJob job, CancellationToken ct)
+    private async Task HandleDestroyFailureAsync(ProvisioningJob job, Cloud cloud, CancellationToken ct)
     {
         if (job.AttemptCount >= MaxAttempts)
         {
@@ -131,8 +131,8 @@ public sealed partial class RollingBackTfHandler(
             var terminal = job.Kind == SagaKinds.Destroy
                 ? SagaStatus.FailedDestroy
                 : SagaStatus.FailedTf;
-            await SagaTransitions.TransitionAsync(
-                db, clock, job, terminal, Duration.Zero, ct: ct);
+            await SagaTransitions.TransitionToTerminalAsync(
+                db, clock, job, cloud, terminal, ct);
             return;
         }
 
@@ -150,7 +150,6 @@ public sealed partial class RollingBackTfHandler(
         var now = clock.GetCurrentInstant();
 
         cloud.DestroyedAt        = now;
-        cloud.ProvisioningStatus = SagaStatus.RolledBack;
         cloud.VmIp               = null;
         cloud.EncryptedCloudAdminToken = null;
         cloud.TerraformWorkspace = null;
@@ -166,8 +165,8 @@ public sealed partial class RollingBackTfHandler(
             ["cloud_id"] = cloud.Id.ToString(),
         });
 
-        await SagaTransitions.TransitionAsync(
-            db, clock, job, SagaStatus.RolledBack, Duration.Zero, ct: ct);
+        await SagaTransitions.TransitionToTerminalAsync(
+            db, clock, job, cloud, SagaStatus.RolledBack, ct);
 
         var workdir = workspaceLayout.GetJobDir(job.Id);
         try

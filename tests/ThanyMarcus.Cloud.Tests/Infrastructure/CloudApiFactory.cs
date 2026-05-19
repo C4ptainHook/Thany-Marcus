@@ -4,7 +4,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ThanyMarcus.Cloud.Api.Features.Processing;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Embedding;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sweepers;
+using ThanyMarcus.Cloud.Tests.Infrastructure.Embedding;
 
 namespace ThanyMarcus.Cloud.Tests.Infrastructure;
 
@@ -24,6 +27,9 @@ public sealed class CloudApiFactory : WebApplicationFactory<Program>
 
     public bool DisableHostedServices { get; init; } = true;
     public Action<IServiceCollection>? CustomizeServices { get; init; }
+
+    public int OrchestratorIdlePollMs { get; init; } = 60_000;
+    public int ExtractionTasksIdlePollMs { get; init; } = 60_000;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -49,6 +55,8 @@ public sealed class CloudApiFactory : WebApplicationFactory<Program>
                 ["Llm:BodySectionHeader"]         = "## Body",
                 ["Llm:AttachmentsSectionHeader"]  = "## Attachments",
                 ["Llm:AttachmentHeaderTemplate"]  = "### Attachment {0} (kind={1})",
+                ["IngestSaga:Orchestrator:IdlePollMs"]       = OrchestratorIdlePollMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["IngestSaga:ExtractionTasks:IdlePollMs"]    = ExtractionTasksIdlePollMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
         });
 
@@ -57,9 +65,18 @@ public sealed class CloudApiFactory : WebApplicationFactory<Program>
             if (DisableHostedServices)
             {
                 services.RemoveAll<IHostedService>(s =>
-                    s.ImplementationType == typeof(IngestSagaWorker) ||
+                    s.ImplementationType == typeof(JobOrchestratorWorker) ||
                     s.ImplementationType == typeof(OrphanIngestSweeper));
             }
+            services.RemoveAll<IHostedService>(s =>
+                s.ImplementationType == typeof(GraniteEmbeddingWarmupService));
+            for (var i = services.Count - 1; i >= 0; i--)
+            {
+                if (services[i].ServiceType == typeof(IEmbeddingClient))
+                    services.RemoveAt(i);
+            }
+            services.AddSingleton<IEmbeddingClient>(_ =>
+                new FakeEmbeddingClient(FakeEmbeddingClient.DeterministicUnitVector));
             CustomizeServices?.Invoke(services);
         });
     }

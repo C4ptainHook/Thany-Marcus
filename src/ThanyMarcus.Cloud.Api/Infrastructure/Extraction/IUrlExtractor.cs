@@ -9,5 +9,9 @@ public sealed record UrlExtractionResult(
     string Markdown,
     string? CanonicalUrl,
     string? Title,
+    string? Byline,
+    string? Excerpt,
+    string? PublishedAt,
+    string? Lang,
     int HttpStatus,
     bool Truncated);

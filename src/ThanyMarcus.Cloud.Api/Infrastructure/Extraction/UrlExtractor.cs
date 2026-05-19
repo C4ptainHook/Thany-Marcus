@@ -77,10 +77,20 @@ public sealed class UrlExtractor : IUrlExtractor
             truncated = true;
         }
 
+        var excerpt = article.Excerpt;
+        if (!string.IsNullOrEmpty(excerpt) && excerpt.Length > 200)
+        {
+            excerpt = excerpt[..200];
+        }
+
         return new UrlExtractionResult(
             Markdown:     markdown,
             CanonicalUrl: article.Uri?.ToString() ?? uri.ToString(),
             Title:        article.Title,
+            Byline:       article.Byline,
+            Excerpt:      excerpt,
+            PublishedAt:  article.PublicationDate?.ToString("O", CultureInfo.InvariantCulture),
+            Lang:         article.Language,
             HttpStatus:   (int)resp.StatusCode,
             Truncated:    truncated);
     }
