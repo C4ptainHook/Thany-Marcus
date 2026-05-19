@@ -16,11 +16,15 @@ using ThanyMarcus.Cloud.Api.Features.Bootstrap;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
+using ThanyMarcus.Cloud.Api.Features.Processing.Phases;
+using ThanyMarcus.Cloud.Api.Features.Processing.Specialists;
 using ThanyMarcus.Cloud.Api.Features.Settings;
 using ThanyMarcus.Cloud.Api.Features.Sync;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Cloud.Api.Infrastructure.Extraction;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Stubs;
 using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sweepers;
 using ThanyMarcus.Shared.Database;
@@ -119,9 +123,31 @@ builder.Services.AddSingleton(_ =>
     builder.Configuration.GetSection("Llm").Get<LlmOptions>() ?? new LlmOptions());
 builder.Services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
 
-builder.Services.AddScoped<IIngestJobHandler, CompositeIngestHandler>();
-builder.Services.AddHostedService<IngestSagaWorker>();
+builder.Services.AddSingleton<IEmbeddingClient, StubEmbeddingClient>();
+builder.Services.AddSingleton<IVlmClient, StubVlmClient>();
+builder.Services.AddSingleton<IDoclingClient, StubDoclingClient>();
+builder.Services.AddSingleton<IParakeetClient, StubParakeetClient>();
+builder.Services.AddSingleton<IUrlFetcherClient, StubUrlFetcherClient>();
+builder.Services.AddSingleton<IVideoSplitterClient, StubVideoSplitterClient>();
+
+builder.Services.AddScoped<IIngestEventBus, PostgresIngestEventBus>();
+builder.Services.AddSingleton<IngestSseTranslator>();
+builder.Services.AddScoped<JobStateTransitions>();
+builder.Services.AddScoped<ProvenanceMaterializer>();
+builder.Services.AddScoped<IPhaseHandler, ExtractingAttachmentsHandler>();
+builder.Services.AddScoped<IPhaseHandler, ComposingHandler>();
+builder.Services.AddScoped<IPhaseHandler, RoutingHandler>();
+builder.Services.AddScoped<IPhaseHandler, ExtractingEntitiesHandler>();
+builder.Services.AddScoped<IPhaseHandler, EmbeddingHandler>();
+builder.Services.AddScoped<CancelHandler>();
+builder.Services.AddScoped<IngestPhaseDispatcher>();
+builder.Services.AddHostedService<JobOrchestratorWorker>();
 builder.Services.AddHostedService<OrphanIngestSweeper>();
+builder.Services.AddHostedService<VlmWorker>();
+builder.Services.AddHostedService<DoclingWorker>();
+builder.Services.AddHostedService<ParakeetWorker>();
+builder.Services.AddHostedService<UrlFetcherWorker>();
+builder.Services.AddHostedService<VideoSplitterWorker>();
 
 var dpKeysDir = builder.Configuration["DataProtection:KeyRingPath"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys");
@@ -167,7 +193,10 @@ app.MapAdminHealthEndpoint();
 app.MapCertInstalledEndpoint();
 
 app.MapIngestEndpoints();
+app.MapReprocessEndpoint();
+app.MapNoteDeleteEndpoint();
 app.MapSyncPullEndpoint();
+app.MapSyncEventsEndpoint();
 app.MapAdminSettingsEndpoints();
 app.MapAdminPluginTokenEndpoints();
 

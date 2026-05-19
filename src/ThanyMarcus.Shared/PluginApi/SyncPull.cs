@@ -15,7 +15,10 @@ public sealed record SyncPullItem(
     [property: JsonPropertyName("tags")]              IReadOnlyList<string> Tags,
     [property: JsonPropertyName("llmMode")]           string? LlmMode,
     [property: JsonPropertyName("attachments")]       IReadOnlyList<SyncPullAttachment> Attachments,
-    [property: JsonPropertyName("updatedAt")]         DateTimeOffset UpdatedAt);
+    [property: JsonPropertyName("updatedAt")]         DateTimeOffset UpdatedAt,
+    [property: JsonPropertyName("provenance"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Provenance = null,
+    [property: JsonPropertyName("status"),     JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Status = null,
+    [property: JsonPropertyName("deletedAt"),  JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? DeletedAt = null);
 
 public sealed record SyncPullAttachment(
     [property: JsonPropertyName("attachmentId")]         Guid AttachmentId,

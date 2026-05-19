@@ -1,43 +1,47 @@
 using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using NodaTime;
 using Npgsql;
-using ThanyMarcus.Portal.Api.Features.Provisioning;
-using ThanyMarcus.Portal.Api.Infrastructure.Database;
-using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
+using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Saga;
 
-namespace ThanyMarcus.Portal.SagaWorker;
+namespace ThanyMarcus.Cloud.Api.Features.Processing;
 
-public sealed partial class SagaWorker : BackgroundService
+public sealed partial class JobOrchestratorWorker : BackgroundService
 {
+    public const string NewChannel = "ingest_jobs_new";
+    public const string ChangedChannel = "ingest_jobs_changed";
+
     private readonly IServiceProvider services;
-    private readonly ILogger<SagaWorker> log;
+    private readonly IConfiguration config;
+    private readonly IClock clock;
+    private readonly ILogger<JobOrchestratorWorker> log;
     private readonly SemaphoreSlim concurrency;
-    private readonly string workerId;
     private readonly Duration leaseDuration;
     private readonly Duration heartbeatInterval;
-    private readonly TimeSpan safetyNetPoll;
+    private readonly TimeSpan idlePoll;
     private readonly string connectionString;
+    private readonly string workerId;
     private readonly Channel<bool> wakeup;
 
-    public SagaWorker(
+    public JobOrchestratorWorker(
         IServiceProvider services,
         IConfiguration config,
         IHostEnvironment env,
-        ILogger<SagaWorker> log)
+        IClock clock,
+        ILogger<JobOrchestratorWorker> log)
     {
         this.services = services;
+        this.config = config;
+        this.clock = clock;
         this.log = log;
-        var max = config.GetValue("Provisioning:MaxConcurrentJobs", 3);
+        var max = config.GetValue("IngestSaga:Orchestrator:MaxConcurrentJobs", 3);
         concurrency = new SemaphoreSlim(max, max);
-        leaseDuration = Duration.FromSeconds(config.GetValue("Provisioning:LeaseSeconds", 60));
-        heartbeatInterval = Duration.FromSeconds(config.GetValue("Provisioning:HeartbeatSeconds", 30));
-        safetyNetPoll = TimeSpan.FromMilliseconds(config.GetValue("Provisioning:IdlePollMs", 60_000));
-        connectionString = config.GetConnectionString("Portal")
-            ?? throw new InvalidOperationException("ConnectionStrings:Portal not configured");
+        leaseDuration = Duration.FromSeconds(config.GetValue("IngestSaga:Orchestrator:LeaseSeconds", 60));
+        heartbeatInterval = Duration.FromSeconds(config.GetValue("IngestSaga:Orchestrator:HeartbeatSeconds", 20));
+        idlePoll = TimeSpan.FromMilliseconds(config.GetValue("IngestSaga:Orchestrator:IdlePollMs", 60_000));
+        connectionString = config.GetConnectionString("Cloud")
+            ?? throw new InvalidOperationException("ConnectionStrings:Cloud not configured");
         workerId = $"{env.ApplicationName}@{Environment.MachineName}/{Guid.NewGuid().ToString("N")[..8]}";
         wakeup = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
         {
@@ -47,10 +51,11 @@ public sealed partial class SagaWorker : BackgroundService
         });
     }
 
+    internal string WorkerId => workerId;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         LogStarted(log, workerId);
-
         var listenTask = ListenLoopAsync(stoppingToken);
 
         try
@@ -59,7 +64,7 @@ public sealed partial class SagaWorker : BackgroundService
             {
                 await concurrency.WaitAsync(stoppingToken);
 
-                ProvisioningJob? job;
+                IngestJob? job;
                 try
                 {
                     job = await ClaimNextAsync(stoppingToken);
@@ -81,20 +86,18 @@ public sealed partial class SagaWorker : BackgroundService
                 _ = Task.Run(async () =>
                 {
                     var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                    var heartbeatTask = HeartbeatLoopAsync(job.Id, workerId, heartbeatCts.Token);
+                    var heartbeatTask = HeartbeatLoopAsync(job.Id, heartbeatCts.Token);
                     try
                     {
                         await using var scope = services.CreateAsyncScope();
-                        var dispatcher = scope.ServiceProvider.GetRequiredService<SagaPhaseDispatcher>();
-                        await dispatcher.HandleAsync(job, stoppingToken);
+                        var dispatcher = scope.ServiceProvider.GetRequiredService<IngestPhaseDispatcher>();
+                        await dispatcher.DispatchAsync(job, stoppingToken);
                     }
                     catch (SagaOwnershipLostException ex)
                     {
                         LogOwnershipLost(log, ex.JobId, ex.AttemptedWorkerId);
                     }
-                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                    {
-                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
                     catch (Exception ex)
                     {
                         LogDispatchFailure(log, ex, job.Id);
@@ -107,6 +110,7 @@ public sealed partial class SagaWorker : BackgroundService
                         catch (Exception ex) { LogHeartbeatTeardown(log, ex, job.Id); }
                         heartbeatCts.Dispose();
                         concurrency.Release();
+                        _ = wakeup.Writer.TryWrite(true);
                     }
                 }, CancellationToken.None);
             }
@@ -120,42 +124,47 @@ public sealed partial class SagaWorker : BackgroundService
         LogStopping(log);
     }
 
-    private async Task<ProvisioningJob?> ClaimNextAsync(CancellationToken ct)
+    internal async Task<IngestJob?> ClaimNextAsync(CancellationToken ct)
     {
         await using var scope = services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<CloudDbContext>();
+        var now = clock.GetCurrentInstant();
+        var lease = (int)leaseDuration.TotalSeconds;
 
-        var sql = $$"""
-            UPDATE provisioning_jobs
-            SET claimed_by         = {0},
-                lease_expires_at   = now() + (interval '1 second' * {1}),
-                next_visible_at    = now() + (interval '1 second' * {1}),
-                attempt_count      = attempt_count + 1,
+        var rows = await db.IngestJobs.FromSqlInterpolated($"""
+            UPDATE ingest_jobs SET
+                status             = CASE
+                                       WHEN status = 'queued' THEN 'extracting_attachments'
+                                       ELSE status
+                                     END,
+                lease_owner        = {workerId},
+                lease_expires_at   = now() + (interval '1 second' * {lease}),
+                attempts           = attempts + 1,
                 transition_version = transition_version + 1,
-                updated_at         = now()
-            WHERE id = (
-              SELECT id FROM provisioning_jobs
-              WHERE status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','failed_destroy','cancelled','rolled_back')
-                AND next_visible_at <= now()
-                AND (claimed_by IS NULL OR lease_expires_at <= now())
-              ORDER BY next_visible_at
-              LIMIT 1
-              FOR UPDATE SKIP LOCKED
-            )
-            RETURNING *
-            """;
+                started_at         = COALESCE(started_at, {now}),
+                updated_at         = {now}
+              WHERE id = (
+                SELECT id FROM ingest_jobs
+                 WHERE status NOT IN ('succeeded','failed_extraction','failed_composition',
+                                      'failed_route','failed_entities','failed_embedding','dead_lettered')
+                   AND scheduled_at <= {now}
+                   AND ((status = 'queued')
+                        OR (status IN ('extracting_attachments','composing','routing','extracting_entities','embedding')
+                            AND (lease_expires_at IS NULL OR lease_expires_at <= {now})))
+                 ORDER BY scheduled_at
+                 LIMIT 1
+                 FOR UPDATE SKIP LOCKED
+              )
+            RETURNING *;
+            """).AsNoTracking().ToListAsync(ct);
 
-        var rows = await db.ProvisioningJobs
-            .FromSqlRaw(sql, workerId, (int)leaseDuration.TotalSeconds)
-            .AsNoTracking()
-            .ToListAsync(ct);
         return rows.FirstOrDefault();
     }
 
-    private async Task HeartbeatLoopAsync(Guid jobId, string ownerWorkerId, CancellationToken ct)
+    private async Task HeartbeatLoopAsync(Guid jobId, CancellationToken ct)
     {
         var interval = heartbeatInterval.ToTimeSpan();
-        var leaseSeconds = (int)leaseDuration.TotalSeconds;
+        var lease = (int)leaseDuration.TotalSeconds;
         while (!ct.IsCancellationRequested)
         {
             try { await Task.Delay(interval, ct); }
@@ -164,18 +173,20 @@ public sealed partial class SagaWorker : BackgroundService
             try
             {
                 await using var scope = services.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<PortalDbContext>();
-                await db.Database.ExecuteSqlInterpolatedAsync($@"
-                    UPDATE provisioning_jobs
-                       SET lease_expires_at = now() + (interval '1 second' * {leaseSeconds}),
-                           updated_at       = now()
-                     WHERE id = {jobId} AND claimed_by = {ownerWorkerId}", ct);
+                var db = scope.ServiceProvider.GetRequiredService<CloudDbContext>();
+                var now = clock.GetCurrentInstant();
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    UPDATE ingest_jobs SET
+                        lease_expires_at = now() + (interval '1 second' * {lease}),
+                        updated_at       = {now}
+                      WHERE id = {jobId}
+                        AND lease_owner = {workerId}
+                        AND status NOT IN ('succeeded','failed_extraction','failed_composition',
+                                           'failed_route','failed_entities','failed_embedding','dead_lettered')
+                    """, ct);
             }
             catch (OperationCanceledException) { return; }
-            catch (Exception ex)
-            {
-                LogHeartbeatFailure(log, ex, jobId);
-            }
+            catch (Exception ex) { LogHeartbeatFailure(log, ex, jobId); }
         }
     }
 
@@ -185,65 +196,53 @@ public sealed partial class SagaWorker : BackgroundService
         {
             await using var conn = new NpgsqlConnection(connectionString);
             await conn.OpenAsync(ct);
-
             conn.Notification += (_, _) => _ = wakeup.Writer.TryWrite(true);
-
             await using (var cmd = new NpgsqlCommand(
-                "LISTEN provisioning_new; LISTEN provisioning_job_changed;", conn))
+                $"LISTEN {NewChannel}; LISTEN {ChangedChannel};", conn))
             {
                 await cmd.ExecuteNonQueryAsync(ct);
             }
-
             while (!ct.IsCancellationRequested)
             {
                 await conn.WaitAsync(ct);
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            LogListenLoopFailure(log, ex);
-        }
+        catch (Exception ex) { LogListenLoopFailure(log, ex); }
     }
 
     private async Task WaitForWakeupAsync(CancellationToken ct)
     {
-        using var timeoutCts = new CancellationTokenSource(safetyNetPoll);
+        using var timeoutCts = new CancellationTokenSource(idlePoll);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-        try
-        {
-            await wakeup.Reader.ReadAsync(linked.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            // safety-net poll interval elapsed
-        }
+        try { await wakeup.Reader.ReadAsync(linked.Token); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
     }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Information,
-        Message = "SagaWorker started; worker_id={WorkerId}")]
+        Message = "JobOrchestratorWorker started; worker_id={WorkerId}")]
     private static partial void LogStarted(ILogger logger, string workerId);
 
-    [LoggerMessage(EventId = 2, Level = LogLevel.Information, Message = "SagaWorker stopping")]
+    [LoggerMessage(EventId = 2, Level = LogLevel.Information, Message = "JobOrchestratorWorker stopping")]
     private static partial void LogStopping(ILogger logger);
 
     [LoggerMessage(EventId = 3, Level = LogLevel.Error,
-        Message = "SagaWorker dispatch failed for job {JobId}")]
+        Message = "JobOrchestratorWorker dispatch failed for job {JobId}")]
     private static partial void LogDispatchFailure(ILogger logger, Exception ex, Guid jobId);
 
     [LoggerMessage(EventId = 4, Level = LogLevel.Warning,
-        Message = "SagaWorker ownership lost for job {JobId} (worker={WorkerId})")]
+        Message = "JobOrchestratorWorker ownership lost for job {JobId} (worker={WorkerId})")]
     private static partial void LogOwnershipLost(ILogger logger, Guid jobId, string? workerId);
 
     [LoggerMessage(EventId = 5, Level = LogLevel.Warning,
-        Message = "SagaWorker heartbeat failed for job {JobId}")]
+        Message = "JobOrchestratorWorker heartbeat failed for job {JobId}")]
     private static partial void LogHeartbeatFailure(ILogger logger, Exception ex, Guid jobId);
 
     [LoggerMessage(EventId = 6, Level = LogLevel.Warning,
-        Message = "SagaWorker heartbeat teardown error for job {JobId}")]
+        Message = "JobOrchestratorWorker heartbeat teardown error for job {JobId}")]
     private static partial void LogHeartbeatTeardown(ILogger logger, Exception ex, Guid jobId);
 
     [LoggerMessage(EventId = 7, Level = LogLevel.Warning,
-        Message = "SagaWorker LISTEN loop terminated unexpectedly")]
+        Message = "JobOrchestratorWorker LISTEN loop terminated unexpectedly")]
     private static partial void LogListenLoopFailure(ILogger logger, Exception ex);
 }

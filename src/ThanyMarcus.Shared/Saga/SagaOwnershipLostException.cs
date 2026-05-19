@@ -1,4 +1,4 @@
-namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
+namespace ThanyMarcus.Shared.Saga;
 
 public sealed class SagaOwnershipLostException : Exception
 {

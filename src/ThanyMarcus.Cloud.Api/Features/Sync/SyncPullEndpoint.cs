@@ -23,6 +23,7 @@ public static class SyncPullEndpoint
     private static async Task<IResult> HandleAsync(
         DateTimeOffset? since,
         int? limit,
+        string? include,
         CloudDbContext db,
         IArtifactStore store,
         CancellationToken ct)
@@ -32,11 +33,22 @@ public static class SyncPullEndpoint
             : Instant.MinValue;
         var pageSize = Math.Clamp(limit ?? DefaultPageSize, 1, 200);
 
-        var notes = await db.Notes
-            .Where(n => n.Status == NoteStatus.Ready && n.UpdatedAt > sinceInstant)
-            .OrderBy(n => n.UpdatedAt)
-            .Take(pageSize)
-            .ToListAsync(ct);
+        var includeProvenance = !string.IsNullOrEmpty(include) &&
+            include.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                   .Any(t => string.Equals(t, "provenance", StringComparison.OrdinalIgnoreCase));
+
+        var notes = includeProvenance
+            ? await db.Notes
+                .Where(n => (n.Status == NoteStatus.Ready ||
+                             n.Status == NoteStatus.Failed) && n.UpdatedAt > sinceInstant)
+                .OrderBy(n => n.UpdatedAt)
+                .Take(pageSize)
+                .ToListAsync(ct)
+            : await db.Notes
+                .Where(n => n.Status == NoteStatus.Ready && n.UpdatedAt > sinceInstant)
+                .OrderBy(n => n.UpdatedAt)
+                .Take(pageSize)
+                .ToListAsync(ct);
 
         if (notes.Count == 0)
         {
@@ -77,6 +89,16 @@ public static class SyncPullEndpoint
                     Extra:                att.Extra.RootElement.Clone()));
             }
 
+            System.Text.Json.JsonElement? provenance = null;
+            string? statusField = null;
+            DateTimeOffset? deletedAt = null;
+            if (includeProvenance)
+            {
+                provenance = note.Provenance is null ? null : note.Provenance.RootElement.Clone();
+                statusField = note.Status;
+                deletedAt = note.DeletedAt?.ToDateTimeOffset();
+            }
+
             items.Add(new SyncPullItem(
                 NoteId:           note.Id,
                 RelativePath:     note.RelativePath ?? $"Inbox/{note.Id}.md",
@@ -85,7 +107,10 @@ public static class SyncPullEndpoint
                 Tags:             note.Tags ?? Array.Empty<string>(),
                 LlmMode:          note.LlmMode,
                 Attachments:      dtoAtts,
-                UpdatedAt:        note.UpdatedAt.ToDateTimeOffset()));
+                UpdatedAt:        note.UpdatedAt.ToDateTimeOffset(),
+                Provenance:       provenance,
+                Status:           statusField,
+                DeletedAt:        deletedAt));
         }
 
         var next = notes[^1].UpdatedAt.ToDateTimeOffset();

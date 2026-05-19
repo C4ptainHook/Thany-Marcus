@@ -25,6 +25,9 @@ public sealed class CloudApiFactory : WebApplicationFactory<Program>
     public bool DisableHostedServices { get; init; } = true;
     public Action<IServiceCollection>? CustomizeServices { get; init; }
 
+    public int OrchestratorIdlePollMs { get; init; } = 60_000;
+    public int ExtractionTasksIdlePollMs { get; init; } = 60_000;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureAppConfiguration((_, cfg) =>
@@ -49,6 +52,8 @@ public sealed class CloudApiFactory : WebApplicationFactory<Program>
                 ["Llm:BodySectionHeader"]         = "## Body",
                 ["Llm:AttachmentsSectionHeader"]  = "## Attachments",
                 ["Llm:AttachmentHeaderTemplate"]  = "### Attachment {0} (kind={1})",
+                ["IngestSaga:Orchestrator:IdlePollMs"]       = OrchestratorIdlePollMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["IngestSaga:ExtractionTasks:IdlePollMs"]    = ExtractionTasksIdlePollMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
         });
 
@@ -57,7 +62,7 @@ public sealed class CloudApiFactory : WebApplicationFactory<Program>
             if (DisableHostedServices)
             {
                 services.RemoveAll<IHostedService>(s =>
-                    s.ImplementationType == typeof(IngestSagaWorker) ||
+                    s.ImplementationType == typeof(JobOrchestratorWorker) ||
                     s.ImplementationType == typeof(OrphanIngestSweeper));
             }
             CustomizeServices?.Invoke(services);

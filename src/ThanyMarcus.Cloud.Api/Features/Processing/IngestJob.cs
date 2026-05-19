@@ -25,8 +25,6 @@ public sealed class IngestJob : IHasUpdatedAt
 
 public static class IngestJobStatus
 {
-    // 'processing' is legacy CLOUD-002; saga-rewrite ticket removes it.
-    public const string Processing = "processing";
     public const string Queued = "queued";
     public const string ExtractingAttachments = "extracting_attachments";
     public const string Composing = "composing";
@@ -40,6 +38,38 @@ public static class IngestJobStatus
     public const string FailedEntities = "failed_entities";
     public const string FailedEmbedding = "failed_embedding";
     public const string DeadLettered = "dead_lettered";
+
+    public static readonly IReadOnlySet<string> Terminals = new HashSet<string>
+    {
+        Succeeded,
+        FailedExtraction,
+        FailedComposition,
+        FailedRoute,
+        FailedEntities,
+        FailedEmbedding,
+        DeadLettered,
+    };
+
+    public static readonly IReadOnlySet<string> InFlightPhases = new HashSet<string>
+    {
+        ExtractingAttachments,
+        Composing,
+        Routing,
+        ExtractingEntities,
+        Embedding,
+    };
+
+    public static bool IsTerminal(string status) => Terminals.Contains(status);
+
+    public static string FailureTerminalFor(string phase) => phase switch
+    {
+        ExtractingAttachments => FailedExtraction,
+        Composing             => FailedComposition,
+        Routing               => FailedRoute,
+        ExtractingEntities    => FailedEntities,
+        Embedding             => FailedEmbedding,
+        _ => throw new ArgumentOutOfRangeException(nameof(phase), phase, "no failure terminal mapping"),
+    };
 }
 
 public static class IngestJobKind

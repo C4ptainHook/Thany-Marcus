@@ -12,7 +12,6 @@ public sealed class IngestJobConfiguration : IEntityTypeConfiguration<IngestJob>
         {
             t.HasCheckConstraint("ck_ingest_jobs_status",
                 "status IN (" +
-                "'processing'," +
                 "'queued','extracting_attachments','composing','routing'," +
                 "'extracting_entities','embedding','succeeded'," +
                 "'failed_extraction','failed_composition','failed_route'," +
