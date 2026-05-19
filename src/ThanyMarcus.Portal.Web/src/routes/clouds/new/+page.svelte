@@ -86,6 +86,11 @@
 
   async function submit() {
     if (!provider || !region) return;
+    if (provider === 'digitalocean') {
+      submitting = true;
+      window.location.href = `/oauth/digitalocean/start?region=${encodeURIComponent(region)}`;
+      return;
+    }
     submitting = true;
     submitError = null;
     try {
@@ -116,7 +121,17 @@
     }
   }
 
-  onMount(() => { /* providers list is static; regions load when provider picked */ });
+  onMount(() => {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('error');
+    if (err) {
+      switch (err) {
+        case 'oauth_failed':   submitError = 'DigitalOcean authorization did not complete. Try again.'; break;
+        case 'step_up_required': submitError = 'Passphrase required to connect. Unlock and try again.'; break;
+        default:               submitError = `Connection failed (${err}).`;
+      }
+    }
+  });
 </script>
 
 <main>
@@ -204,7 +219,7 @@
       <div class="actions">
         <button class="btn-secondary" onclick={() => step = 'provider'} disabled={submitting}>Edit</button>
         <button class="btn-primary" disabled={submitting} onclick={submit}>
-          {submitting ? 'Provisioning…' : 'Provision'}
+          {submitting ? (provider === 'digitalocean' ? 'Connecting…' : 'Provisioning…') : (provider === 'digitalocean' ? 'Connect DigitalOcean' : 'Provision')}
         </button>
       </div>
     </section>

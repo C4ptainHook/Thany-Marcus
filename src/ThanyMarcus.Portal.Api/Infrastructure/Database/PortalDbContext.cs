@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 
 namespace ThanyMarcus.Portal.Api.Infrastructure.Database;
@@ -16,6 +17,7 @@ public sealed class PortalDbContext(DbContextOptions<PortalDbContext> options) :
     public DbSet<AuthLockout> AuthLockouts => Set<AuthLockout>();
     public DbSet<StepUpUnlock> StepUpUnlocks => Set<StepUpUnlock>();
     public DbSet<Cloud> Clouds => Set<Cloud>();
+    public DbSet<CloudSecret> CloudSecrets => Set<CloudSecret>();
     public DbSet<PluginTokenMetadata> PluginTokenMetadata => Set<PluginTokenMetadata>();
     public DbSet<ProvisioningJob> ProvisioningJobs => Set<ProvisioningJob>();
 

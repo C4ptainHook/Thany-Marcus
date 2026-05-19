@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
+using ThanyMarcus.Portal.Api.Features.Auth.Login;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth.StepUp;
@@ -28,6 +29,7 @@ public static class PassphraseEndpoints
             PassphraseService svc,
             IInfraOpUnlockCache cache,
             AuthLockoutService lockouts,
+            DigitalOceanTokenRefresher doRefresher,
             CancellationToken ct) =>
         {
             var userId = Guid.Parse(user.FindFirstValue(AuthClaimTypes.SubUs)!);
@@ -42,6 +44,7 @@ public static class PassphraseEndpoints
                 }
                 await cache.SetAsync(userId, dek, ct);
                 await lockouts.ClearAsync(userId, AuthLockoutKinds.Unlock, ct);
+                await doRefresher.RefreshExpiringAsync(userId, dek, ct);
                 return Results.NoContent();
             }
             finally

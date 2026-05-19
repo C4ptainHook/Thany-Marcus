@@ -8,12 +8,15 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using NodaTime;
+using Polly;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
+using ThanyMarcus.Portal.Api.Features.Auth.Login;
 using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
@@ -27,6 +30,7 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderMeta;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Status;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
@@ -92,6 +96,18 @@ builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
 builder.Services.AddHostedService<InfraOpUnlockSweepService>();
 
 builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
+builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
+
+builder.Services.Configure<DigitalOceanOAuthOptions>(builder.Configuration.GetSection("DigitalOcean:OAuth"));
+builder.Services.AddSingleton<DigitalOceanOAuthStateCookie>();
+builder.Services.AddScoped<DigitalOceanTokenRefresher>();
+builder.Services.AddHttpClient<IDigitalOceanOAuthClient, DigitalOceanOAuthClient>(c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(30);
+})
+.AddPolicyHandler(Polly.Extensions.Http.HttpPolicyExtensions
+    .HandleTransientHttpError()
+    .WaitAndRetryAsync(3, n => TimeSpan.FromMilliseconds(200 * Math.Pow(5, n - 1))));
 builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
 builder.Services.AddScoped<EnqueueGuard>();
 builder.Services.AddSingleton<EnrollmentTokenGenerator>();
@@ -220,6 +236,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 });
 
 app.MapAuthEndpoints();
+app.MapDigitalOceanOAuthEndpoints();
 app.MapTotpEndpoints();
 app.MapPassphraseEndpoints();
 app.MapProviderTokenEndpoints();

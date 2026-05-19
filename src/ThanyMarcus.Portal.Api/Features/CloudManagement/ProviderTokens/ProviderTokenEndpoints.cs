@@ -31,6 +31,8 @@ public static class ProviderTokenEndpoints
         {
             if (!KnownProviders.IsValid(body.Provider))
                 return Results.BadRequest(new { error = "unknown_provider", supported = KnownProviders.All });
+            if (body.Provider == KnownProviders.DigitalOcean)
+                return Results.BadRequest(new { error = "use_oauth_flow", start = "/oauth/digitalocean/start" });
             if (string.IsNullOrWhiteSpace(body.Token))
                 return Results.BadRequest(new { error = "token_required" });
 

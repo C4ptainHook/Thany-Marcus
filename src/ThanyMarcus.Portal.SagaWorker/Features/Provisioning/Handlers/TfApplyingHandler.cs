@@ -9,6 +9,7 @@ using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
@@ -20,6 +21,7 @@ public sealed partial class TfApplyingHandler(
     IClock clock,
     IInfraOpUnlockCache unlockCache,
     IProviderTokenVault providerVault,
+    ICloudSecretBundle secrets,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
     IConfiguration config,
@@ -59,17 +61,20 @@ public sealed partial class TfApplyingHandler(
                 return;
             }
 
-            providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
-            if (providerToken is null && cloud.Provider != "stub")
+            if (cloud.Provider != DigitalOceanTfEnv.DigitalOceanProvider && cloud.Provider != "stub")
             {
-                EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
+                if (providerToken is null)
                 {
-                    ["error"] = "provider_token_not_found",
-                });
-                job.LastError = $"no provider token for {cloud.Provider}";
-                await SagaTransitions.TransitionToTerminalAsync(
-                    db, clock, job, cloud, SagaStatus.FailedTf, ct);
-                return;
+                    EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                    {
+                        ["error"] = "provider_token_not_found",
+                    });
+                    job.LastError = $"no provider token for {cloud.Provider}";
+                    await SagaTransitions.TransitionToTerminalAsync(
+                        db, clock, job, cloud, SagaStatus.FailedTf, ct);
+                    return;
+                }
             }
 
             if (needsReplan)
@@ -93,7 +98,7 @@ public sealed partial class TfApplyingHandler(
                     return;
                 }
 
-                var planEnv = BuildEnv(cloud, providerToken);
+                var planEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
                 var planResult = await tf.PlanAsync(workdir, planEnv, ct);
                 EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", planResult.Stdout);
                 if (!planResult.Success)
@@ -106,7 +111,7 @@ public sealed partial class TfApplyingHandler(
                 }
             }
 
-            var applyEnv = BuildEnv(cloud, providerToken);
+            var applyEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
             var applyResult = await tf.ApplyAsync(workdir, applyEnv, ct);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", applyResult.Stdout);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", applyResult.Stderr);
@@ -174,7 +179,8 @@ public sealed partial class TfApplyingHandler(
         return IPAddress.TryParse(raw, out _) ? raw : null;
     }
 
-    private static Dictionary<string, string> BuildEnv(Cloud cloud, byte[]? providerToken)
+    private async Task<Dictionary<string, string>> BuildEnvAsync(
+        Cloud cloud, byte[]? providerToken, byte[] dek, CancellationToken ct)
     {
         var env = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -183,7 +189,11 @@ public sealed partial class TfApplyingHandler(
             ["TF_VAR_hostname"] = cloud.Hostname,
             ["TF_VAR_enrollment_token"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)),
         };
-        if (providerToken is not null)
+        if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
+        {
+            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.Id, dek, secrets, ct);
+        }
+        else if (providerToken is not null)
         {
             env["TF_VAR_provider_token"] = Encoding.UTF8.GetString(providerToken);
         }

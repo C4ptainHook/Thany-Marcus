@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
@@ -111,10 +112,12 @@ public sealed class RollingBackTfHandlerTests(PostgresFixture postgres) : DbInte
 
         var unlockCache = new PostgresInfraOpUnlockCache(Db, dp, Clock);
         var providerVault = new ProviderTokenVault(Db, Clock);
+        var secrets = new CloudSecretBundle(Db, Clock);
+        var doClient = new FakeDigitalOceanOAuthClient();
         var layout = new WorkspaceLayout(config, NullLogger<WorkspaceLayout>.Instance);
 
         return new RollingBackTfHandler(
-            Db, Clock, unlockCache, providerVault, tf,
+            Db, Clock, unlockCache, providerVault, secrets, doClient, tf,
             layout, config, NullLogger<RollingBackTfHandler>.Instance);
     }
 }

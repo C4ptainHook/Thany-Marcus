@@ -9,7 +9,9 @@ using Microsoft.Extensions.Hosting;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
@@ -73,6 +75,8 @@ internal static class SagaHostBuilder
 
         builder.Services.AddSingleton<IInfraOpUnlockCache>(new StubInfraOpUnlockCache());
         builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
+        builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
+        builder.Services.AddSingleton<IDigitalOceanOAuthClient, FakeDigitalOceanOAuthClient>();
         builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
         builder.Services.AddScoped<IProvisioningEventBus, PostgresProvisioningEventBus>();
         builder.Services.AddSingleton(pluginTokenCloudClient ?? new StubPluginTokenCloudClient());
@@ -82,6 +86,7 @@ internal static class SagaHostBuilder
         builder.Services.AddSingleton(cloudflare);
         builder.Services.AddSingleton<WorkspaceLayout>();
 
+        builder.Services.AddScoped<ISagaPhaseHandler, MintingSpacesHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, TfPlanningHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, TfApplyingHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, DnsCreatingHandler>();

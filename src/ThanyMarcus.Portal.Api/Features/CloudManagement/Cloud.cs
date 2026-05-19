@@ -19,6 +19,7 @@ public sealed class Cloud : IHasUpdatedAt
     public Guid? ProviderTokenId { get; set; }
 
     public string ProvisioningStatus { get; set; } = null!;
+    public Instant? MintingSpacesStartedAt { get; set; }
     public Instant? PlanStartedAt { get; set; }
     public Instant? ApplyStartedAt { get; set; }
     public Instant? DnsStartedAt { get; set; }
@@ -26,6 +27,8 @@ public sealed class Cloud : IHasUpdatedAt
     public Instant? AdminStartedAt { get; set; }
     public Instant? ProvisioningCompletedAt { get; set; }
     public string? ProvisioningError { get; set; }
+
+    public string ConnectionStatus { get; set; } = "connected";
 
     public Instant CreatedAt { get; init; }
     public Instant UpdatedAt { get; set; }

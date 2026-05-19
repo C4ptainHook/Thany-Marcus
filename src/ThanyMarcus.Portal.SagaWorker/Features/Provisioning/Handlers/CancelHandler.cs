@@ -8,6 +8,7 @@ using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
@@ -19,6 +20,7 @@ public sealed partial class CancelHandler(
     IClock clock,
     IInfraOpUnlockCache unlockCache,
     IProviderTokenVault providerVault,
+    ICloudSecretBundle secrets,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
     IConfiguration config,
@@ -117,7 +119,8 @@ public sealed partial class CancelHandler(
         {
             if (await unlockCache.TryGetAsync(cloud.UserId, dek, ct))
             {
-                providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
+                if (cloud.Provider != DigitalOceanTfEnv.DigitalOceanProvider && cloud.Provider != "stub")
+                    providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
             }
             else
             {
@@ -145,7 +148,7 @@ public sealed partial class CancelHandler(
                 return;
             }
 
-            var destroyEnv = BuildEnv(cloud, providerToken);
+            var destroyEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
             var destroyResult = await tf.DestroyAsync(workdir, destroyEnv, ct);
             EventsLogAppender.AppendTerraformStream(cancelJob, clock, Phase, "tf_stdout", destroyResult.Stdout);
             EventsLogAppender.AppendTerraformStream(cancelJob, clock, Phase, "tf_stderr", destroyResult.Stderr);
@@ -175,7 +178,8 @@ public sealed partial class CancelHandler(
         }
     }
 
-    private static Dictionary<string, string> BuildEnv(Cloud cloud, byte[]? providerToken)
+    private async Task<Dictionary<string, string>> BuildEnvAsync(
+        Cloud cloud, byte[]? providerToken, byte[] dek, CancellationToken ct)
     {
         var env = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -184,7 +188,11 @@ public sealed partial class CancelHandler(
             ["TF_VAR_hostname"] = cloud.Hostname,
             ["TF_VAR_enrollment_token"] = string.Empty,
         };
-        if (providerToken is not null)
+        if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
+        {
+            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.Id, dek, secrets, ct);
+        }
+        else if (providerToken is not null)
         {
             env["TF_VAR_provider_token"] = Encoding.UTF8.GetString(providerToken);
         }

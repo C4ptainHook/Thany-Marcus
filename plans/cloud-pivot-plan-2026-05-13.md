@@ -210,8 +210,8 @@ Strongest claim:
 1. User visits the portal, signs in with Google SSO.
 2. (Optional) Enables TOTP 2FA in Account Settings — scans QR code with an authenticator app, saves 8 single-use backup codes.
 3. Clicks "Create cloud" → wizard:
-   - Step 1: pick provider (DO / Azure; more in future) + paste provider credentials (DO: API token; Azure: service principal — tenant_id, client_id, client_secret, subscription_id)
-   - Step 2: set passphrase (encrypts the provider credentials); see 8 recovery codes
+   - Step 1: pick provider (DO / Azure; more in future). **DO:** click "Connect DigitalOcean" → OAuth redirect → DO consent → callback (no paste). **Azure:** paste service principal (tenant_id, client_id, client_secret, subscription_id). See the 2026-05-19 amendment at end of §23 for the DO OAuth flow and the credential-bundle schema that replaces the single-`EncryptedProviderToken` row.
+   - Step 2: set passphrase (encrypts the provider credentials with the per-user DEK); see 8 recovery codes
    - Step 3: provisioning progress — Terraform plan → apply → droplet/VM boots → cloud-init runs → Docker images pulled → Ollama model downloaded → ready (~5–10 min on DO; ~7–15 min on Azure)
    - Domain is auto-assigned: portal generates random subdomain `<random8>.thany.click` and configures Cloudflare DNS A-record pointing at the new IP before Terraform completes. User does no DNS configuration.
 4. On first boot, the user's cloud generates a **cloud admin token** and POSTs it to the portal's `/api/cloud/{cloud_id}/register-with-token` endpoint.
@@ -230,7 +230,7 @@ User returns to the portal for:
 
 - **Cloud admin token** — plaintext in portal Postgres; scoped only to app-level admin endpoints on the specific user's cloud; cannot destroy infra; cannot read vault content. Low-impact if portal is breached.
 - **Plugin bearer token** — hashed in user's cloud's Postgres; plaintext shown once to user at issuance and never persisted in portal.
-- **Provider API token** — `AES-GCM(token, Argon2id(passphrase, salt))`. Decrypted only in-memory when user supplies passphrase. Held only during the infra op, dropped after.
+- **Provider credentials** — `AES-GCM(plaintext, dek)` with per-user DEK; DEK unwrapped via step-up passphrase. Decrypted only in-memory while a session is active; held only across the infra op, dropped after. Schema is **per-cloud, multi-kind** (DO: oauth_access + oauth_refresh + spaces_access_id + spaces_secret; Azure: sp_client_secret) — see the 2026-05-19 amendment at end of §23 for the bundle schema and the OAuth flow that supersedes the original "paste a DO API token" model.
 - **8 dual-use recovery codes (passphrase)** — hashed at rest with Argon2id; single-use; each can substitute for passphrase.
 - **8 single-use TOTP backup codes** — separate set; hashed at rest; covers loss of authenticator app.
 - **TOTP shared secret** — AES-GCM encrypted at rest with a server-side master key from env.
@@ -620,19 +620,21 @@ Portal flow per user-cloud:
 ### Destroy flow
 
 - User clicks "Destroy" in portal
-- Portal prompts for passphrase, decrypts provider token in memory
+- Portal prompts for passphrase, unwraps DEK in memory
+- **DO clouds:** before terraform destroy — `DELETE /v2/spaces/keys/{access_key_id}` to revoke the minted Spaces key in the user's DO account; revoke the OAuth access token at DO's revocation endpoint. See 2026-05-19 amendment at end of §23.
 - Portal runs `terraform destroy` in the cloud's workspace
-- Portal deletes its records of the cloud
+- Portal deletes all `(cloud_id, *)` secret rows and the `clouds` row
 - Local vault on user's machine survives untouched (preserved promise)
+- DO clouds: nudge user to remove "Thany" from DO console's Authorized Apps if they want full off-boarding (one click, user-only action; the underlying OAuth grant is not third-party-revocable)
 - Manual DNS cleanup notice for the A-record (auto-DNS-cleanup is future work)
 
 ### Onboarding wizard (3 screens)
 
 | Screen | Content | User input |
 |---|---|---|
-| 1. **Cloud target** | Pick provider + paste provider API token + paste domain | 3 fields |
-| 2. **Security** | Set passphrase + see 8 recovery codes | 1 field + acknowledge codes |
-| 3. **Provisioning** | Live progress: terraform plan → apply → cloud-init → Docker pull → model download → ready | None — wait |
+| 1. **Cloud target** | Pick provider. **DO:** one-button "Connect DigitalOcean" (OAuth, no paste). **Azure:** paste service principal fields. Domain is auto-assigned (random subdomain on `thany.click`) per §8. | DO: 1 click. Azure: 4 fields. |
+| 2. **Security** | Set passphrase + see 8 recovery codes (first cloud only; reused on subsequent clouds) | 1 field + acknowledge codes |
+| 3. **Provisioning** | Live progress: spaces-key mint (DO only) → terraform plan → apply → cloud-init → Docker pull → model download → ready | None — wait |
 
 Optional 2FA setup is offered in Account Settings post-onboarding.
 
@@ -650,6 +652,58 @@ After provisioning completes, a "Plugin Setup" page shows:
 > **Optional VM downsize.** Post-migration, the portal VM no longer hosts Postgres, freeing ~500 MB RAM. B2ms → B2s is available as a cost lever (approximately $30/mo savings) once the system has run steady-state on managed PG for a week. Not baked into the migration plan, to keep cutover risk low.
 >
 > Cross-references: ADR-0037 (saga scaling ladder), ADR-0038 (managed Postgres), ADR-0019 amendment (connection budget on Flexible Server), ADR-0027 amendment (privacy framing clarified).
+
+> **Amendment 2026-05-19 — DigitalOcean OAuth + Spaces auto-mint (supersedes the DO portions of §8, §21 token storage, §23 onboarding wizard, and Appendix C ADR-0023 framing for DO).**
+>
+> **Motivation.** The original onboarding flow asks the user to paste a DigitalOcean API token. That has two real problems independent of UX polish: (1) the user must navigate DO's console and understand what a Personal Access Token is — a credential most people have never created and will treat opaquely; (2) Terraform's `digitalocean` provider needs *separate* Spaces credentials (`SPACES_ACCESS_KEY_ID` / `SPACES_SECRET_ACCESS_KEY`) to create the Spaces bucket — so a single pasted PAT does not actually unblock provisioning end-to-end, and a second paste step is unacceptable.
+>
+> **Decision.** For DigitalOcean specifically, replace PAT-paste with **OAuth 2.0 authorization-code flow** and **auto-mint Spaces credentials** server-side from the resulting access token. The user pastes nothing for DO. Azure provisioning continues to use pasted service principals (Azure offers no symmetric consent flow; service principals remain the right primitive there). Adding a new OAuth-capable provider in the future is a credential-driver addition; adding a paste-only provider stays a credential-schema addition.
+>
+> **What the user sees (DO).** On the Cloud page, **"Connect DigitalOcean"** button → redirect to `https://cloud.digitalocean.com/v1/oauth/authorize` (scope `read write`, CSRF state) → DO consent screen ("Thany wants read/write access to your account") → DO redirects to `https://portal.thany.click/oauth/digitalocean/callback?code=…&state=…` → portal exchanges the code at `/v1/oauth/token` → receives `{access_token, refresh_token, expires_in≈30d, info: {uuid, name, email}}` → portal kicks off the provisioning saga. The user never types or sees a credential.
+>
+> **What the user sees (Azure, unchanged).** Paste tenant_id / client_id / client_secret / subscription_id, encrypted with the per-user DEK as today.
+>
+> **Credential schema (replaces ADR-0023 for DO).** The current per-user-per-provider single `EncryptedProviderToken` row is too narrow — DO needs four entries (access, refresh, spaces id, spaces secret), Azure needs one. Generalize to a **cloud-scoped secret bundle** keyed on `(cloud_id, kind)`:
+>
+> | Provider | Kinds stored |
+> |---|---|
+> | DO | `do_oauth_access`, `do_oauth_refresh`, `do_spaces_access_id`, `do_spaces_secret` |
+> | Azure | `azure_sp_client_secret` (other SP fields non-secret, on `clouds`) |
+> | Shared | `ssh_priv` (Terraform-generated keypair) |
+>
+> Each row is `AES-GCM(plaintext, dek)` with the existing per-user DEK envelope. The DEK availability rule (§21) is unchanged: unwrapped only inside a logged-in session via step-up passphrase; the saga inherits the unwrapped DEK transiently from the request that started it (see "Refresh-window" below for the only departure).
+>
+> **Provisioning saga step changes.** Insert a new step `do_spaces_key_mint` between `planning` and `applying` for DO clouds:
+>
+> 1. Saga reads `do_oauth_access` from the secret bundle.
+> 2. POSTs `/v2/spaces/keys` with `{name: "thany-cloud-{cloud_id}", grants: [{bucket: "", permission: "fullaccess"}]}` for the bootstrap window. (Bucket-scoped grants for a not-yet-existing bucket name remain unverified live; until verified, use `fullaccess` and narrow post-apply if the test confirms — open verification noted in §28.)
+> 3. Stores returned `(access_key_id, secret_key)` as `do_spaces_access_id` + `do_spaces_secret`, AES-GCM-wrapped with the user's DEK.
+> 4. Saga `applying` step passes both DO env vars + `DIGITALOCEAN_TOKEN={oauth_access}` to the Terraform subprocess.
+>
+> **Refresh-window — the only DEK-availability exception.** OAuth access tokens expire every 30 days; refresh tokens do not expire absent revocation. Refresh has to happen without the user being online. Resolution: **refresh on user login, not in the background.**
+>
+> - At login, if `do_oauth_access.expires_at < now + 5d`, portal performs the refresh inline while the DEK is warm: unwrap refresh_token, call `/v1/oauth/token` with `grant_type=refresh_token`, re-wrap both new tokens, drop DEK.
+> - If the user has been offline > 30d, access expires before next login. Refresh attempt fails → mark `clouds.connection_status = needs_reauth` → dashboard shows "Reconnect DigitalOcean" → one-click re-OAuth, callback re-stores fresh tokens.
+> - Saga runs (provisioning, resize, destroy) always happen mid-session (user initiated), so the DEK is always warm during their lifetime. No background-refresh `IHostedService` is needed; if one is later added (e.g. to refresh during a long-running saga that crosses the 30-day boundary), it inherits the same "DEK unavailable → set needs_reauth" failure mode.
+> - This preserves the "portal breach does not yield usable provider access" property of ADR-0023, because OAuth tokens at rest are still DEK-wrapped.
+>
+> **Disconnect / destroy flow.** On user-initiated destroy or "Disconnect cloud":
+>
+> 1. Saga reads `do_spaces_access_id` and calls `DELETE /v2/spaces/keys/{access_key_id}` — minted Spaces key revoked in the user's DO account.
+> 2. Saga revokes the OAuth access token at DO's revocation endpoint.
+> 3. Terraform destroy proceeds as today.
+> 4. Portal deletes all `(cloud_id, *)` secret rows.
+>
+> Net: a churned user has no live credentials left in their DO account that the portal had previously minted. The user's original consent (the OAuth grant itself) is also revocable from DO's console at any time — and a revocation there is detected on the next refresh attempt and surfaces as `needs_reauth`.
+>
+> **Portal config additions.** One-time setup at DO: register an OAuth app, set callback URL `https://portal.thany.click/oauth/digitalocean/callback`, store `DO_OAUTH_CLIENT_ID` + `DO_OAUTH_CLIENT_SECRET` in portal env (these are *Boiko's*, not per-user; rotation policy: documented but manual). One-time setup in Cloudflare: the callback path is already served by the portal; nothing extra.
+>
+> **Caveats / open verifications.**
+>
+> - DO's OAuth consent screen historically exposes only coarse `read` / `read_write` scopes, not fine-grained `spaces_key:create`-style scopes. `read_write` is sufficient for everything we need (droplet, spaces, spaces_key:create); consent screen language is "read and write access," which matches user expectation. To-verify before coding: a live OAuth `read_write` token can actually call `POST /v2/spaces/keys` (rather than that endpoint being restricted to PAT-only). If it cannot, fallback design is documented but unattractive: keep DO OAuth for provisioning auth, ask user to additionally paste Spaces keys, accept the second paste step.
+> - DO does not expose an API to revoke a user's PAT/OAuth grant from a third party in all cases. The minted *Spaces key* is API-revocable (verified). The OAuth *access token* revocation endpoint exists. The user's underlying OAuth *grant* (visible in DO console under "Authorized apps") is user-revocable, not third-party-revocable — meaning a fully clean offboarding from our side covers the keys we minted, but if the user wants to remove the "Thany" app from their DO authorized apps list entirely, that's a one-click action in DO's console. Surface this as a UI nudge on disconnect, not a blocker.
+>
+> Cross-references: supersedes the DO half of ADR-0023; new ADR-0039 to be authored ("DigitalOcean OAuth + auto-mint Spaces credentials; deprecate DO PAT-paste flow"); §28 Q-Provider-Creds added.
 
 ## 24. Evaluation Plan
 
@@ -671,6 +725,8 @@ Eval corpus collection: ~150–200 self-collected artifacts over 3–4 weeks of 
 - Optional TOTP 2FA with 8 single-use backup codes
 - Terraform CLI integration: per-user workspaces, `pg` backend for state
 - `.tf` modules for DO + Azure; documented path for adding more
+- DigitalOcean OAuth client (registered at DO; client_id/secret in portal env); callback endpoint at `/oauth/digitalocean/callback`; CSRF state validation; token exchange + login-time refresh; `needs_reauth` surfacing (see 2026-05-19 amendment at end of §23)
+- Spaces-key mint saga step for DO (`POST /v2/spaces/keys` → store ciphertext alongside OAuth tokens; revoke on destroy via `DELETE`)
 - Cloudflare DNS API client (per-cloud subdomain A-record management on `thany.click`)
 - Cloud lifecycle: provision, configure (proxied), resize, destroy
 - Plugin bearer-token issuance + revocation UI
@@ -827,6 +883,7 @@ Still open:
 - **Q-DNS-cert.** What if DNS hasn't propagated when LE tries to issue the cert? Retry strategy + user-visible error state.
 - **Q-Name.** Project name + portal domain. "Thany-Marcus" is the working name; final?
 - **Q-ImageDistribution.** Where do user clouds pull Docker images from? GitHub Container Registry (public, free)? Image signing strategy?
+- ~~**Q-Provider-Creds.** How does the user supply provider credentials?~~ **Resolved (2026-05-19 amendment at end of §23):** DO via OAuth 2.0 (no paste); auto-mint Spaces credentials from OAuth access token; refresh on login. Azure stays paste-a-service-principal. Open verification: live test that OAuth `read_write` token can call `POST /v2/spaces/keys`.
 
 ### Tier B — design refinements
 
@@ -913,5 +970,6 @@ Continuing numbering from 0017:
 - ADR-0028: Drop Google SSO on user's cloud; data plane has zero human-facing browser auth; Q-OAuth dissolved
 - ADR-0029: Drop mobile and PWA from MVP; Obsidian Mobile + same plugin is the future-work mobile path
 - ADR-0030: Drop Cytoscape.js graph viewer — Obsidian's native graph view is the rendering surface
+- ADR-0039: DigitalOcean OAuth + auto-mint Spaces credentials; deprecate DO PAT-paste flow; refresh on login with `needs_reauth` fallback; per-cloud multi-kind secret bundle replaces single `EncryptedProviderToken` row for DO. Supersedes the DO portion of ADR-0023. See 2026-05-19 amendment at end of §23.
 
 **Plan status:** architecture locked at the level resolved during grilling so far. Tier-A open questions (§28) need explicit decisions before implementation begins. Tier-B and Tier-C items can be drafted as defaults and revisited mid-implementation.

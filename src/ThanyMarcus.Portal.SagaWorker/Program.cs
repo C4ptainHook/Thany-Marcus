@@ -7,7 +7,9 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
@@ -62,7 +64,17 @@ public static class Program
 
         builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
         builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
+        builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
         builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
+
+        builder.Services.Configure<DigitalOceanOAuthOptions>(builder.Configuration.GetSection("DigitalOcean:OAuth"));
+        builder.Services.AddHttpClient<IDigitalOceanOAuthClient, DigitalOceanOAuthClient>(c =>
+        {
+            c.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .AddPolicyHandler(HttpPolicyExtensions
+            .HandleTransientHttpError()
+            .WaitAndRetryAsync(3, n => TimeSpan.FromMilliseconds(200 * Math.Pow(5, n - 1))));
         builder.Services.AddScoped<IProvisioningEventBus, PostgresProvisioningEventBus>();
 
         builder.Services.AddSingleton<ITerraformRunner, TerraformRunner>();
@@ -85,6 +97,7 @@ public static class Program
         else
             builder.Services.AddSingleton<ICloudflareDnsClient, CloudflareDnsClient>();
 
+        builder.Services.AddScoped<ISagaPhaseHandler, MintingSpacesHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, TfPlanningHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, TfApplyingHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, DnsCreatingHandler>();
