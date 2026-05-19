@@ -170,9 +170,9 @@ write_files:
             - /etc/letsencrypt:/etc/letsencrypt:ro
           depends_on:
             postgres: { condition: service_healthy }
-            ollama:   { condition: service_healthy }
-            docling:  { condition: service_healthy }
-            parakeet: { condition: service_healthy }
+            ollama:   { condition: service_started }
+            docling:  { condition: service_started }
+            parakeet: { condition: service_started }
           networks: [cloud]
           healthcheck:
             test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health/live || exit 1"]
