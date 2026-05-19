@@ -76,6 +76,7 @@ internal static class SagaHostBuilder
         builder.Services.AddSingleton<IInfraOpUnlockCache>(new StubInfraOpUnlockCache());
         builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
         builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
+        builder.Services.AddScoped<IDigitalOceanOAuthConnections, DigitalOceanOAuthConnections>();
         builder.Services.AddSingleton<IDigitalOceanOAuthClient, FakeDigitalOceanOAuthClient>();
         builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
         builder.Services.AddScoped<IProvisioningEventBus, PostgresProvisioningEventBus>();

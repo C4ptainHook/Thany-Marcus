@@ -2,6 +2,9 @@
   import { onMount } from 'svelte';
   import { enableInit, enableVerify, disable, type TotpEnableInit } from '$lib/totpClient';
   import { setPassphrase } from '$lib/stepUpClient';
+  import { apiFetch } from '$lib/http';
+
+  type DoConnection = { connected: false } | { connected: true; status: string; expiresAt: string };
 
   type Phase = 'loading' | 'idle' | 'enabling' | 'showing-codes' | 'disabling';
 
@@ -19,6 +22,29 @@
   let passphraseBusy = $state(false);
   let backupCodes = $state<string[]>([]);
   let error = $state<string | null>(null);
+  let doConnection = $state<DoConnection | null>(null);
+  let doDisconnectBusy = $state(false);
+
+  async function refreshDoConnection() {
+    try {
+      const r = await fetch('/api/clouds/connections/digitalocean');
+      if (!r.ok) { doConnection = { connected: false }; return; }
+      doConnection = await r.json();
+    } catch {
+      doConnection = { connected: false };
+    }
+  }
+
+  async function disconnectDo() {
+    if (!confirm('Disconnect DigitalOcean? Provisioning will require re-authorization.')) return;
+    doDisconnectBusy = true;
+    try {
+      const r = await apiFetch('/api/clouds/connections/digitalocean', { method: 'DELETE' });
+      if (r.ok || r.status === 204) await refreshDoConnection();
+    } finally {
+      doDisconnectBusy = false;
+    }
+  }
 
   async function refreshMe() {
     const r = await fetch('/api/auth/me');
@@ -61,7 +87,7 @@
     }
   }
 
-  onMount(refreshMe);
+  onMount(async () => { await refreshMe(); await refreshDoConnection(); });
 
   async function startEnable() {
     error = null;
@@ -231,6 +257,29 @@
         <p>Passphrase: <strong class="success">set ✓</strong></p>
       {/if}
     </section>
+
+    {#if passphraseSet}
+      <section class="card">
+        <h2 class="card-title">CONNECTIONS</h2>
+        <p>
+          DigitalOcean:
+          {#if doConnection === null}
+            <span class="muted">loading…</span>
+          {:else if !doConnection.connected}
+            <strong>not connected</strong>
+            <a class="btn btn-primary" href="/oauth/digitalocean/start?return_to=/settings" style="margin-left: var(--space-2);">Connect DigitalOcean</a>
+          {:else if doConnection.status === 'needs_reauth'}
+            <strong class="error">needs re-authorization</strong>
+            <a class="btn btn-primary" href="/oauth/digitalocean/start?return_to=/settings" style="margin-left: var(--space-2);">Reconnect</a>
+          {:else}
+            <strong class="success">connected</strong>
+            <button class="btn-secondary" type="button" onclick={disconnectDo} disabled={doDisconnectBusy} style="margin-left: var(--space-2);">
+              {doDisconnectBusy ? 'Disconnecting…' : 'Disconnect'}
+            </button>
+          {/if}
+        </p>
+      </section>
+    {/if}
 
   {/if}
 </main>

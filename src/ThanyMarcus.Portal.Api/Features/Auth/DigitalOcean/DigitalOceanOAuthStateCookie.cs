@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.DataProtection;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 
-public sealed record DigitalOceanOAuthState(string State, Guid UserId, string Region, long IssuedAtUnixSeconds);
+public sealed record DigitalOceanOAuthState(string State, Guid UserId, string ReturnTo, long IssuedAtUnixSeconds);
 
 public sealed class DigitalOceanOAuthStateCookie(IDataProtectionProvider dpProvider)
 {

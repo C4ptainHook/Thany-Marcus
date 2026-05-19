@@ -17,6 +17,7 @@ public sealed partial class MintingSpacesHandler(
     IClock clock,
     IInfraOpUnlockCache unlockCache,
     ICloudSecretBundle secrets,
+    IDigitalOceanOAuthConnections connections,
     IDigitalOceanOAuthClient doClient,
     ILogger<MintingSpacesHandler> log) : ISagaPhaseHandler
 {
@@ -59,18 +60,14 @@ public sealed partial class MintingSpacesHandler(
                 return;
             }
 
-            string accessToken;
-            try
-            {
-                accessToken = await secrets.GetAsync(cloud.Id, CloudSecretKind.DoOAuthAccess, dek, ct);
-            }
-            catch (CloudSecretNotFoundException)
+            var accessToken = await connections.GetAccessTokenAsync(cloud.UserId, dek, ct);
+            if (accessToken is null)
             {
                 EventsLogAppender.Append(job, clock, Phase, new JsonObject
                 {
-                    ["error"] = "do_oauth_access_missing",
+                    ["error"] = "do_oauth_connection_missing",
                 });
-                job.LastError = "DO OAuth access token missing";
+                job.LastError = "DigitalOcean is not connected for this user";
                 await SagaTransitions.TransitionToTerminalAsync(
                     db, clock, job, cloud, SagaStatus.FailedMintingSpaces, ct);
                 return;

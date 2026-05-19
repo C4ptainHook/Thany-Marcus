@@ -5,7 +5,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
@@ -17,6 +19,8 @@ public sealed partial class TfPlanningHandler(
     IClock clock,
     IInfraOpUnlockCache unlockCache,
     IProviderTokenVault providerVault,
+    ICloudSecretBundle secrets,
+    IDigitalOceanOAuthConnections connections,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
     IConfiguration config,
@@ -53,18 +57,21 @@ public sealed partial class TfPlanningHandler(
                 return;
             }
 
-            providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
-            if (providerToken is null && cloud.Provider != "stub")
+            if (cloud.Provider != DigitalOceanTfEnv.DigitalOceanProvider && cloud.Provider != "stub")
             {
-                EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
+                if (providerToken is null)
                 {
-                    ["error"] = "provider_token_not_found",
-                    ["provider"] = cloud.Provider,
-                });
-                job.LastError = $"no provider token for {cloud.Provider}";
-                await SagaTransitions.TransitionToTerminalAsync(
-                    db, clock, job, cloud, SagaStatus.FailedTf, ct);
-                return;
+                    EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                    {
+                        ["error"] = "provider_token_not_found",
+                        ["provider"] = cloud.Provider,
+                    });
+                    job.LastError = $"no provider token for {cloud.Provider}";
+                    await SagaTransitions.TransitionToTerminalAsync(
+                        db, clock, job, cloud, SagaStatus.FailedTf, ct);
+                    return;
+                }
             }
 
             var workdir = await workspaceLayout.RenderAsync(job, cloud, ct);
@@ -92,7 +99,7 @@ public sealed partial class TfPlanningHandler(
                 return;
             }
 
-            var planEnv = BuildEnv(cloud, job, providerToken);
+            var planEnv = await BuildEnvAsync(cloud, job, providerToken, dek, ct);
             var planResult = await tf.PlanAsync(workdir, planEnv, ct);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", planResult.Stdout);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", planResult.Stderr);
@@ -124,10 +131,12 @@ public sealed partial class TfPlanningHandler(
         }
     }
 
-    private static Dictionary<string, string> BuildEnv(
+    private async Task<Dictionary<string, string>> BuildEnvAsync(
         Api.Features.CloudManagement.Cloud cloud,
         ProvisioningJob job,
-        byte[]? providerToken)
+        byte[]? providerToken,
+        byte[] dek,
+        CancellationToken ct)
     {
         var enrollmentToken = job.EnrollmentToken
             ?? Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
@@ -138,7 +147,11 @@ public sealed partial class TfPlanningHandler(
             ["TF_VAR_hostname"] = cloud.Hostname,
             ["TF_VAR_enrollment_token"] = enrollmentToken,
         };
-        if (providerToken is not null)
+        if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
+        {
+            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.UserId, cloud.Id, dek, connections, secrets, ct);
+        }
+        else if (providerToken is not null)
         {
             env["TF_VAR_provider_token"] = Encoding.UTF8.GetString(providerToken);
         }

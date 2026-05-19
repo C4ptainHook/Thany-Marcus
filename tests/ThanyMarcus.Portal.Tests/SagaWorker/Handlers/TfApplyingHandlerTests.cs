@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
@@ -90,10 +91,11 @@ public sealed class TfApplyingHandlerTests(PostgresFixture postgres) : DbIntegra
         var unlockCache = new PostgresInfraOpUnlockCache(Db, dp, Clock);
         var providerVault = new ProviderTokenVault(Db, Clock);
         var secrets = new CloudSecretBundle(Db, Clock);
+        var connections = new DigitalOceanOAuthConnections(Db, Clock);
         var workspaceLayout = new WorkspaceLayout(config, NullLogger<WorkspaceLayout>.Instance);
 
         return new TfApplyingHandler(
-            Db, Clock, unlockCache, providerVault, secrets, tf,
+            Db, Clock, unlockCache, providerVault, secrets, connections, tf,
             workspaceLayout, config, NullLogger<TfApplyingHandler>.Instance);
     }
 }

@@ -22,6 +22,7 @@ public sealed partial class RollingBackTfHandler(
     IInfraOpUnlockCache unlockCache,
     IProviderTokenVault providerVault,
     ICloudSecretBundle secrets,
+    IDigitalOceanOAuthConnections connections,
     IDigitalOceanOAuthClient doClient,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
@@ -155,7 +156,7 @@ public sealed partial class RollingBackTfHandler(
 
         if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
         {
-            await BestEffortRevokeDoCredentialsAsync(cloud.Id, dek, ct);
+            await BestEffortRevokeDoCredentialsAsync(cloud.UserId, cloud.Id, dek, ct);
         }
 
         cloud.DestroyedAt        = now;
@@ -213,13 +214,13 @@ public sealed partial class RollingBackTfHandler(
         _ => SagaStatus.FailedTf,
     };
 
-    private async Task BestEffortRevokeDoCredentialsAsync(Guid cloudId, byte[] dek, CancellationToken ct)
+    private async Task BestEffortRevokeDoCredentialsAsync(Guid userId, Guid cloudId, byte[] dek, CancellationToken ct)
     {
         string? accessToken = null;
         string? spacesId    = null;
         try
         {
-            accessToken = await secrets.TryGetAsync(cloudId, CloudSecretKind.DoOAuthAccess,    dek, ct);
+            accessToken = await connections.GetAccessTokenAsync(userId, dek, ct);
             spacesId    = await secrets.TryGetAsync(cloudId, CloudSecretKind.DoSpacesAccessId, dek, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -236,15 +237,8 @@ public sealed partial class RollingBackTfHandler(
                 LogDoSpacesKeyDeleteFailed(log, ex, cloudId);
             }
         }
-        if (accessToken is not null)
-        {
-            try { await doClient.RevokeOAuthTokenAsync(accessToken, ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                LogDoOAuthRevokeFailed(log, ex, cloudId);
-            }
-        }
-
+        // NOTE: user-level OAuth token is intentionally NOT revoked here.
+        // Other clouds for the same user still need it; revoke happens only on explicit disconnect.
         await secrets.DeleteAllForCloudAsync(cloudId, ct);
     }
 
@@ -260,7 +254,7 @@ public sealed partial class RollingBackTfHandler(
         };
         if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
         {
-            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.Id, dek, secrets, ct);
+            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.UserId, cloud.Id, dek, connections, secrets, ct);
         }
         else if (providerToken is not null)
         {
@@ -284,8 +278,4 @@ public sealed partial class RollingBackTfHandler(
     [LoggerMessage(EventId = 4, Level = LogLevel.Warning,
         Message = "RollingBackTfHandler: DELETE /v2/spaces/keys failed for cloud {CloudId}; continuing")]
     private static partial void LogDoSpacesKeyDeleteFailed(ILogger logger, Exception ex, Guid cloudId);
-
-    [LoggerMessage(EventId = 5, Level = LogLevel.Warning,
-        Message = "RollingBackTfHandler: DO OAuth revoke failed for cloud {CloudId}; continuing")]
-    private static partial void LogDoOAuthRevokeFailed(ILogger logger, Exception ex, Guid cloudId);
 }

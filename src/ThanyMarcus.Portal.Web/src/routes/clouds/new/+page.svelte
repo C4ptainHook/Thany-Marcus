@@ -86,18 +86,6 @@
 
   async function submit() {
     if (!provider || !region) return;
-    if (provider === 'digitalocean') {
-      submitting = true;
-      submitError = null;
-      const probe = await apiFetch('/api/auth/unlock/probe');
-      if (probe.status !== 204) {
-        submitError = 'Passphrase required to connect.';
-        submitting = false;
-        return;
-      }
-      window.location.href = `/oauth/digitalocean/start?region=${encodeURIComponent(region)}`;
-      return;
-    }
     submitting = true;
     submitError = null;
     try {
@@ -108,6 +96,16 @@
       });
       if (r.status === 202) {
         goto('/');
+        return;
+      }
+      if (r.status === 412) {
+        const problem = await parseProblem(r);
+        if (problem?.error === 'connect_required' && provider === 'digitalocean') {
+          const returnTo = `/clouds/new?provider=${encodeURIComponent(provider)}&region=${encodeURIComponent(region)}`;
+          window.location.href = `/oauth/digitalocean/start?return_to=${encodeURIComponent(returnTo)}`;
+          return;
+        }
+        submitError = mapErrorToMessage(problem?.error, r.status);
         return;
       }
       if (r.status === 401) {
@@ -128,7 +126,7 @@
     }
   }
 
-  onMount(() => {
+  onMount(async () => {
     const params = new URLSearchParams(window.location.search);
     const err = params.get('error');
     if (err) {
@@ -138,7 +136,25 @@
         default:               submitError = `Connection failed (${err}).`;
       }
     }
+    if (params.get('connected') === '1') {
+      const presetProvider = params.get('provider');
+      const presetRegion   = params.get('region');
+      if (presetProvider === 'digitalocean') {
+        provider = 'digitalocean' as Provider;
+        await loadRegionsFor(provider);
+        if (presetRegion && DigitalOceanRegions(presetRegion)) {
+          region = presetRegion;
+          step = 'review';
+        } else {
+          step = 'region';
+        }
+      }
+    }
   });
+
+  function DigitalOceanRegions(slug: string): boolean {
+    return regions.some(r => r.slug === slug) || /^[a-z]{3}[0-9]$/.test(slug);
+  }
 </script>
 
 <main>

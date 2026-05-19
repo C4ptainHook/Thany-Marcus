@@ -18,6 +18,7 @@
 
   function initialPhaseStates(c: CloudStatusResponse): Record<PhaseName, PhaseState> {
     const map: Record<PhaseName, PhaseState> = {
+      minting_spaces: 'pending',
       tf_planning: 'pending',
       tf_applying: 'pending',
       dns_creating: 'pending',

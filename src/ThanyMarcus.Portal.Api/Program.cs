@@ -100,6 +100,7 @@ builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
 
 builder.Services.Configure<DigitalOceanOAuthOptions>(builder.Configuration.GetSection("DigitalOcean:OAuth"));
 builder.Services.AddSingleton<DigitalOceanOAuthStateCookie>();
+builder.Services.AddScoped<IDigitalOceanOAuthConnections, DigitalOceanOAuthConnections>();
 builder.Services.AddScoped<DigitalOceanTokenRefresher>();
 builder.Services.AddHttpClient<IDigitalOceanOAuthClient, DigitalOceanOAuthClient>(c =>
 {
@@ -237,6 +238,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 
 app.MapAuthEndpoints();
 app.MapDigitalOceanOAuthEndpoints();
+app.MapDigitalOceanConnectionEndpoints();
 app.MapTotpEndpoints();
 app.MapPassphraseEndpoints();
 app.MapProviderTokenEndpoints();
