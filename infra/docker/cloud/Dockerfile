@@ -6,8 +6,8 @@ ARG GRANITE_HF_REPO
 ARG GRANITE_REVISION
 RUN pip install --no-cache-dir "huggingface_hub[cli]"
 RUN hf download "$GRANITE_HF_REPO" \
+        "onnx/model.onnx" "tokenizer.json" "config.json" \
         --revision "$GRANITE_REVISION" \
-        --include "onnx/model.onnx" "tokenizer.json" "config.json" \
         --local-dir /tmp/granite
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
