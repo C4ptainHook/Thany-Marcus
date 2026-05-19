@@ -34,8 +34,5 @@ services:
       postgres:
         condition: service_healthy
 
-  caddy:
-    profiles: [prod]
-
 volumes:
   pg_data:
