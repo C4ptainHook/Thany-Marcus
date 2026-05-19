@@ -5,7 +5,7 @@ FROM python:3.12-slim AS granite
 ARG GRANITE_HF_REPO
 ARG GRANITE_REVISION
 RUN pip install --no-cache-dir "huggingface_hub[cli]"
-RUN huggingface-cli download "$GRANITE_HF_REPO" \
+RUN hf download "$GRANITE_HF_REPO" \
         --revision "$GRANITE_REVISION" \
         --include "onnx/model.onnx" "tokenizer.json" "config.json" \
         --local-dir /tmp/granite
