@@ -13,6 +13,9 @@ services:
       DataProtection__KeyRingPath: /var/lib/portal/data-protection-keys
       Google__ClientId: ${GOOGLE_CLIENT_ID:-}
       Google__ClientSecret: ${GOOGLE_CLIENT_SECRET:-}
+      DigitalOcean__OAuth__ClientId: ${DO_OAUTH_CLIENT_ID:-}
+      DigitalOcean__OAuth__ClientSecret: ${DO_OAUTH_CLIENT_SECRET:-}
+      DigitalOcean__OAuth__CallbackUrl: ${DO_OAUTH_CALLBACK_URL:-}
     volumes:
       - dp_keys:/var/lib/portal/data-protection-keys
     networks: [portal]

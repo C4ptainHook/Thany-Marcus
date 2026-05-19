@@ -1,6 +1,5 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
-using Microsoft.AspNetCore.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.Login;
@@ -58,5 +57,9 @@ public static class PassphraseEndpoints
            .WithMetadata(new LockoutKindMetadata(AuthLockoutKinds.Unlock))
            .AddEndpointFilter<RequireTurnstileFilter>()
            .WithMetadata(new TurnstileKindMetadata(AuthLockoutKinds.Unlock));
+
+        app.MapGet("/api/auth/unlock/probe", Results.NoContent)
+           .RequireAuthorization(AuthPolicies.TotpRequired)
+           .AddEndpointFilter<RequireInfraOpUnlockFilter>();
     }
 }

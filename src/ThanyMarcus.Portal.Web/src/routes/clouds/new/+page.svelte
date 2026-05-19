@@ -88,6 +88,13 @@
     if (!provider || !region) return;
     if (provider === 'digitalocean') {
       submitting = true;
+      submitError = null;
+      const probe = await apiFetch('/api/auth/unlock/probe');
+      if (probe.status !== 204) {
+        submitError = 'Passphrase required to connect.';
+        submitting = false;
+        return;
+      }
       window.location.href = `/oauth/digitalocean/start?region=${encodeURIComponent(region)}`;
       return;
     }
