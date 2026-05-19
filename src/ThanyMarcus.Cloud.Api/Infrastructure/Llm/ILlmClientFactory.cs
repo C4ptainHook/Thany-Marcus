@@ -4,5 +4,5 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 
 public interface ILlmClientFactory
 {
-    ILlmClient Resolve(CloudSettings settings);
+    ILlmClient Resolve(CloudSettings settings, out bool fallbackToSafe);
 }

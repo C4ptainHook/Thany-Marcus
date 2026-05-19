@@ -134,7 +134,8 @@ public sealed partial class JobOrchestratorWorker : BackgroundService
         var rows = await db.IngestJobs.FromSqlInterpolated($"""
             UPDATE ingest_jobs SET
                 status             = CASE
-                                       WHEN status = 'queued' THEN 'extracting_attachments'
+                                       WHEN status = 'queued' AND kind <> 'hub_regen'
+                                            THEN 'extracting_attachments'
                                        ELSE status
                                      END,
                 lease_owner        = {workerId},

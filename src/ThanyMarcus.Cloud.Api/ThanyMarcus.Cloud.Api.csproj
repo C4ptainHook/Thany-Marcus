@@ -36,10 +36,6 @@
     <PackageReference Include="AWSSDK.S3" />
     <PackageReference Include="SmartReader" />
     <PackageReference Include="ReverseMarkdown" />
-    <PackageReference Include="Microsoft.Extensions.AI" />
-    <PackageReference Include="LlmTornado" />
-    <PackageReference Include="LlmTornado.Microsoft.Extensions.AI" />
-
     <PackageReference Include="Pgvector" />
     <PackageReference Include="Pgvector.EntityFrameworkCore" />
 
@@ -48,6 +44,8 @@
 
     <PackageReference Include="PdfPig" />
     <PackageReference Include="NAudio.Core" />
+
+    <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <ItemGroup>

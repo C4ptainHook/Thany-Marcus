@@ -124,7 +124,6 @@ public sealed class RetryBudgetTests(PostgresFixture postgres)
                 ["IngestSaga:Phases:composing:MaxAttempts"] = "2",
                 ["IngestSaga:Phases:composing:BackoffSecondsBase"] = "1",
                 ["IngestSaga:Models:Stub:Version"] = "stub-v1",
-                ["Llm:SystemPrompt"] = "",
             }).Build());
 
         services.AddDbContext<CloudDbContext>((sp, opts) => opts
@@ -132,8 +131,10 @@ public sealed class RetryBudgetTests(PostgresFixture postgres)
             .UseSnakeCaseNamingConvention()
             .AddInterceptors(sp.GetRequiredService<TimestampInterceptor>()));
 
-        services.AddSingleton(_ => new LlmOptions());
-        services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
+        services.Configure<LlmIntelligenceOptions>(_ => { });
+        services.AddSingleton<ILlmClient, StubLlmClient>();
+        services.AddSingleton<ILlmClientFactory, StubLlmClientFactory>();
+        services.AddScoped<LlmEventAppender>();
         services.AddSingleton<IEmbeddingClient, StubEmbeddingClient>();
         services.AddSingleton<IIngestEventBus, NoOpIngestEventBus>();
         services.AddSingleton(new ThrowCounter { Remaining = throwCount });
@@ -142,6 +143,7 @@ public sealed class RetryBudgetTests(PostgresFixture postgres)
         services.AddScoped<ProvenanceMaterializer>();
         services.AddScoped<IPhaseHandler, ThrowingComposingHandler>();
         services.AddScoped<CancelHandler>();
+        services.AddScoped<HubGenerationHandler>();
         services.AddScoped<IngestPhaseDispatcher>();
         return services.BuildServiceProvider();
     }

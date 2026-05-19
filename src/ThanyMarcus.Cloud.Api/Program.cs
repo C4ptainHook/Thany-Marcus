@@ -16,6 +16,8 @@ using ThanyMarcus.Cloud.Api.Features.Bootstrap;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
+using ThanyMarcus.Cloud.Api.Features.Processing.Composing;
+using ThanyMarcus.Cloud.Api.Features.Processing.Composing.Renderers;
 using ThanyMarcus.Cloud.Api.Features.Processing.Phases;
 using ThanyMarcus.Cloud.Api.Features.Processing.Specialists;
 using ThanyMarcus.Cloud.Api.Features.Settings;
@@ -198,9 +200,18 @@ builder.Services.AddSingleton<IImageExtractor, NotImplementedImageExtractor>();
 builder.Services.AddSingleton<IVoiceExtractor, NotImplementedVoiceExtractor>();
 builder.Services.AddSingleton<IFileExtractor, NotImplementedFileExtractor>();
 
-builder.Services.AddSingleton(_ =>
-    builder.Configuration.GetSection("Llm").Get<LlmOptions>() ?? new LlmOptions());
+builder.Services.Configure<LlmIntelligenceOptions>(builder.Configuration.GetSection("LlmIntelligence"));
+builder.Services.PostConfigure<LlmIntelligenceOptions>(o =>
+    o.OllamaTag = builder.Configuration["IngestSaga:Models:Vlm:OllamaTag"] ?? o.OllamaTag);
+builder.Services.AddHttpClient<SafeLlmClient>((sp, client) =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["IngestSaga:Sidecars:Ollama:BaseUrl"] ?? "http://localhost:11434");
+    client.Timeout = TimeSpan.FromMinutes(2);
+});
+builder.Services.AddSingleton<ILlmClient>(sp => sp.GetRequiredService<SafeLlmClient>());
 builder.Services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
+builder.Services.AddScoped<LlmEventAppender>();
 
 builder.Services.AddSingleton<IEmbeddingClient, StubEmbeddingClient>();
 builder.Services.AddScoped<IVlmClient, OllamaVlmClient>();
@@ -213,12 +224,22 @@ builder.Services.AddScoped<IIngestEventBus, PostgresIngestEventBus>();
 builder.Services.AddSingleton<IngestSseTranslator>();
 builder.Services.AddScoped<JobStateTransitions>();
 builder.Services.AddScoped<ProvenanceMaterializer>();
+
+builder.Services.AddSingleton<IAttachmentRenderer, UrlRenderer>();
+builder.Services.AddSingleton<IAttachmentRenderer, ImageRenderer>();
+builder.Services.AddSingleton<IAttachmentRenderer, AudioRenderer>();
+builder.Services.AddSingleton<IAttachmentRenderer, VideoRenderer>();
+builder.Services.AddSingleton<IAttachmentRenderer, DocumentRenderer>();
+builder.Services.AddSingleton<FailedHiddenRenderer>();
+builder.Services.AddSingleton<CompositeNoteComposer>();
+
 builder.Services.AddScoped<IPhaseHandler, ExtractingAttachmentsHandler>();
 builder.Services.AddScoped<IPhaseHandler, ComposingHandler>();
 builder.Services.AddScoped<IPhaseHandler, RoutingHandler>();
 builder.Services.AddScoped<IPhaseHandler, ExtractingEntitiesHandler>();
 builder.Services.AddScoped<IPhaseHandler, EmbeddingHandler>();
 builder.Services.AddScoped<CancelHandler>();
+builder.Services.AddScoped<HubGenerationHandler>();
 builder.Services.AddScoped<IngestPhaseDispatcher>();
 builder.Services.AddHostedService<JobOrchestratorWorker>();
 builder.Services.AddHostedService<OrphanIngestSweeper>();

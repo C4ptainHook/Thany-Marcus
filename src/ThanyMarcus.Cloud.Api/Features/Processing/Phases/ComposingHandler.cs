@@ -1,7 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using NodaTime;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
+using ThanyMarcus.Cloud.Api.Features.Processing.Composing;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
-using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 
 namespace ThanyMarcus.Cloud.Api.Features.Processing.Phases;
 
@@ -10,34 +11,38 @@ public sealed class ComposingHandler : IPhaseHandler
     public string Phase => IngestJobStatus.Composing;
 
     private readonly CloudDbContext db;
+    private readonly CompositeNoteComposer composer;
     private readonly JobStateTransitions transitions;
+    private readonly IClock clock;
 
-    public ComposingHandler(CloudDbContext db, JobStateTransitions transitions)
+    public ComposingHandler(
+        CloudDbContext db,
+        CompositeNoteComposer composer,
+        JobStateTransitions transitions,
+        IClock clock)
     {
         this.db = db;
+        this.composer = composer;
         this.transitions = transitions;
+        this.clock = clock;
     }
 
     public async Task<PhaseHandlerResult> HandleAsync(IngestJob job, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(job);
 
-        var note = await db.Notes.SingleAsync(n => n.Id == job.NoteId, ct);
         var attachments = await db.Attachments
             .Where(a => a.NoteId == job.NoteId)
+            .OrderBy(a => a.CreatedAt)
             .ToListAsync(ct);
+        var note = await db.Notes.SingleAsync(n => n.Id == job.NoteId, ct);
 
-        var emptyEnrichment = new CompositeEnrichmentResult(
-            SuggestedProject:  null,
-            BodyAnchors:       Array.Empty<WikilinkAnchor>(),
-            AttachmentAnchors: Array.Empty<AttachmentAnchors>(),
-            Tags:              Array.Empty<string>(),
-            InputTokens:       null,
-            OutputTokens:      null);
+        var composed = await composer.ComposeAsync(note, attachments, note.BodyOutput, ct);
 
-        var body = CompositeMarkdownAssembler.Assemble(note, attachments, emptyEnrichment, llmMode: "safe");
-        note.BodyOutput   = body;
-        note.RelativePath = $"Inbox/{note.Id}.md";
+        note.BodyOutput = $"---\n{composed.Frontmatter}---\n\n{composed.Body}";
+        note.RelativePath ??= $"Inbox/{note.Id}.md";
+        note.UpdatedAt = clock.GetCurrentInstant();
+        job.LastComposeTemplate = composed.ComposeTemplateVersion;
 
         await db.SaveChangesAsync(ct);
 

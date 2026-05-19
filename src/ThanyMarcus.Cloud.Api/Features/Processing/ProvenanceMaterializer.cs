@@ -1,12 +1,15 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Cloud.Api.Features.Processing;
 
-public sealed class ProvenanceMaterializer
+public sealed partial class ProvenanceMaterializer
 {
+    [GeneratedRegex(@"(?m)^compose_template:\s*(?<v>\S+)\s*$")]
+    private static partial Regex ComposeTemplateLine();
     private readonly CloudDbContext db;
 
     public ProvenanceMaterializer(CloudDbContext db)
@@ -36,6 +39,10 @@ public sealed class ProvenanceMaterializer
         var persistedJob = await db.IngestJobs
             .AsNoTracking()
             .SingleOrDefaultAsync(j => j.Id == job.Id, ct) ?? job;
+        // LastComposeTemplate is [NotMapped] and dispatcher loads each phase in a fresh scope, so
+        // we cannot rely on the in-memory job alone — recover it from the frontmatter we just wrote.
+        persistedJob.LastComposeTemplate = job.LastComposeTemplate
+            ?? ExtractComposeTemplateFromBody(note.BodyOutput);
 
         var docJson = BuildJson(persistedJob, note, attachments, tasks);
 
@@ -79,6 +86,8 @@ public sealed class ProvenanceMaterializer
             totalMs = (finished - started).TotalMilliseconds;
         }
 
+        var llmCalls = ExtractLlmCalls(job.EventsLog);
+
         var doc = new ProvenanceDocument(
             JobId:               job.Id,
             Kind:                job.Kind,
@@ -89,9 +98,34 @@ public sealed class ProvenanceMaterializer
             PhaseEvents:         phaseEvents,
             ExtractionFailures:  failures,
             ExtractionSummary:   summary,
-            CacheHits:           cacheHits);
+            CacheHits:           cacheHits,
+            ComposeTemplate:     job.LastComposeTemplate,
+            LlmCalls:            llmCalls);
 
         return JsonSerializer.Serialize(doc);
+    }
+
+    private static IReadOnlyList<LlmCallRollup> ExtractLlmCalls(JsonDocument eventsLog)
+    {
+        if (eventsLog.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<LlmCallRollup>();
+        }
+        var list = new List<LlmCallRollup>();
+        foreach (var el in eventsLog.RootElement.EnumerateArray())
+        {
+            if (!el.TryGetProperty("stage", out var stage) || stage.ValueKind != JsonValueKind.String) continue;
+            var stageStr = stage.GetString();
+            if (stageStr is null || !stageStr.StartsWith("llm_", StringComparison.Ordinal)) continue;
+            list.Add(new LlmCallRollup(
+                Stage:       stageStr,
+                PromptId:    el.TryGetProperty("prompt_id", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null,
+                RetryIndex:  el.TryGetProperty("retry_index", out var r) && r.ValueKind == JsonValueKind.Number ? r.GetInt32() : 0,
+                Confidence:  el.TryGetProperty("confidence", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetDouble() : null,
+                LlmMode:     el.TryGetProperty("llm_mode", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null,
+                Decision:    el.TryGetProperty("decision", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null));
+        }
+        return list;
     }
 
     private static IReadOnlyList<JsonElement> ParseEventsLog(JsonDocument eventsLog)
@@ -106,6 +140,13 @@ public sealed class ProvenanceMaterializer
             list.Add(el.Clone());
         }
         return list;
+    }
+
+    private static string? ExtractComposeTemplateFromBody(string? body)
+    {
+        if (string.IsNullOrEmpty(body)) return null;
+        var m = ComposeTemplateLine().Match(body);
+        return m.Success ? m.Groups["v"].Value : null;
     }
 
     private static string ResolveModelName(Note note) =>
@@ -123,7 +164,17 @@ public sealed class ProvenanceMaterializer
         [property: System.Text.Json.Serialization.JsonPropertyName("phase_events")]        IReadOnlyList<JsonElement> PhaseEvents,
         [property: System.Text.Json.Serialization.JsonPropertyName("extraction_failures")] IReadOnlyList<ExtractionFailure> ExtractionFailures,
         [property: System.Text.Json.Serialization.JsonPropertyName("extraction_summary")]  IReadOnlyList<ExtractionSummaryEntry> ExtractionSummary,
-        [property: System.Text.Json.Serialization.JsonPropertyName("cache_hits")]          int CacheHits);
+        [property: System.Text.Json.Serialization.JsonPropertyName("cache_hits")]          int CacheHits,
+        [property: System.Text.Json.Serialization.JsonPropertyName("compose_template")]    string? ComposeTemplate,
+        [property: System.Text.Json.Serialization.JsonPropertyName("llm_calls")]           IReadOnlyList<LlmCallRollup> LlmCalls);
+
+    private sealed record LlmCallRollup(
+        [property: System.Text.Json.Serialization.JsonPropertyName("stage")]        string Stage,
+        [property: System.Text.Json.Serialization.JsonPropertyName("prompt_id")]    string? PromptId,
+        [property: System.Text.Json.Serialization.JsonPropertyName("retry_index")]  int RetryIndex,
+        [property: System.Text.Json.Serialization.JsonPropertyName("confidence")]   double? Confidence,
+        [property: System.Text.Json.Serialization.JsonPropertyName("llm_mode")]     string? LlmMode,
+        [property: System.Text.Json.Serialization.JsonPropertyName("decision")]     string? Decision);
 
     private sealed record ExtractionFailure(
         [property: System.Text.Json.Serialization.JsonPropertyName("attachmentId")] Guid AttachmentId,

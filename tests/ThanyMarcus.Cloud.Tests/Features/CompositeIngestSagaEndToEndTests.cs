@@ -11,10 +11,13 @@ using Shouldly;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
+using ThanyMarcus.Cloud.Api.Features.Processing.Composing;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
 using ThanyMarcus.Cloud.Tests.Infrastructure;
 using ThanyMarcus.Shared.PluginApi;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace ThanyMarcus.Cloud.Tests.Features;
 
@@ -23,6 +26,7 @@ namespace ThanyMarcus.Cloud.Tests.Features;
 public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
 {
     private static readonly TimeSpan TerminalTimeout = TimeSpan.FromSeconds(60);
+    private static readonly string[] ExpectedAttachmentKinds = { "file", "image", "url", "voice" };
 
     [Fact]
     public async Task Composite_saga_full_lifecycle_with_reprocess_and_delete()
@@ -50,11 +54,15 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
                      || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IParakeetClient)
                      || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IVideoSplitterClient)
                      || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight.IDocumentPreflighter)
-                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight.IAudioPreflighter))
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight.IAudioPreflighter)
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Llm.ILlmClient)
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Llm.ILlmClientFactory))
                     {
                         services.RemoveAt(i);
                     }
                 }
+                services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Llm.ILlmClient, StubLlmClient>();
+                services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Llm.ILlmClientFactory, StubLlmClientFactory>();
                 services.AddSingleton<IArtifactStore>(fakeStore);
                 services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IUrlFetcherClient,
                     ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Stubs.StubUrlFetcherClient>();
@@ -153,12 +161,30 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
         item.Body.ShouldContain("[stub VLM description");
         item.Body.ShouldContain("[stub parakeet transcription]");
         item.Body.ShouldContain("[stub docling extraction]");
+
+        var (frontmatter, bodyAfter) = SplitFrontmatter(item.Body);
+        frontmatter.ShouldNotBeNull();
+        var probe = ParseFrontmatter(frontmatter!);
+        probe.ComposeTemplate.ShouldBe(CompositeNoteComposer.ComposeTemplateVersion);
+        probe.Modality.ShouldBe("composite");
+        probe.Source.ShouldBe("plugin");
+        probe.AttachmentKinds.ShouldBe(ExpectedAttachmentKinds);
+
+        bodyAfter.ShouldStartWith("## User Notes\n\n");
+        bodyAfter.ShouldContain("\n## System Output\n\n");
+        bodyAfter.ShouldContain("### Source:");
+        bodyAfter.ShouldContain("### Image");
+        bodyAfter.ShouldContain("### Voice memo");
+        bodyAfter.ShouldContain("### Document:");
+        bodyAfter.ShouldNotContain("### Video");
+
         item.Attachments.Count.ShouldBe(4);
         item.Attachments
             .Where(a => a.Kind != AttachmentKind.Url)
             .ShouldAllBe(a => a.DownloadUrl != null);
         item.Provenance.ShouldNotBeNull();
         var prov = item.Provenance!.Value;
+        prov.GetProperty("compose_template").GetString().ShouldBe(CompositeNoteComposer.ComposeTemplateVersion);
         prov.GetProperty("extraction_summary").GetArrayLength().ShouldBeGreaterThan(0);
         var totalExtracted = 0;
         var totalTotal = 0;
@@ -169,6 +195,8 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
         }
         totalTotal.ShouldBe(4);
         totalExtracted.ShouldBe(4);
+
+        await InjectUserNotesAsync(postgres.ConnectionString, initResp.NoteId, "my preserved notes", ct);
 
         var reprocessResp = await client.PostAsync(
             new Uri($"/api/notes/{initResp.NoteId}/reprocess", UriKind.Relative), null, ct);
@@ -185,6 +213,9 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
         item2!.Provenance.ShouldNotBeNull();
         item2.Provenance!.Value.TryGetProperty("cache_hits", out _).ShouldBeTrue();
         item2.Provenance!.Value.TryGetProperty("extraction_summary", out _).ShouldBeTrue();
+        item2.Provenance!.Value.GetProperty("compose_template").GetString()
+            .ShouldBe(CompositeNoteComposer.ComposeTemplateVersion);
+        item2.Body!.ShouldContain("## User Notes\n\nmy preserved notes\n\n## System Output");
 
         var deleteResp = await client.DeleteAsync(
             new Uri($"/api/notes/{initResp.NoteId}", UriKind.Relative), ct);
@@ -324,6 +355,50 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
 
     private static string KeyFromUrl(string url) =>
         Uri.UnescapeDataString(url.AsSpan(url.LastIndexOf('/') + 1).ToString());
+
+    private static (string? Frontmatter, string Body) SplitFrontmatter(string raw)
+    {
+        if (!raw.StartsWith("---\n", StringComparison.Ordinal)) return (null, raw);
+        var end = raw.IndexOf("\n---\n", 4, StringComparison.Ordinal);
+        if (end < 0) return (null, raw);
+        var frontmatter = raw.Substring(4, end - 4);
+        var body = raw[(end + 5)..];
+        if (body.StartsWith('\n')) body = body[1..];
+        return (frontmatter, body);
+    }
+
+    private static FrontmatterProbe ParseFrontmatter(string yaml)
+    {
+        var d = new DeserializerBuilder()
+            .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .IgnoreUnmatchedProperties()
+            .Build();
+        return d.Deserialize<FrontmatterProbe>(yaml);
+    }
+
+    private sealed class FrontmatterProbe
+    {
+        public string Id { get; set; } = "";
+        public string CapturedAt { get; set; } = "";
+        public string Modality { get; set; } = "";
+        public List<string> AttachmentKinds { get; set; } = new();
+        public string Source { get; set; } = "";
+        public string LlmMode { get; set; } = "";
+        public string ComposeTemplate { get; set; } = "";
+    }
+
+    private static async Task InjectUserNotesAsync(string connStr, Guid noteId, string userNotes, CancellationToken ct)
+    {
+        using var db = NewDb(connStr);
+        var note = await db.Notes.SingleAsync(n => n.Id == noteId, ct);
+        var existing = note.BodyOutput ?? string.Empty;
+        var (frontmatter, body) = SplitFrontmatter(existing);
+        var prefix = frontmatter is null ? string.Empty : $"---\n{frontmatter}\n---\n\n";
+        var systemOutputIdx = body.IndexOf("## System Output", StringComparison.Ordinal);
+        var systemOutput = systemOutputIdx >= 0 ? body[systemOutputIdx..] : "## System Output\n\n<!-- no attachments -->\n";
+        note.BodyOutput = prefix + $"## User Notes\n\n{userNotes}\n\n" + systemOutput;
+        await db.SaveChangesAsync(ct);
+    }
 
     private static async Task<string> SeedPluginTokenAsync(PostgresFixture postgres)
     {

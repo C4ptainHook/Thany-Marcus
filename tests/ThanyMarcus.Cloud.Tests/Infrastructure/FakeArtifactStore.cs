@@ -19,10 +19,18 @@ public sealed class FakeArtifactStore : IArtifactStore
             new Dictionary<string, string>(StringComparer.Ordinal) { ["Content-Type"] = mimeType },
             SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromTimeSpan(ttl))));
 
-    public Task<PresignedDownload> IssueDownloadUrlAsync(string key, TimeSpan ttl, CancellationToken ct) =>
-        Task.FromResult(new PresignedDownload(
+    public bool FailDownloadUrl { get; set; }
+
+    public Task<PresignedDownload> IssueDownloadUrlAsync(string key, TimeSpan ttl, CancellationToken ct)
+    {
+        if (FailDownloadUrl)
+        {
+            throw new InvalidOperationException("simulated presign failure");
+        }
+        return Task.FromResult(new PresignedDownload(
             new Uri($"https://fake.example.test/download/{Uri.EscapeDataString(key)}"),
             SystemClock.Instance.GetCurrentInstant().Plus(Duration.FromTimeSpan(ttl))));
+    }
 
     public Task<ObjectMetadata?> HeadAsync(string key, CancellationToken ct) =>
         Task.FromResult<ObjectMetadata?>(Objects.TryGetValue(key, out var o)

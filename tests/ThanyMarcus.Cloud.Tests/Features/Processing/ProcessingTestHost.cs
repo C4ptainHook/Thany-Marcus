@@ -6,18 +6,23 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NodaTime;
 using ThanyMarcus.Cloud.Api.Features.Processing;
+using ThanyMarcus.Cloud.Api.Features.Processing.Composing;
+using ThanyMarcus.Cloud.Api.Features.Processing.Composing.Renderers;
 using ThanyMarcus.Cloud.Api.Features.Processing.Phases;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Stubs;
+using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
+using ThanyMarcus.Cloud.Tests.Infrastructure;
 using ThanyMarcus.Shared.Database;
 
 namespace ThanyMarcus.Cloud.Tests.Features.Processing;
 
 public static class ProcessingTestHost
 {
-    public static ServiceProvider Build(string connectionString, IClock? clock = null)
+    public static ServiceProvider Build(string connectionString, IClock? clock = null,
+        Action<IServiceCollection>? customize = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IClock>(clock ?? SystemClock.Instance);
@@ -46,11 +51,8 @@ public static class ProcessingTestHost
                     ["IngestSaga:ExtractionTasks:BackoffSecondsBase"] = "2",
                     ["IngestSaga:ExtractionTasks:LeaseSeconds"] = "60",
                     ["IngestSaga:ExtractionTasks:IdlePollMs"] = "60000",
-                    ["Llm:SystemPrompt"] = "test",
-                    ["Llm:DefaultAnthropicModel"] = "test",
-                    ["Llm:BodySectionHeader"] = "## Body",
-                    ["Llm:AttachmentsSectionHeader"] = "## Attachments",
-                    ["Llm:AttachmentHeaderTemplate"] = "### {0} ({1})",
+                    ["IngestSaga:Models:Vlm:OllamaTag"] = "minicpm-v:8b-2.6-q4_K_M",
+                    ["IngestSaga:Sidecars:Ollama:BaseUrl"] = "http://localhost:11434",
                 })
                 .Build());
 
@@ -59,10 +61,22 @@ public static class ProcessingTestHost
             .UseSnakeCaseNamingConvention()
             .AddInterceptors(sp.GetRequiredService<TimestampInterceptor>()));
 
-        services.AddSingleton(_ => new LlmOptions());
-        services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
+        services.Configure<LlmIntelligenceOptions>(_ => { });
+        services.AddSingleton<ILlmClient, StubLlmClient>();
+        services.AddSingleton<ILlmClientFactory, StubLlmClientFactory>();
+        services.AddScoped<LlmEventAppender>();
         services.AddSingleton<IEmbeddingClient, StubEmbeddingClient>();
         services.AddSingleton<IIngestEventBus, NoOpIngestEventBus>();
+
+        services.AddSingleton<IArtifactStore, FakeArtifactStore>();
+
+        services.AddSingleton<IAttachmentRenderer, UrlRenderer>();
+        services.AddSingleton<IAttachmentRenderer, ImageRenderer>();
+        services.AddSingleton<IAttachmentRenderer, AudioRenderer>();
+        services.AddSingleton<IAttachmentRenderer, VideoRenderer>();
+        services.AddSingleton<IAttachmentRenderer, DocumentRenderer>();
+        services.AddSingleton<FailedHiddenRenderer>();
+        services.AddSingleton<CompositeNoteComposer>();
 
         services.AddScoped<JobStateTransitions>();
         services.AddScoped<ProvenanceMaterializer>();
@@ -72,7 +86,10 @@ public static class ProcessingTestHost
         services.AddScoped<IPhaseHandler, ExtractingEntitiesHandler>();
         services.AddScoped<IPhaseHandler, EmbeddingHandler>();
         services.AddScoped<CancelHandler>();
+        services.AddScoped<HubGenerationHandler>();
         services.AddScoped<IngestPhaseDispatcher>();
+
+        customize?.Invoke(services);
 
         return services.BuildServiceProvider();
     }

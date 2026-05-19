@@ -11,6 +11,7 @@ public sealed partial class IngestPhaseDispatcher
 {
     private readonly Dictionary<string, IPhaseHandler> handlers;
     private readonly CancelHandler cancelHandler;
+    private readonly HubGenerationHandler hubGenerationHandler;
     private readonly JobStateTransitions transitions;
     private readonly CloudDbContext db;
     private readonly IConfiguration config;
@@ -22,6 +23,7 @@ public sealed partial class IngestPhaseDispatcher
     public IngestPhaseDispatcher(
         IEnumerable<IPhaseHandler> handlers,
         CancelHandler cancelHandler,
+        HubGenerationHandler hubGenerationHandler,
         JobStateTransitions transitions,
         CloudDbContext db,
         IConfiguration config,
@@ -41,6 +43,7 @@ public sealed partial class IngestPhaseDispatcher
             }
         }
         this.cancelHandler = cancelHandler;
+        this.hubGenerationHandler = hubGenerationHandler;
         this.transitions = transitions;
         this.db = db;
         this.config = config;
@@ -79,7 +82,12 @@ public sealed partial class IngestPhaseDispatcher
             return;
         }
 
-        if (!handlers.TryGetValue(job.Status, out var handler))
+        IPhaseHandler? handler;
+        if (job.Status == IngestJobStatus.Composing && job.Kind == IngestJobKind.HubRegen)
+        {
+            handler = new HubGenerationHandlerAdapter(hubGenerationHandler);
+        }
+        else if (!handlers.TryGetValue(job.Status, out handler))
         {
             LogNoHandler(log, job.Id, job.Status);
             return;
@@ -179,4 +187,13 @@ public sealed partial class IngestPhaseDispatcher
     [LoggerMessage(EventId = 4, Level = LogLevel.Error,
         Message = "Phase handler failed (job={JobId} phase={Phase})")]
     private static partial void LogHandlerFailure(ILogger logger, Exception ex, Guid jobId, string phase);
+
+    private sealed class HubGenerationHandlerAdapter : IPhaseHandler
+    {
+        private readonly HubGenerationHandler inner;
+        public HubGenerationHandlerAdapter(HubGenerationHandler inner) { this.inner = inner; }
+        public string Phase => IngestJobStatus.Composing;
+        public Task<PhaseHandlerResult> HandleAsync(IngestJob job, CancellationToken ct) =>
+            inner.HandleAsync(job, ct);
+    }
 }

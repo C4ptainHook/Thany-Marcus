@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
 using NodaTime;
 using ThanyMarcus.Shared.Database;
@@ -21,6 +22,9 @@ public sealed class IngestJob : IHasUpdatedAt
     public long TransitionVersion { get; set; }
     public Instant CreatedAt { get; init; }
     public Instant UpdatedAt { get; set; }
+
+    [NotMapped]
+    public string? LastComposeTemplate { get; set; }
 }
 
 public static class IngestJobStatus
