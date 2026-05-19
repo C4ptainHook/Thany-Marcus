@@ -7,6 +7,7 @@ using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
@@ -17,6 +18,8 @@ namespace ThanyMarcus.Portal.Tests.SagaWorker.Handlers;
 
 public sealed class RollingBackTfHandlerDestroyTests(PostgresFixture postgres) : DbIntegrationTestBase(postgres)
 {
+    private FakeDigitalOceanOAuthClient FakeDoClient { get; } = new();
+
     [Fact]
     public async Task Destroy_success_soft_deletes_cloud_revokes_tokens_and_deletes_workspace()
     {
@@ -182,10 +185,12 @@ public sealed class RollingBackTfHandlerDestroyTests(PostgresFixture postgres) :
 
         var unlockCache = new PostgresInfraOpUnlockCache(Db, dp, Clock);
         var providerVault = new ProviderTokenVault(Db, Clock);
+        var secrets = new CloudSecretBundle(Db, Clock);
+        var doClient = FakeDoClient;
         var layout = new WorkspaceLayout(config, NullLogger<WorkspaceLayout>.Instance);
 
         return new RollingBackTfHandler(
-            Db, Clock, unlockCache, providerVault, tf,
+            Db, Clock, unlockCache, providerVault, secrets, doClient, tf,
             layout, config, NullLogger<RollingBackTfHandler>.Instance);
     }
 }

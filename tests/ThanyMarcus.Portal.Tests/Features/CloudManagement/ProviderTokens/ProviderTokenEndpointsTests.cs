@@ -85,14 +85,37 @@ public sealed class ProviderTokenEndpointsTests(PostgresFixture postgres) : Fact
         await SeedStepUpAsync(factory.Services, user.Id, dek, ct);
 
         var res = await client.PostAsJsonAsync(Root,
-            new RegisterProviderTokenRequest(KnownProviders.DigitalOcean, "dop_v1_secret"), ct);
+            new RegisterProviderTokenRequest(KnownProviders.Azure, "az-secret"), ct);
 
         res.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         var row = await Db.EncryptedProviderTokens.AsNoTracking()
-            .SingleAsync(t => t.UserId == user.Id && t.Provider == KnownProviders.DigitalOcean, ct);
+            .SingleAsync(t => t.UserId == user.Id && t.Provider == KnownProviders.Azure, ct);
         row.Ciphertext.ShouldNotBeEmpty();
         row.Nonce.Length.ShouldBe(12);
         row.Tag.Length.ShouldBe(16);
+    }
+
+    [Fact]
+    public async Task Post_digitalocean_token_returns_400_use_oauth_flow()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var user = await InsertUserAsync();
+        var factory = Factory
+            .WithTestAuth(user.Id, totp: TotpClaimValues.Verified)
+            .WithClock(Clock);
+        using var client = factory.CreateClient();
+        await SeedStepUpAsync(factory.Services, user.Id, RandomNumberGenerator.GetBytes(32), ct);
+
+        var res = await client.PostAsJsonAsync(Root,
+            new RegisterProviderTokenRequest(KnownProviders.DigitalOcean, "dop_v1_x"), ct);
+
+        res.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        var body = await res.Content.ReadFromJsonAsync<ErrorBody>(ct);
+        body!.Error.ShouldBe("use_oauth_flow");
+
+        (await Db.EncryptedProviderTokens.AsNoTracking()
+            .AnyAsync(t => t.UserId == user.Id && t.Provider == KnownProviders.DigitalOcean, ct))
+            .ShouldBeFalse();
     }
 
     [Fact]
@@ -197,7 +220,7 @@ public sealed class ProviderTokenEndpointsTests(PostgresFixture postgres) : Fact
         await SeedStepUpAsync(factory.Services, user.Id, RandomNumberGenerator.GetBytes(32), ct);
 
         (await client.PostAsJsonAsync(Root,
-            new RegisterProviderTokenRequest(KnownProviders.DigitalOcean, "do-secret-aaa"), ct))
+            new RegisterProviderTokenRequest(KnownProviders.Azure, "az-secret-aaa"), ct))
             .EnsureSuccessStatusCode();
         (await client.PostAsJsonAsync(Root,
             new RegisterProviderTokenRequest(KnownProviders.Cloudflare, "cf-secret-bbb"), ct))
@@ -206,14 +229,14 @@ public sealed class ProviderTokenEndpointsTests(PostgresFixture postgres) : Fact
         var res = await client.GetAsync(Root, ct);
         res.StatusCode.ShouldBe(HttpStatusCode.OK);
         var rawBody = await res.Content.ReadAsStringAsync(ct);
-        rawBody.ShouldNotContain("do-secret-aaa");
+        rawBody.ShouldNotContain("az-secret-aaa");
         rawBody.ShouldNotContain("cf-secret-bbb");
         rawBody.ShouldNotContain("ciphertext");
         rawBody.ShouldNotContain("nonce");
         rawBody.ShouldNotContain("tag");
 
         var summaries = await res.Content.ReadFromJsonAsync<List<ProviderTokenSummary>>(ct);
-        summaries!.Select(s => s.Provider).ShouldBe([KnownProviders.Cloudflare, KnownProviders.DigitalOcean]);
+        summaries!.Select(s => s.Provider).ShouldBe([KnownProviders.Azure, KnownProviders.Cloudflare]);
     }
 
     [Fact]
@@ -268,15 +291,15 @@ public sealed class ProviderTokenEndpointsTests(PostgresFixture postgres) : Fact
         await SeedStepUpAsync(factory.Services, user.Id, RandomNumberGenerator.GetBytes(32), ct);
 
         (await client.PostAsJsonAsync(Root,
-            new RegisterProviderTokenRequest(KnownProviders.DigitalOcean, "secret"), ct))
+            new RegisterProviderTokenRequest(KnownProviders.Azure, "secret"), ct))
             .EnsureSuccessStatusCode();
 
         var del = await client.DeleteAsync(
-            new Uri($"/api/clouds/provider-tokens/{KnownProviders.DigitalOcean}", UriKind.Relative), ct);
+            new Uri($"/api/clouds/provider-tokens/{KnownProviders.Azure}", UriKind.Relative), ct);
         del.StatusCode.ShouldBe(HttpStatusCode.NoContent);
 
         (await Db.EncryptedProviderTokens.AsNoTracking()
-            .AnyAsync(t => t.UserId == user.Id && t.Provider == KnownProviders.DigitalOcean, ct))
+            .AnyAsync(t => t.UserId == user.Id && t.Provider == KnownProviders.Azure, ct))
             .ShouldBeFalse();
 
         var list = await client.GetAsync(Root, ct);

@@ -181,7 +181,7 @@ write_files:
             retries: 5
 
         postgres:
-          image: postgres:16-alpine
+          image: pgvector/pgvector:pg16
           restart: unless-stopped
           environment:
             POSTGRES_USER: cloud

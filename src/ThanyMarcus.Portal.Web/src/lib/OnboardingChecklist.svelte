@@ -1,53 +1,18 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { untrack } from 'svelte';
   import { setPassphrase } from './stepUpClient';
-  import ProviderTokenSection from './ProviderTokenSection.svelte';
   import type { MeResponse } from './types/auth';
 
   let { me, onPassphraseSet }: { me: MeResponse; onPassphraseSet: () => void } = $props();
 
   let passphraseSet = $state(untrack(() => me.passphraseSet === true));
-  let hasProviderToken = $state(false);
-  let providerLoaded = $state(false);
 
-  let expanded = $state<1 | 2 | null>(null);
+  let expanded = $state<1 | null>(null);
 
   let pp = $state('');
   let pp2 = $state('');
   let ppError = $state<string | null>(null);
   let ppBusy = $state(false);
-
-  async function refreshProviderTokens() {
-    try {
-      const r = await fetch('/api/clouds/provider-tokens');
-      if (!r.ok) { hasProviderToken = false; return; }
-      const list = (await r.json()) as Array<{ provider: string }>;
-      hasProviderToken = list.length > 0;
-    } catch {
-      hasProviderToken = false;
-    } finally {
-      providerLoaded = true;
-    }
-  }
-
-  function onVisibility() {
-    if (document.visibilityState === 'visible' && passphraseSet) refreshProviderTokens();
-  }
-
-  onMount(() => {
-    if (passphraseSet) refreshProviderTokens();
-    else providerLoaded = true;
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('focus', onVisibility);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('focus', onVisibility);
-    };
-  });
-
-  $effect(() => {
-    if (passphraseSet && !providerLoaded) refreshProviderTokens();
-  });
 
   async function submitPassphrase(e: SubmitEvent) {
     e.preventDefault();
@@ -73,7 +38,7 @@
     }
   }
 
-  function toggle(step: 1 | 2) {
+  function toggle(step: 1) {
     expanded = expanded === step ? null : step;
   }
 </script>
@@ -108,45 +73,20 @@
       {/if}
     </li>
 
-    <li class={'step ' + (hasProviderToken ? 'done' : passphraseSet ? 'open' : 'locked')}>
-      <button
-        class="step-head"
-        type="button"
-        disabled={!passphraseSet || hasProviderToken}
-        onclick={() => toggle(2)}
-      >
-        <span class="icon success">{hasProviderToken ? '[●]' : passphraseSet ? '[○]' : '[—]'}</span>
-        <span class="title">2. Add a provider API token</span>
+    <li class={'step ' + (passphraseSet ? 'open' : 'locked')}>
+      <div class="step-head static">
+        <span class="icon success">{passphraseSet ? '[○]' : '[—]'}</span>
+        <span class="title">2. Provision your cloud</span>
         {#if !passphraseSet}<span class="muted lock-note">(locked)</span>{/if}
-      </button>
+      </div>
       <p class="desc">
         {#if passphraseSet}
-          Used to provision your cloud.
+          Pick a region and connect DigitalOcean — one click, no token paste.
         {:else}
           Needs passphrase set first.
         {/if}
       </p>
-      {#if expanded === 2 && passphraseSet && !hasProviderToken}
-        <div class="expand">
-          <ProviderTokenSection provider="digitalocean" onSaved={refreshProviderTokens} />
-        </div>
-      {/if}
-    </li>
-
-    <li class={'step ' + (hasProviderToken ? 'open' : 'locked')}>
-      <div class="step-head static">
-        <span class="icon success">{hasProviderToken ? '[○]' : '[—]'}</span>
-        <span class="title">3. Provision your cloud</span>
-        {#if !hasProviderToken}<span class="muted lock-note">(locked)</span>{/if}
-      </div>
-      <p class="desc">
-        {#if hasProviderToken}
-          Pick provider + region, review cost, provision.
-        {:else}
-          Needs provider token saved first.
-        {/if}
-      </p>
-      {#if hasProviderToken}
+      {#if passphraseSet}
         <a class="btn btn-primary go" href="/clouds/new">Provision cloud</a>
       {/if}
     </li>

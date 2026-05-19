@@ -2,7 +2,6 @@
   import { onMount } from 'svelte';
   import { enableInit, enableVerify, disable, type TotpEnableInit } from '$lib/totpClient';
   import { setPassphrase } from '$lib/stepUpClient';
-  import ProviderTokenSection from '$lib/ProviderTokenSection.svelte';
 
   type Phase = 'loading' | 'idle' | 'enabling' | 'showing-codes' | 'disabling';
 
@@ -233,12 +232,6 @@
       {/if}
     </section>
 
-    {#if passphraseSet}
-      <section class="card">
-        <h2 class="card-title">PROVIDER CREDENTIALS</h2>
-        <ProviderTokenSection provider="digitalocean" />
-      </section>
-    {/if}
   {/if}
 </main>
 

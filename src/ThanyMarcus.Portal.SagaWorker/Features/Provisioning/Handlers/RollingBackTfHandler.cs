@@ -7,7 +7,9 @@ using Microsoft.Extensions.Configuration;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
@@ -19,6 +21,8 @@ public sealed partial class RollingBackTfHandler(
     IClock clock,
     IInfraOpUnlockCache unlockCache,
     IProviderTokenVault providerVault,
+    ICloudSecretBundle secrets,
+    IDigitalOceanOAuthClient doClient,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
     IConfiguration config,
@@ -47,7 +51,7 @@ public sealed partial class RollingBackTfHandler(
             {
                 LogStepUpMissing(log, job.Id);
             }
-            else
+            else if (cloud.Provider != DigitalOceanTfEnv.DigitalOceanProvider && cloud.Provider != "stub")
             {
                 providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
             }
@@ -64,7 +68,7 @@ public sealed partial class RollingBackTfHandler(
 
                 if (initResult.Success)
                 {
-                    var destroyEnv = BuildEnv(cloud, providerToken);
+                    var destroyEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
                     var destroyResult = await tf.DestroyAsync(workdir, destroyEnv, ct);
                     EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", destroyResult.Stdout);
                     EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", destroyResult.Stderr);
@@ -92,7 +96,7 @@ public sealed partial class RollingBackTfHandler(
 
             if (job.Kind == SagaKinds.Destroy)
             {
-                await CompleteUserDestroyAsync(job, ct);
+                await CompleteUserDestroyAsync(job, dek, ct);
             }
             else
             {
@@ -144,10 +148,15 @@ public sealed partial class RollingBackTfHandler(
         await SagaTransitions.RescheduleAsync(db, clock, job, RetryDelay, ct);
     }
 
-    private async Task CompleteUserDestroyAsync(ProvisioningJob job, CancellationToken ct)
+    private async Task CompleteUserDestroyAsync(ProvisioningJob job, byte[] dek, CancellationToken ct)
     {
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
         var now = clock.GetCurrentInstant();
+
+        if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
+        {
+            await BestEffortRevokeDoCredentialsAsync(cloud.Id, dek, ct);
+        }
 
         cloud.DestroyedAt        = now;
         cloud.VmIp               = null;
@@ -204,7 +213,43 @@ public sealed partial class RollingBackTfHandler(
         _ => SagaStatus.FailedTf,
     };
 
-    private static Dictionary<string, string> BuildEnv(Cloud cloud, byte[]? providerToken)
+    private async Task BestEffortRevokeDoCredentialsAsync(Guid cloudId, byte[] dek, CancellationToken ct)
+    {
+        string? accessToken = null;
+        string? spacesId    = null;
+        try
+        {
+            accessToken = await secrets.TryGetAsync(cloudId, CloudSecretKind.DoOAuthAccess,    dek, ct);
+            spacesId    = await secrets.TryGetAsync(cloudId, CloudSecretKind.DoSpacesAccessId, dek, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogDoRevokeReadFailed(log, ex, cloudId);
+            return;
+        }
+
+        if (accessToken is not null && spacesId is not null)
+        {
+            try { await doClient.DeleteSpacesKeyAsync(accessToken, spacesId, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogDoSpacesKeyDeleteFailed(log, ex, cloudId);
+            }
+        }
+        if (accessToken is not null)
+        {
+            try { await doClient.RevokeOAuthTokenAsync(accessToken, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogDoOAuthRevokeFailed(log, ex, cloudId);
+            }
+        }
+
+        await secrets.DeleteAllForCloudAsync(cloudId, ct);
+    }
+
+    private async Task<Dictionary<string, string>> BuildEnvAsync(
+        Cloud cloud, byte[]? providerToken, byte[] dek, CancellationToken ct)
     {
         var env = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -213,7 +258,11 @@ public sealed partial class RollingBackTfHandler(
             ["TF_VAR_hostname"] = cloud.Hostname,
             ["TF_VAR_enrollment_token"] = string.Empty,
         };
-        if (providerToken is not null)
+        if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
+        {
+            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.Id, dek, secrets, ct);
+        }
+        else if (providerToken is not null)
         {
             env["TF_VAR_provider_token"] = Encoding.UTF8.GetString(providerToken);
         }
@@ -227,4 +276,16 @@ public sealed partial class RollingBackTfHandler(
     [LoggerMessage(EventId = 2, Level = LogLevel.Warning,
         Message = "RollingBackTfHandler: terraform workspace delete failed for cloud {CloudId}; saga proceeds (housekeeping only)")]
     private static partial void LogWorkspaceDeleteFailed(ILogger logger, Exception ex, Guid cloudId);
+
+    [LoggerMessage(EventId = 3, Level = LogLevel.Warning,
+        Message = "RollingBackTfHandler: failed to read DO secrets for revoke (cloud {CloudId}); skipping best-effort revoke")]
+    private static partial void LogDoRevokeReadFailed(ILogger logger, Exception ex, Guid cloudId);
+
+    [LoggerMessage(EventId = 4, Level = LogLevel.Warning,
+        Message = "RollingBackTfHandler: DELETE /v2/spaces/keys failed for cloud {CloudId}; continuing")]
+    private static partial void LogDoSpacesKeyDeleteFailed(ILogger logger, Exception ex, Guid cloudId);
+
+    [LoggerMessage(EventId = 5, Level = LogLevel.Warning,
+        Message = "RollingBackTfHandler: DO OAuth revoke failed for cloud {CloudId}; continuing")]
+    private static partial void LogDoOAuthRevokeFailed(ILogger logger, Exception ex, Guid cloudId);
 }

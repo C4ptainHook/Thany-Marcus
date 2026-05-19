@@ -3,6 +3,7 @@ namespace ThanyMarcus.Portal.Api.Features.Provisioning;
 public static class SagaStatus
 {
     public const string Pending               = "pending";
+    public const string MintingSpaces         = "minting_spaces";
     public const string TfPlanning            = "tf_planning";
     public const string TfApplying            = "tf_applying";
     public const string DnsCreating           = "dns_creating";
@@ -13,19 +14,20 @@ public static class SagaStatus
     public const string RollingBackDns        = "rolling_back_dns";
     public const string Destroying            = "destroying";
 
-    public const string Succeeded          = "succeeded";
-    public const string FailedTf           = "failed_tf";
-    public const string FailedDns          = "failed_dns";
-    public const string FailedCallback     = "failed_callback";
-    public const string FailedCert         = "failed_cert";
-    public const string FailedPluginToken  = "failed_plugin_token";
-    public const string FailedDestroy      = "failed_destroy";
-    public const string Cancelled          = "cancelled";
-    public const string RolledBack         = "rolled_back";
+    public const string Succeeded            = "succeeded";
+    public const string FailedTf             = "failed_tf";
+    public const string FailedDns            = "failed_dns";
+    public const string FailedCallback       = "failed_callback";
+    public const string FailedCert           = "failed_cert";
+    public const string FailedPluginToken    = "failed_plugin_token";
+    public const string FailedDestroy        = "failed_destroy";
+    public const string FailedMintingSpaces  = "failed_minting_spaces";
+    public const string Cancelled            = "cancelled";
+    public const string RolledBack           = "rolled_back";
 
     public static readonly IReadOnlyList<string> Terminal =
     [
-        Succeeded, FailedTf, FailedDns, FailedCallback, FailedCert, FailedPluginToken, FailedDestroy, Cancelled, RolledBack,
+        Succeeded, FailedTf, FailedDns, FailedCallback, FailedCert, FailedPluginToken, FailedDestroy, FailedMintingSpaces, Cancelled, RolledBack,
     ];
 
     private static readonly HashSet<string> TerminalSet = new(Terminal, StringComparer.Ordinal);

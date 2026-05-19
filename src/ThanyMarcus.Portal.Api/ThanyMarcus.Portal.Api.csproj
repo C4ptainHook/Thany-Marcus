@@ -33,6 +33,8 @@
     <PackageReference Include="NodaTime" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
 
+    <PackageReference Include="Microsoft.Extensions.Http.Polly" />
+
     <PackageReference Include="Otp.NET" />
     <PackageReference Include="QRCoder" />
     <PackageReference Include="Konscious.Security.Cryptography.Argon2" />
