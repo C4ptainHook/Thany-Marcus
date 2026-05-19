@@ -42,12 +42,34 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
             {
                 for (var i = services.Count - 1; i >= 0; i--)
                 {
-                    if (services[i].ServiceType == typeof(IArtifactStore))
+                    var t = services[i].ServiceType;
+                    if (t == typeof(IArtifactStore)
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IUrlFetcherClient)
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IVlmClient)
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IDoclingClient)
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IParakeetClient)
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IVideoSplitterClient)
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight.IDocumentPreflighter)
+                     || t == typeof(ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight.IAudioPreflighter))
                     {
                         services.RemoveAt(i);
                     }
                 }
                 services.AddSingleton<IArtifactStore>(fakeStore);
+                services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IUrlFetcherClient,
+                    ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Stubs.StubUrlFetcherClient>();
+                services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IVlmClient,
+                    ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Stubs.StubVlmClient>();
+                services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IDoclingClient>(
+                    new InMemoryDoclingClient("[stub docling extraction]"));
+                services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IParakeetClient>(
+                    new InMemoryParakeetClient("[stub parakeet transcription]"));
+                services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.IVideoSplitterClient>(
+                    new InMemoryVideoSplitterClient());
+                services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight.IDocumentPreflighter,
+                    AlwaysPassDocumentPreflighter>();
+                services.AddSingleton<ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight.IAudioPreflighter,
+                    AlwaysPassAudioPreflighter>();
             },
         };
         using var client = factory.CreateClient();

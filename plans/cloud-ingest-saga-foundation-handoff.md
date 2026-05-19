@@ -3,9 +3,11 @@
 Date: 2026-05-19
 Status: Draft. Third ticket of the ADR-0042 implementation series. Lands the phase-machine saga + per-sidecar specialist worker pools + SSE progress channel + reprocess/cancel endpoints + provenance event log, with every sidecar call routed through a **stub client returning canned data**. Real model wiring (`VlmWorker → ollama:11434`, `DoclingWorker → docling:5001`, `ParakeetWorker → parakeet:5092`, `UrlFetcherWorker → live HTTP`, `VideoSplitterWorker → ffmpeg`) lands in handoffs #4–#6.
 
-**Goal:** replace the CLOUD-002-vintage single-phase saga (`IngestSagaWorker` + `CompositeIngestHandler`) with the ADR-0042 §3 phase machine, drive per-attachment work through `extraction_tasks` claimed by specialist workers under per-sidecar concurrency caps, expose a per-cloud SSE channel (`GET /api/sync/events`) symmetric to the portal's `/api/clouds/{id}/events`, accept `POST /api/notes/{id}/reprocess` for cache-aware re-runs, treat `DELETE /api/notes/{id}` as cancellation, and append an immutable provenance event for every phase transition. After this ticket: a composite-ingest finalize triggers the orchestrator → it splits attachments into queued `extraction_tasks` → five specialist workers (one of each kind) claim sub-tasks via SKIP LOCKED → each calls a stub client that returns canned text → the orchestrator advances through `composing → routing → extracting_entities → embedding → succeeded`, emitting an SSE event at each transition. The plugin sees `note.status` flip `processing → ready` over ~10 s with no real model behind any sidecar yet.
+> **Rebase note 2026-05-19** — the original brief split this work into three passes (A: orchestrator + claim loop + state-machine plumbing; B: specialists + SSE + endpoints; C: provenance materialization + regression anchor). The Pass-A scaffolding (`JobOrchestratorWorker`, `IngestPhaseDispatcher`, the six per-phase handlers under `Features/Processing/Phases/`, `IngestJob.Kind`/`EventsLog`/`TransitionVersion`, the `IngestJobKind` constants, the full ADR-0042 §3 failure-terminal set on `IngestJobStatus`, and the cleanup migration `20260518223246_DropLegacyProcessingStatus`) was already landed in the working tree before this brief was finalized. Pass A is dropped from this rebase, and the surviving two passes are renumbered: what was Pass B is now Pass A; what was Pass C is now Pass B. Any references below to the prior Pass-A short-circuit, the `IngestSagaWorker` → `JobOrchestratorWorker` replacement, or the separate `0002_drop_legacy_processing.cs` migration are historical context, not outstanding work.
 
-Estimated **3 person-days** with AI-agent assistance, split into three passes (~1d each). Pass A is the orchestrator + claim loop + state-machine plumbing (no specialist workers, no SSE). Pass B is the five specialist workers + their stub clients + the new endpoints (`reprocess`, `DELETE`, `events`). Pass C is wiring, tests, and the cross-ticket regression anchor. The estimate is rough — it could compress to 2 days if the EF Core SKIP-LOCKED patterns transfer cleanly from the portal saga; it can stretch to 3.5 days if the SSE notification fan-out hits unexpected Npgsql concurrency issues.
+**Goal:** building on the already-landed `JobOrchestratorWorker` + phase machine + cleanup migration (Pass-A scaffolding from the original brief), drive per-attachment work through `extraction_tasks` claimed by specialist workers under per-sidecar concurrency caps, expose a per-cloud SSE channel (`GET /api/sync/events`) symmetric to the portal's `/api/clouds/{id}/events`, accept `POST /api/notes/{id}/reprocess` for cache-aware re-runs, treat `DELETE /api/notes/{id}` as cancellation, and append an immutable provenance event for every phase transition. After this ticket: a composite-ingest finalize triggers the orchestrator → it splits attachments into queued `extraction_tasks` → five specialist workers (one of each kind) claim sub-tasks via SKIP LOCKED → each calls a stub client that returns canned text → the orchestrator advances through `composing → routing → extracting_entities → embedding → succeeded`, emitting an SSE event at each transition. The plugin sees `note.status` flip `processing → ready` over ~10 s with no real model behind any sidecar yet.
+
+Estimated **2 person-days** with AI-agent assistance, split into two passes (~1d each). Pass A is the five specialist workers + their stub clients + the new endpoints (`reprocess`, `DELETE`, `events`) + the SSE bus. Pass B is provenance materialization + the cross-ticket regression anchor. The estimate is rough — it could compress to 1.5 days if the SSE notification fan-out is clean; it can stretch to 2.5 days if Npgsql concurrency issues surface around `pg_notify`. (The original brief carved off an extra "Pass A" for orchestrator + claim loop + state-machine plumbing; that work is already in the tree as `JobOrchestratorWorker` + `IngestPhaseDispatcher` + the per-phase handlers, so this rebase skips it.)
 
 After this ticket, handoffs #4–#6 swap the stub clients for real sidecar HTTP clients **one worker at a time** without touching the saga, the schema, the endpoints, the SSE bus, or the cancellation logic. That isolation is the whole point of this ticket: a finished framework with five drop-in seams.
 
@@ -22,8 +24,8 @@ This handoff **does not** ship the schema migration (that's handoff #1, `cloud-s
 - **`docs/decisions/0032-fk-cascades-and-soft-delete.md`** — soft-delete via `deleted_at` on `notes` (and `entities`); the orchestrator's per-phase cancellation check reads this column.
 - **`docs/decisions/0024-dbcontext-shape.md`** + **`docs/decisions/0028-schema-conventions.md`** — single `CloudDbContext`, snake_case via naming convention, `IClock`-driven `Instant` timestamps, `IHasUpdatedAt` interceptor. New entities follow the same pattern (already scaffolded by the schema migration).
 - **`docs/decisions/0023-test-stack.md`** — xUnit v3 + Shouldly + Testcontainers + Respawn. `PostgresFixture` and `CloudApiFactory` already exist; the new tests reuse them.
-- **`plans/cloud-002-handoff.md`** — current saga baseline. The `IngestSagaWorker` + `CompositeIngestHandler` files this ticket **replaces** live at `src/ThanyMarcus.Cloud.Api/Features/Processing/`. The `IngestEndpoints.MapIngestEndpoints` + `SyncPullEndpoint.MapSyncPullEndpoint` shapes **stay byte-for-byte the same** — this ticket is purely about what happens *after* `/finalize` enqueues a row.
-- **`plans/cloud-schema-v2-handoff.md`** — the schema this ticket reads/writes. The legacy `'processing'` value in the `ingest_jobs.status` check constraint is **dropped at the end of this ticket** (final migration in §"Schema cleanup"). All other schema-v2 columns (`embedding`, `deleted_at`, `is_hub`, `project_id`, `hub_entity_id`, `transition_version`, `events_log`, `kind`, the entire `extraction_tasks` table, the new partial-unique-index `ix_ingest_jobs_active_per_note`) are already present.
+- **`plans/cloud-002-handoff.md`** — original composite-ingest baseline. The legacy `IngestSagaWorker` + `CompositeIngestHandler` were already removed before this brief was finalized; `JobOrchestratorWorker` + the per-phase handlers under `Features/Processing/Phases/` are the live shape. The `IngestEndpoints.MapIngestEndpoints` + `SyncPullEndpoint.MapSyncPullEndpoint` shapes **stay byte-for-byte the same** — this ticket is purely about what happens *after* `/finalize` enqueues a row.
+- **`plans/cloud-schema-v2-handoff.md`** — the schema this ticket reads/writes. The `ingest_jobs.status` check constraint already enumerates the full ADR-0042 §3 phase vocabulary (the migration `20260518223246_DropLegacyProcessingStatus` removed the legacy `'processing'` value). All schema-v2 columns (`embedding`, `deleted_at`, `is_hub`, `project_id`, `hub_entity_id`, `transition_version`, `events_log`, `kind`, the entire `extraction_tasks` table, the new partial-unique-index `ix_ingest_jobs_active_per_note`) are already present.
 - **`plans/cloud-sidecars-handoff.md`** — the sidecars this ticket's *future* siblings will call. The compose stack already runs `ollama`, `docling`, `parakeet` containers; their `IngestSaga:Sidecars:*:BaseUrl` config keys are already in `appsettings.json`. This ticket adds `IngestSaga:Sidecars:*:MaxConcurrency` consumption (the keys exist; the semaphores are new) and adds the **stub clients** that satisfy the same `I{Vlm,Docling,Parakeet,UrlFetcher,VideoSplitter}Client` interfaces the real ones will eventually implement.
 - **Memory `composite_ingest_decision.md`** — one composite draft → one processed note. The saga rewrite must preserve this invariant: one finalize → exactly one `ingest_jobs` row → fan-out into N `extraction_tasks` → one terminal `note.status`. Hub regen and reprocess each get their own `ingest_jobs` row (per `kind` discriminator) but do not produce parallel notes.
 - **Memory `portal_architecture.md`** — Postgres job queue, mutable status, no event sourcing, SSE only. Applies as-is.
@@ -65,7 +67,7 @@ Recorded here so the next reader does not re-litigate them.
     
     The bus implementation (`PostgresIngestEventBus`) mirrors `PostgresProvisioningEventBus` line-for-line, modulo the channel name and payload shape.
 
-14. **SSE channel is bearer-token authenticated.** `GET /api/sync/events` runs under `RequirePluginAuthFilter` (same filter that protects `/api/sync/pull`). No cookie auth; the plugin sends `Authorization: Bearer <token>` on the `EventSource` connection via the well-supported `EventSourcePolyfill` headers option, or via a query-string token (`?access_token=<>`) for environments without polyfill. **Choose query-string token in MVP** — the alternative (header-on-EventSource) requires a polyfill in the plugin, which is one more dep. Document the choice with a security note: token is logged into the cloud's request log; rotate-by-plugin-token-rotation if a log leak is suspected.
+14. **SSE channel is bearer-token authenticated, header-only — no query-string token path.** `GET /api/sync/events` runs under `RequirePluginAuthFilter` (same filter that protects `/api/sync/pull`) **unchanged**: it accepts `Authorization: Bearer <token>` and nothing else. The plugin opens the SSE stream with [`@microsoft/fetch-event-source`](https://www.npmjs.com/package/@microsoft/fetch-event-source) — a `fetch`-based SSE client that supports request headers natively and runs in Obsidian's Electron environment — passing the plugin token in the `Authorization` header. **The native browser `EventSource` API and `?access_token=<>` fallbacks are explicitly rejected.** Rationale: bearer tokens in URLs leak into nginx access logs, the .NET request log, error reporters, browser/Electron history, and any upstream proxy we don't control; the memory baseline (`feedback_totp_login_only` + the broader auth model) is that bearer credentials never land in URLs, and scrubbing only covers log paths we own. The plugin-side dep is ~10KB and replaces a server-side filter extension + log-scrubber pair, so the cost is net-negative. **Locked; ADR-0049 documents the choice and the rejected alternatives.**
 
 15. **No `Last-Event-ID` replay.** Per ADR-0020. Plugin reconnect calls `GET /api/sync/pull?since=<last_seen_updated_at>` and reconciles via DB state. This is correct for terminal-state arrivals (`note_succeeded`, `note_failed`) but loses transient progress events on reconnect — acceptable per ADR-0020's "no durable event store" trade.
 
@@ -75,112 +77,11 @@ Recorded here so the next reader does not re-litigate them.
 
 ## Scope boundary (precise)
 
-Three passes, ~1 day each. All three ship in the same handoff because they share the saga's coordination contract; splitting at any pass-boundary would force temporary stub code that gets deleted in the next pass.
+Two passes, ~1 day each. Both ship in the same handoff because they share the saga's coordination contract; splitting at the pass-boundary would force temporary stub code that gets deleted in the next pass.
 
-### Pass A — claim loop refactor + phase state machine + ownership exception (~1 day)
+### Pass A — five specialist workers + stub clients + SSE bus + reprocess/cancel endpoints (~1 day)
 
-The `IngestSagaWorker` from CLOUD-002 is replaced by `JobOrchestratorWorker`. The new orchestrator runs the phase machine but with all specialist work **inlined as TODO-stubs** that flip every `extraction_tasks` row directly to `succeeded` without dispatching to specialists. SSE bus is not yet wired. This pass proves the phase machine + retry/lease/transition_version mechanics work end-to-end against the schema-v2 shape; specialist-worker dispatch lands in Pass B.
-
-**1. Replace `IngestSagaWorker.cs` with `JobOrchestratorWorker.cs`.**
-   - Copy the claim-loop shape from `src/ThanyMarcus.Portal.SagaWorker/SagaWorker.cs:25-220` (concurrency semaphore, `LISTEN/NOTIFY` wakeup, `WaitForWakeupAsync` safety-net poll, heartbeat loop, worker-id format). The portal version uses `Channels` for wakeup signalling; cloud-side uses the same pattern.
-   - Concurrency: `IngestSaga:Orchestrator:MaxConcurrentJobs` (default 3 per ADR-0042 §1). `LeaseSeconds=60`, `HeartbeatSeconds=20`, `IdlePollMs=60000`. All in `appsettings.json:IngestSaga:Orchestrator`.
-   - Claim SQL targets `ingest_jobs` with the new phase vocabulary:
-     ```sql
-     UPDATE ingest_jobs SET
-         status              = CASE
-                                  WHEN status = 'queued' THEN 'extracting_attachments'
-                                  ELSE status
-                                END,
-         lease_owner         = {workerId},
-         lease_expires_at    = {now + lease},
-         attempts            = attempts + 1,
-         transition_version  = transition_version + 1,
-         started_at          = COALESCE(started_at, {now}),
-         updated_at          = {now}
-       WHERE id = (
-         SELECT id FROM ingest_jobs
-          WHERE status NOT IN ('succeeded','failed_extraction','failed_composition',
-                               'failed_route','failed_entities','failed_embedding','dead_lettered')
-            AND (status = 'queued' AND scheduled_at <= {now}
-                 OR status IN ('extracting_attachments','composing','routing','extracting_entities','embedding')
-                    AND lease_expires_at <= {now})
-            AND scheduled_at <= {now}
-          ORDER BY scheduled_at
-          LIMIT 1 FOR UPDATE SKIP LOCKED
-       ) RETURNING *;
-     ```
-     The `CASE` transitions newly-queued jobs to `extracting_attachments` atomically; in-flight jobs whose lease expired keep their current phase (we re-process from where they were). The terminal-set exclusion mirrors the schema-v2 `ix_ingest_jobs_active_per_note` filter exactly.
-
-**2. Add `IngestPhaseDispatcher.cs` (`Features/Processing/`).**
-   - Single class with `Task DispatchAsync(IngestJob job, CancellationToken ct)`.
-   - Branches on `job.Status`:
-     - `extracting_attachments` → `ExtractingAttachmentsHandler.HandleAsync`
-     - `composing` → `ComposingHandler.HandleAsync`
-     - `routing` → `RoutingHandler.HandleAsync`
-     - `extracting_entities` → `ExtractingEntitiesHandler.HandleAsync`
-     - `embedding` → `EmbeddingHandler.HandleAsync`
-   - Each handler is `IPhaseHandler` (interface in `Features/Processing/Phases/IPhaseHandler.cs`), DI-registered scoped.
-   - Before dispatching: check `notes.deleted_at IS NOT NULL`. If set, short-circuit to `CancelHandler.HandleAsync` (writes `dead_lettered` + `last_error='user_cancelled'`, returns).
-   - After each handler returns successfully, the handler itself transitions the job to the next phase (via `UPDATE ingest_jobs SET status=<next>, transition_version=...`). The orchestrator then re-loops and the next claim picks up the same job in the new phase. **This avoids the "handler returns enum, dispatcher writes it" double-write pattern** — each handler owns its phase exit transition.
-
-**3. Land the five phase handlers as classes, with `extraction_attachments` real and the rest no-op:**
-   - `ExtractingAttachmentsHandler.cs` — **the only real handler in Pass A**:
-     1. Load `note` + `attachments` for the job.
-     2. For each attachment with `extraction_status='pending'`:
-        - Resolve `target_sidecar` by `kind`: `image→ollama`, `file→docling` (PDF) or `url→url` discriminator on the mime / extra, `voice→parakeet`, `url→url`, `video→video`.
-        - Compute `extraction_cache_key = sha256:{target_sidecar}:{model_version}` (the model version is `appsettings.json:IngestSaga:Models:<kind>:Version` for the kind, defaults to `"stub-v1"` in Pass A).
-        - Check for cache hit: if `attachments` table has any other row with same `sha256` AND same `extraction_cache_key` AND `extracted_text IS NOT NULL`, copy the `extracted_text` onto the current row and skip task enqueue.
-        - Otherwise, INSERT an `extraction_tasks` row: `(ingest_job_id, attachment_id, target_sidecar, status='queued', scheduled_at=now)`.
-     3. Save changes.
-     4. **PASS-A SHORTCUT:** immediately UPDATE all queued `extraction_tasks` for this job to `status='succeeded'` with `extracted_text='[stub Pass-A placeholder]'`. This unblocks the orchestrator's "wait until all sub-tasks terminal" gate without specialist workers. Pass B removes this shortcut.
-     5. UPDATE `ingest_jobs.status = 'composing'`.
-   - `ComposingHandler.cs` — calls `CompositeMarkdownAssembler.Assemble(note, attachments, /*enrichment=null*/, /*llmMode=null*/)` (the existing CLOUD-002 assembler still works; it accepts a no-anchor enrichment shape). Writes `notes.body_output`, `notes.relative_path='Inbox/{noteId}.md'`. Transitions to `routing`.
-   - `RoutingHandler.cs` — calls `ILlmClient.EnrichCompositeAsync(...)` (existing CLOUD-002 client; in `safe` mode this is `NoOpLlmClient`). On a non-null `SuggestedProject`, look up/create an `entities` row with `kind='project'` and matching `canonical_name`; set `notes.project_id` to that entity's id, set `relative_path` to `Projects/{canonical_name}/{noteId}.md`. Transitions to `extracting_entities`.
-   - `ExtractingEntitiesHandler.cs` — re-uses the same enrichment result from `RoutingHandler` (cache on the job, OR re-call the LLM — for Pass A simplicity, **re-call**: the no-op client returns `[]` mentions, the loop is empty). For each LLM-emitted mention, look up/create the target `entities` row, then INSERT a `mentions` row pointing back to the note. Increment `entities.mention_count` for each new mention. Transitions to `embedding`.
-   - `EmbeddingHandler.cs` — calls `IEmbeddingClient.EmbedAsync(notes.body_output)`. Writes `notes.embedding = new Vector(result)`. Transitions to `succeeded`. On `succeeded`, flips `notes.status='ready'`.
-   - Each handler appends one entry to `ingest_jobs.events_log` via the bus (Pass A: bus is a no-op stub; Pass B wires `pg_notify`).
-
-**4. Failure cascade + retry budget.**
-   - Each phase has its own retry budget from `appsettings.json:IngestSaga:Phases:<phase>:MaxAttempts` (defaults from ADR-0042 §3 table: `extracting_attachments=1, composing=2, routing=3, extracting_entities=3, embedding=3`) and `BackoffSecondsBase=2`.
-   - `IngestPhaseDispatcher` catches handler exceptions:
-     - On exception, increment `attempts` on the `ingest_jobs` row.
-     - If `attempts < MaxAttempts[phase]`, set `scheduled_at = now + 2^attempts * BackoffSecondsBase`, set `status` back to its CURRENT phase (NOT `queued` — keep the phase so the next claim re-runs the same handler), clear `lease_owner`, set `last_error`.
-     - If `attempts >= MaxAttempts[phase]`, transition to the matching failure terminal (`extracting_attachments` → `failed_extraction`, `composing` → `failed_composition`, etc.) and set `notes.status='failed'`.
-     - Emit an event (Pass A: stub; Pass B: real `note_phase_changed` or `note_failed`).
-   - Concurrency safety: every UPDATE includes `AND lease_owner = {workerId} AND transition_version = {expected}` in the WHERE clause; row-count zero throws `SagaOwnershipLostException` (lift the portal-side class from `src/ThanyMarcus.Portal.SagaWorker/Features/Provisioning/SagaOwnershipLostException.cs` into a shared location at `src/ThanyMarcus.Shared/Saga/SagaOwnershipLostException.cs` and reference from both projects).
-
-**5. Heartbeat loop** identical shape to `Portal.SagaWorker.SagaWorker.HeartbeatLoopAsync` (`src/ThanyMarcus.Portal.SagaWorker/SagaWorker.cs:154-179`), updates `lease_expires_at = now + lease` every 20s, scoped to `(id, lease_owner, status NOT IN terminals)`.
-
-**6. LISTEN/NOTIFY wakeup** on `ingest_jobs_new` (already wired by `IngestEndpoints.NotifyIngestJobAsync`) **plus** a new channel `ingest_jobs_changed` that the dispatcher fires after every phase transition (so a job in `composing` → `routing` doesn't pay the next claim's idle-poll delay). Channel name + payload (just the job id) is the contract; the orchestrator's LISTEN loop joins both channels.
-
-**7. Provenance event log writes** at every transition. Pass A writes them with a local helper inside the dispatcher; Pass B factors out the helper into `IIngestEventBus`. The event payload schema:
-```json
-{
-  "at":   "2026-05-19T10:00:00.000Z",
-  "by":   "ThanyMarcus.Cloud.Api@host/9a8b7c6d",
-  "from": "extracting_attachments",
-  "to":   "composing",
-  "error": null
-}
-```
-Applied as `UPDATE ingest_jobs SET events_log = events_log || $payload::jsonb, ...`.
-
-**8. Schema cleanup migration** `0002_drop_legacy_processing_status.cs`:
-   - Drop the legacy `'processing'` value from `ck_ingest_jobs_status` (and any in-flight rows holding it — there should be none, but defensively: `UPDATE ingest_jobs SET status = 'extracting_attachments' WHERE status = 'processing'`; the legacy code's `processing` is conceptually the new code's `extracting_attachments`).
-   - Drop the `IngestJobStatus.Processing` constant.
-   - Update the partial-unique-index filter to remove `'processing'` from the active-set definition (it's not in the terminal-set either; the filter `status NOT IN (terminals)` already excludes it correctly without listing it).
-   - **This migration lands at the END of Pass A**, after `JobOrchestratorWorker` is verified to never emit `'processing'`.
-
-**9. Tests for Pass A** under `tests/ThanyMarcus.Cloud.Tests/Features/Processing/`:
-   - `JobOrchestratorWorkerTests.cs` — claim contention (two orchestrator instances, one job, exactly one wins; mirror `Portal.Tests/Features/Provisioning/SagaConcurrencyTests.cs`); lease expiry → re-claim → resumes from the right phase; transition_version mismatch → `SagaOwnershipLostException` swallowed + dispatch aborted.
-   - `PhaseDispatcherTests.cs` — each handler runs in isolation against a seeded `ingest_jobs` row; assert phase transitions and `events_log` append; assert `notes.deleted_at` short-circuits to `dead_lettered`; assert retry-budget overshoot → correct failure terminal.
-   - `RetryBudgetTests.cs` — handler throws → `attempts` increments → `scheduled_at` jumps + same phase persisted; after N exceptions, failure terminal sticks.
-
-→ At end of Pass A: a finalize → job runs through all five phases → terminal `succeeded` → `notes.status='ready'`, in ~50ms (no real model calls, no SSE). The orchestrator + phase machine + lease/retry/transition_version mechanics are proven. **No specialist workers yet** — Pass A's `ExtractingAttachmentsHandler` does the work inline by short-circuit-fulfilling extraction_tasks.
-
-### Pass B — five specialist workers + stub clients + SSE bus + reprocess/cancel endpoints (~1 day)
-
-The Pass-A shortcut in `ExtractingAttachmentsHandler` is **removed**. Five `IHostedService` specialist workers now claim `extraction_tasks` rows and call stub clients. The SSE bus is wired; the reprocess + cancel endpoints land.
+The Pass-A scaffolding from the original brief (`JobOrchestratorWorker`, `IngestPhaseDispatcher`, the six per-phase handlers, the inline-fulfilment short-circuit in `ExtractingAttachmentsHandler`, the `IngestJob.Kind`/`EventsLog`/`TransitionVersion` columns, the failure-terminal vocabulary, and the legacy-`'processing'` cleanup migration) is already in the working tree. This pass replaces the short-circuit with five `IHostedService` specialist workers that claim `extraction_tasks` rows and call stub clients, wires the SSE bus, and lands the reprocess + cancel endpoints.
 
 **1. Five specialist workers.** Each at `Features/Processing/Specialists/<Name>Worker.cs`:
    - `VlmWorker.cs` (claims `target_sidecar='ollama'`).
@@ -233,12 +134,12 @@ The Pass-A shortcut in `ExtractingAttachmentsHandler` is **removed**. Five `IHos
    - `StubVlmClient.cs` implements `IVlmClient` (interface in `Infrastructure/Sidecars/IVlmClient.cs`). `Task<string> DescribeImageAsync(string storageKey, CancellationToken ct)` returns `$"[stub VLM description for {storageKey}; model=stub-v1]"` after `Task.Delay(50, ct)`.
    - `StubDoclingClient.cs` implements `IDoclingClient`. `Task<string> ExtractMarkdownAsync(string storageKey, string mimeType, CancellationToken ct)` returns `$"# [stub docling extraction]\n\nFile: {storageKey}\n"`.
    - `StubParakeetClient.cs` implements `IParakeetClient`. `Task<string> TranscribeAsync(string storageKey, CancellationToken ct)` returns `"[stub parakeet transcription]"`.
-   - `StubUrlFetcherClient.cs` implements `IUrlFetcherClient`. `Task<string> FetchMarkdownAsync(string url, CancellationToken ct)` returns `$"# [stub URL extraction]\n\nURL: {url}\n"` (the existing `UrlExtractor` from CLOUD-002 stays; this is the stub-shaped wrapper for parity, OR delete the existing extractor and have the worker call directly. **Choice:** keep `UrlExtractor` in-place; `StubUrlFetcherClient` is for tests only, and the `UrlFetcherWorker` defaults to the real `UrlExtractor` via DI swap. Pass-B production wiring uses `UrlExtractor`; tests can override.)
+   - `StubUrlFetcherClient.cs` implements `IUrlFetcherClient`. `Task<string> FetchMarkdownAsync(string url, CancellationToken ct)` returns `$"# [stub URL extraction]\n\nURL: {url}\n"` (the existing `UrlExtractor` from CLOUD-002 stays; this is the stub-shaped wrapper for parity, OR delete the existing extractor and have the worker call directly. **Choice:** keep `UrlExtractor` in-place; `StubUrlFetcherClient` is for tests only, and the `UrlFetcherWorker` defaults to the real `UrlExtractor` via DI swap. Pass-A production wiring uses `UrlExtractor`; tests can override.)
    - `StubVideoSplitterClient.cs` implements `IVideoSplitterClient`. `Task<VideoSplitResult> SplitAsync(...)` returns `new VideoSplitResult(KeyframeStorageKeys: [], AudioStorageKey: null)` — the video kind ends up extraction-skipped end-to-end until handoff #6 lands real ffmpeg.
    
    Each interface lives at `Infrastructure/Sidecars/I<Name>Client.cs`; each stub at `Infrastructure/Sidecars/Stubs/Stub<Name>Client.cs`. Real client implementations (`OllamaVlmClient`, `DoclingHttpClient`, `ParakeetHttpClient`, `RealUrlFetcherClient`, `FfmpegVideoSplitterClient`) arrive in handoffs #4–#6 as drop-in DI replacements.
 
-**3. Remove the Pass-A shortcut in `ExtractingAttachmentsHandler`.** Now the handler INSERTs `extraction_tasks` rows and **returns** without transitioning the job — the orchestrator's outer loop re-claims the job on the next wake (`extraction_tasks_changed` notify) and re-enters `ExtractingAttachmentsHandler`, which checks "are all extraction_tasks for this job terminal?":
+**3. Replace the inline-fulfilment shortcut in `ExtractingAttachmentsHandler`.** The on-tree handler still short-circuits `extraction_tasks` straight to `succeeded` (the scaffolding placeholder from the dropped Pass A). Replace that path so the handler INSERTs `extraction_tasks` rows and **returns** without transitioning the job — the orchestrator's outer loop re-claims the job on the next wake (`extraction_tasks_changed` notify) and re-enters `ExtractingAttachmentsHandler`, which checks "are all extraction_tasks for this job terminal?":
    - If yes, transition `ingest_jobs.status='composing'`.
    - If no, return; orchestrator will re-claim again on next wake.
    
@@ -283,7 +184,7 @@ The Pass-A shortcut in `ExtractingAttachmentsHandler` is **removed**. Five `IHos
    - Heartbeat: `: heartbeat\n\n` every 30s.
    - No initial state snapshot beyond a `connected` comment — clients backfill via `/api/sync/pull`.
 
-   Auth pattern: the existing `RequirePluginAuthFilter` reads `Authorization: Bearer`. For `EventSource` query-string fallback, the filter must **also** accept `?access_token=<>`; extend the filter to check both sources OR add a new `RequirePluginAuthFilterFromQuery` for this endpoint only. **Choice:** extend the existing filter (one-liner) to also accept `access_token` query-string; preserves a single auth code path. Document in code (one-line "non-obvious-why" comment) that this is for `EventSource` compatibility.
+   Auth pattern: the existing `RequirePluginAuthFilter` (reads `Authorization: Bearer`) is wired **unchanged**. **Do not** add a query-string credential path under any name (`access_token`, `token`, `auth`, etc.), **do not** add a `RequirePluginAuthFilterFromQuery` sibling. Per design-decision #14 the plugin sends a real `Authorization` header via `@microsoft/fetch-event-source`; the filter stays a single Authorization-header code path identical to `/api/sync/pull`. The endpoint test (`SyncEventsEndpointTests.cs`) covers the generic invariant — `GET /api/sync/events` without a valid `Authorization: Bearer` header returns `401` — which catches any future "let me sneak the token in via the URL" regression without naming a specific query-param scheme.
 
 **6. `POST /api/notes/{id}/reprocess` endpoint.** Add at `Features/Ingest/ReprocessEndpoint.cs`:
    ```csharp
@@ -298,7 +199,7 @@ The Pass-A shortcut in `ExtractingAttachmentsHandler` is **removed**. Five `IHos
    - `pg_notify('ingest_jobs_new', '')`.
    - Return `202 { jobId, status: 'queued' }`.
 
-   The orchestrator handles `kind='reprocess'` identically to `kind='capture'` in Pass A/B — the only difference is the **cache hit rate** in `ExtractingAttachmentsHandler` (same `sha256` + same `extraction_cache_key` → cached `extracted_text` → no specialist work). Model-version bumps invalidate the cache; the worker pool runs.
+   The orchestrator handles `kind='reprocess'` identically to `kind='capture'` — the only difference is the **cache hit rate** in `ExtractingAttachmentsHandler` (same `sha256` + same `extraction_cache_key` → cached `extracted_text` → no specialist work). Model-version bumps invalidate the cache; the worker pool runs.
 
 **7. `DELETE /api/notes/{id}` endpoint** at `Features/Ingest/NoteDeleteEndpoint.cs`:
    ```csharp
@@ -323,11 +224,11 @@ The Pass-A shortcut in `ExtractingAttachmentsHandler` is **removed**. Five `IHos
    - `attachment_status_changed { noteId, attachmentId, from, to }`
    - `note_succeeded { noteId }`
    - `note_failed { noteId, error }`
-   - `hub_materialized { noteId, entityId }` (this ticket emits stubs from `ExtractingEntitiesHandler` only when LLM provides a hub-triggering mention; in Pass B with `NoOpLlmClient`, this is never fired. Reserved for the M5 worker tickets.)
+   - `hub_materialized { noteId, entityId }` (this ticket emits stubs from `ExtractingEntitiesHandler` only when LLM provides a hub-triggering mention; in Pass A with `NoOpLlmClient`, this is never fired. Reserved for the M5 worker tickets.)
 
    Wire the translator into the SSE endpoint; on each notify, translator translates → handler writes SSE.
 
-**10. Tests for Pass B:**
+**10. Tests for Pass A:**
    - `Specialists/VlmWorkerTests.cs` (and one per specialist) — claim contention (two VlmWorker instances, one extraction_task, exactly one wins; both consult the same `target_sidecar='ollama'` queue); lease expiry → re-claim → attempts increments; client throws → retry → success; persistent failure → `failed` terminal.
    - `Specialists/SpecialistWorkerBaseTests.cs` — verifies the abstract base's claim loop in isolation against an arbitrary `target_sidecar`.
    - `Sync/SyncEventsEndpointTests.cs` — open SSE connection; orchestrator fires a phase change; client receives `event: note_phase_changed\ndata: {...}\n\n`. Mock `IIngestEventBus` OR use real `pg_notify` with Testcontainers (the latter is the more realistic test; pick it).
@@ -336,9 +237,9 @@ The Pass-A shortcut in `ExtractingAttachmentsHandler` is **removed**. Five `IHos
    - `Phases/CancelHandlerTests.cs` — invoking the handler directly transitions the job correctly.
    - `Sync/IngestSseTranslatorTests.cs` — every event kind round-trips through (write payload → notify → translator → SSE event) with the expected JSON shape.
 
-→ At end of Pass B: a finalize → orchestrator splits attachments into `extraction_tasks` → five specialist workers race to claim → each calls `StubXxxClient` → returns canned text in ~50ms each → orchestrator advances through phases → SSE endpoint streams `note_phase_changed → note_succeeded` in real time → `notes.status='ready'`. Total wall-clock ~500ms for a 3-attachment composite (5 specialist workers in parallel + ~5 phase transitions of 30ms each). Real model wiring is purely an implementation swap in handoffs #4–#6.
+→ At end of Pass A: a finalize → orchestrator splits attachments into `extraction_tasks` → five specialist workers race to claim → each calls `StubXxxClient` → returns canned text in ~50ms each → orchestrator advances through phases → SSE endpoint streams `note_phase_changed → note_succeeded` in real time → `notes.status='ready'`. Total wall-clock ~500ms for a 3-attachment composite (5 specialist workers in parallel + ~5 phase transitions of 30ms each). Real model wiring is purely an implementation swap in handoffs #4–#6.
 
-### Pass C — provenance event log materialization + integration regression anchor (~1 day)
+### Pass B — provenance event log materialization + integration regression anchor (~1 day)
 
 The previous passes wrote `events_log` directly; this pass materializes `notes.provenance` from it at terminal-time, exposes it via `/api/sync/pull`, and lands the end-to-end regression test.
 
@@ -360,14 +261,14 @@ The previous passes wrote `events_log` directly; this pass materializes `notes.p
              cache_hits          = /*from extraction_tasks.events_log on skipped-cache-hit*/,
          }));
      ```
-   - The CLOUD-002 `CompositeIngestHandler.BuildProvenance` is **deleted** in this ticket (line `Features/Processing/CompositeIngestHandler.cs:140-161`); the new materializer fully replaces it. Field names align with §22 of the cloud-pivot plan for forward compatibility with CLOUD-024.
+   - The CLOUD-002 `CompositeIngestHandler.BuildProvenance` was already deleted alongside the saga rewrite; `ProvenanceMaterializer.Build(...)` is the only path that writes `notes.provenance`. Field names align with §22 of the cloud-pivot plan for forward compatibility with CLOUD-024.
 
 **2. `/api/sync/pull` extension.** Add an optional `?include=provenance` query parameter (default `false`) that includes `notes.provenance` in the response. Plugin reads provenance to surface "View processing details" in a context menu. Existing default response shape stays unchanged (plugins not requesting `?include=provenance` see no diff).
 
 **3. Cross-ticket regression test** `tests/ThanyMarcus.Cloud.Tests/Features/CompositeIngestSagaEndToEndTests.cs`:
    - Spin up `CloudApiFactory` against `pgvector/pgvector:pg16`.
    - Register stub clients for all five sidecars + `NoOpLlmClient` + `StubEmbeddingClient` (returns zero-vector).
-   - Issue `/api/ingest/init` with 4 attachments: 1 URL, 1 image, 1 voice, 1 PDF file.
+   - Issue `/api/ingest/init` with 4 attachments: 1 URL, 1 image, 1 audio, 1 PDF document.
    - Issue presigned PUTs to MinIO (Testcontainers, already in CLOUD-002 test fixtures).
    - Issue `/api/ingest/{noteId}/finalize`.
    - Open SSE on `/api/sync/events` BEFORE finalize.
@@ -386,9 +287,9 @@ The previous passes wrote `events_log` directly; this pass materializes `notes.p
 
 **5. ADRs to author** (0.25-day batch after the ticket ships, NOT in this ticket's scope):
    - **ADR-0048: In-process ingest pipeline runtime topology.** Captures the "single deployable" decision (orchestrator + 5 specialists + SSE in one process), the `SpecialistWorkerBase<TClient>` pattern, and why no separate worker binary.
-   - **ADR-0049: Cloud-side SSE channel auth.** Documents the `?access_token=<>` query-string fallback for `EventSource`, the security trade (logged token), and the rotation path.
+   - **ADR-0049: Cloud-side SSE channel auth.** Documents the header-on-SSE choice (`Authorization: Bearer` via `@microsoft/fetch-event-source` from the plugin), why query-string token fallback was rejected (bearer credentials in URLs leak across log/proxy boundaries we don't control), and the plugin-side dep choice as the implementation contract.
 
-→ At end of Pass C: provenance is comprehensive, the regression anchor catches future breakages, and handoffs #4–#6 can begin with confidence that the framework is solid.
+→ At end of Pass B: provenance is comprehensive, the regression anchor catches future breakages, and handoffs #4–#6 can begin with confidence that the framework is solid.
 
 ## File map
 
@@ -402,25 +303,23 @@ Thany-Marcus/
 ├── plans/
 │   └── cloud-ingest-saga-foundation-handoff.md            # THIS FILE
 ├── src/ThanyMarcus.Cloud.Api/
-│   ├── Program.cs                                         # CHANGED: + register JobOrchestratorWorker + 5 specialists + IIngestEventBus + IngestSseTranslator + 5 stub clients + IEmbeddingClient stub + MapSyncEventsEndpoint + MapReprocessEndpoint + MapNoteDeleteEndpoint; - register IngestSagaWorker
+│   ├── Program.cs                                         # CHANGED: + register 5 specialists + IIngestEventBus + IngestSseTranslator + 5 stub clients + IEmbeddingClient stub + MapSyncEventsEndpoint + MapReprocessEndpoint + MapNoteDeleteEndpoint (JobOrchestratorWorker already registered)
 │   ├── appsettings.json                                   # CHANGED: + IngestSaga:Orchestrator:* + IngestSaga:Specialists:*:Replicas + IngestSaga:Phases:*:MaxAttempts + IngestSaga:ExtractionTasks:MaxAttempts + IngestSaga:Models:Stub:Version
 │   ├── Features/
 │   │   ├── Processing/
-│   │   │   ├── IngestSagaWorker.cs                        # DELETED (replaced by JobOrchestratorWorker)
-│   │   │   ├── CompositeIngestHandler.cs                  # DELETED (replaced by phase handlers)
-│   │   │   ├── JobOrchestratorWorker.cs                   # NEW: orchestrator loop, claim, heartbeat, LISTEN/NOTIFY
-│   │   │   ├── IngestPhaseDispatcher.cs                   # NEW: per-phase handler dispatch + cancellation check + retry/dead-letter
-│   │   │   ├── ProvenanceMaterializer.cs                  # NEW: final notes.provenance JSONB assembly
-│   │   │   ├── IngestJob.cs                               # CHANGED: + IngestJobKind constants; IngestJobStatus extended with phase + failure-terminals
-│   │   │   ├── IngestJobConfiguration.cs                  # CHANGED: handled by schema-v2 migration; verify
+│   │   │   ├── JobOrchestratorWorker.cs                   # EXISTS (Pass-A scaffolding): orchestrator loop, claim, heartbeat, LISTEN/NOTIFY
+│   │   │   ├── IngestPhaseDispatcher.cs                   # EXISTS (Pass-A scaffolding): per-phase handler dispatch + cancellation check + retry/dead-letter
+│   │   │   ├── ProvenanceMaterializer.cs                  # CHANGED: fill out terminal-time JSONB assembly per Pass B §"Provenance" below
+│   │   │   ├── IngestJob.cs                               # EXISTS: IngestJobKind constants + IngestJobStatus phase + failure-terminals already in place
+│   │   │   ├── IngestJobConfiguration.cs                  # UNCHANGED
 │   │   │   ├── Phases/
-│   │   │   │   ├── IPhaseHandler.cs                       # NEW
-│   │   │   │   ├── ExtractingAttachmentsHandler.cs        # NEW: split into extraction_tasks; wait-for-terminal; cache-hit path
-│   │   │   │   ├── ComposingHandler.cs                    # NEW: calls existing CompositeMarkdownAssembler
-│   │   │   │   ├── RoutingHandler.cs                      # NEW: calls ILlmClient (NoOpLlmClient in safe mode); writes project_id
-│   │   │   │   ├── ExtractingEntitiesHandler.cs           # NEW: calls ILlmClient; inserts mentions
-│   │   │   │   ├── EmbeddingHandler.cs                    # NEW: calls IEmbeddingClient; writes notes.embedding
-│   │   │   │   └── CancelHandler.cs                       # NEW: deleted_at short-circuit
+│   │   │   │   ├── IPhaseHandler.cs                       # EXISTS (Pass-A scaffolding)
+│   │   │   │   ├── ExtractingAttachmentsHandler.cs        # CHANGED: replace inline-fulfilment short-circuit with extraction_tasks fan-out + wait-for-terminal + cache-hit path
+│   │   │   │   ├── ComposingHandler.cs                    # EXISTS (Pass-A scaffolding): calls existing CompositeMarkdownAssembler
+│   │   │   │   ├── RoutingHandler.cs                      # EXISTS (Pass-A scaffolding): calls ILlmClient (NoOpLlmClient in safe mode); writes project_id
+│   │   │   │   ├── ExtractingEntitiesHandler.cs           # EXISTS (Pass-A scaffolding): calls ILlmClient; inserts mentions
+│   │   │   │   ├── EmbeddingHandler.cs                    # EXISTS (Pass-A scaffolding): calls IEmbeddingClient; writes notes.embedding
+│   │   │   │   └── CancelHandler.cs                       # EXISTS (Pass-A scaffolding): deleted_at short-circuit
 │   │   │   └── Specialists/
 │   │   │       ├── SpecialistWorkerBase.cs                # NEW: abstract claim-loop/heartbeat parameterized by TClient + TargetSidecar
 │   │   │       ├── VlmWorker.cs                           # NEW
@@ -440,11 +339,10 @@ Thany-Marcus/
 │   │   │   ├── IngestSseTranslator.cs                     # NEW: notify-payload → typed SseEvent → serialized
 │   │   │   └── IngestSseEvent.cs                          # NEW: closed event vocabulary record types
 │   │   └── PluginAuth/
-│   │       └── RequirePluginAuthFilter.cs                 # CHANGED: + accept access_token query-string (for EventSource)
+│   │       └── RequirePluginAuthFilter.cs                 # UNCHANGED — header-only bearer auth, no query-string fallback (per DD#14)
 │   └── Infrastructure/
 │       ├── Database/
-│       │   ├── CloudDbContext.cs                          # UNCHANGED (schema-v2 already wired)
-│       │   └── Migrations/0002_drop_legacy_processing.cs  # NEW (small): drop 'processing' from ck_ingest_jobs_status
+│       │   └── CloudDbContext.cs                          # UNCHANGED (schema-v2 already wired; legacy-'processing' cleanup migration `20260518223246_DropLegacyProcessingStatus` already on disk)
 │       └── Sidecars/                                      # NEW directory
 │           ├── IVlmClient.cs
 │           ├── IDoclingClient.cs
@@ -487,7 +385,7 @@ Thany-Marcus/
     │   │   ├── ReprocessEndpointTests.cs                  # NEW
     │   │   └── NoteDeleteEndpointTests.cs                 # NEW
     │   ├── CompositeIngestEndToEndTests.cs                # CHANGED: assertions updated for phase machine + SSE sequence (existing CLOUD-002 test)
-    │   └── CompositeIngestSagaEndToEndTests.cs            # NEW: the full regression anchor (Pass C)
+    │   └── CompositeIngestSagaEndToEndTests.cs            # NEW: the full regression anchor (Pass B)
     └── Infrastructure/
         └── Sidecars/Stubs/
             └── (stub-client tests for each, asserting canned-output stability)
@@ -592,7 +490,7 @@ Fired by `IIngestEventBus`; serialized by `IngestSseTranslator`; written to SSE 
 ## Acceptance criteria
 
 1. ✅ `dotnet build` clean with warnings-as-errors. `dotnet test` green; the CLOUD-002 `CompositeIngestEndToEndTests.cs` (updated to assert phase-machine output) continues to pass.
-2. ✅ `IngestSagaWorker.cs` and `CompositeIngestHandler.cs` deleted; no compile-time references remain. `IngestJobStatus.Processing` constant deleted; the schema migration `0002_drop_legacy_processing.cs` applies cleanly.
+2. ✅ Precondition (already on disk; verify with `grep -rn 'IngestSagaWorker\|CompositeIngestHandler' src tests` returning zero): legacy saga files deleted; `IngestJobStatus.Processing` constant gone; migration `20260518223246_DropLegacyProcessingStatus` applied. **This is no longer a deliverable of this ticket — verification only.**
 3. ✅ `JobOrchestratorWorker` registered as `IHostedService`; orchestrator pool of 3 concurrent slots verified by `JobOrchestratorWorkerTests.cs` claim-contention test.
 4. ✅ Five specialist workers (`VlmWorker`, `DoclingWorker`, `ParakeetWorker`, `UrlFetcherWorker`, `VideoSplitterWorker`) registered with default replica counts from ADR-0042 §1; each verified in `SpecialistWorkerBaseTests.cs` to claim only its own `target_sidecar` rows.
 5. ✅ All six new sidecar interfaces (`IVlmClient`, `IDoclingClient`, `IParakeetClient`, `IUrlFetcherClient`, `IVideoSplitterClient`, `IEmbeddingClient`) exist with stub implementations registered in DI; swapping any stub for a real impl is a one-line `Program.cs` change.
@@ -602,7 +500,7 @@ Fired by `IIngestEventBus`; serialized by `IngestSseTranslator`; written to SSE 
 9. ✅ `DELETE /api/notes/{noteId}` returns 204; sets `notes.deleted_at`; in-flight orchestrator transitions to `dead_lettered` at next phase boundary; SSE emits `note_failed { error: 'user_cancelled' }`.
 10. ✅ `notes.provenance` populated from `ProvenanceMaterializer.Build(...)` at every terminal; includes `extraction_summary`, `phase_events`, `total_ms`, `cache_hits`.
 11. ✅ `/api/sync/pull?include=provenance=true` returns the provenance JSONB inline; default `include=false` matches CLOUD-002 response shape byte-for-byte.
-12. ✅ `CompositeIngestSagaEndToEndTests.cs` (the Pass-C regression anchor) is green: 4-attachment composite → SSE event sequence → /sync/pull with provenance → reprocess (cache hit) → DELETE → second reprocess returns 404.
+12. ✅ `CompositeIngestSagaEndToEndTests.cs` (the Pass-B regression anchor) is green: 4-attachment composite → SSE event sequence → /sync/pull with provenance → reprocess (cache hit) → DELETE → second reprocess returns 404.
 13. ✅ Manual smoke against a freshly-provisioned cloud:
     ```bash
     # 1. Init + upload + finalize (existing CLOUD-002 flow, unchanged)
@@ -614,7 +512,7 @@ Fired by `IIngestEventBus`; serialized by `IngestSseTranslator`; written to SSE 
     # → 202 { noteId, status:"processing" }
 
     # 2. Stream events
-    curl -N "https://<cloud>.thany.click/api/sync/events?access_token=$PLUGIN_TOKEN"
+    curl -N -H "Authorization: Bearer $PLUGIN_TOKEN" "https://<cloud>.thany.click/api/sync/events"
     # → event: note_phase_changed
     #   data: {"noteId":"...","jobId":"...","from":"queued","to":"extracting_attachments"}
     #   ...
@@ -631,14 +529,14 @@ Fired by `IIngestEventBus`; serialized by `IngestSseTranslator`; written to SSE 
       -H "Authorization: Bearer $PLUGIN_TOKEN"
     # → 204
     ```
-14. ✅ No `// TODO` markers in shipped code paths. `// FORK:` markers explicitly named at: each `Stub<Name>Client` (forks to handoffs #4–#6), the `?access_token=` query-string auth (forks to a hardening pass if EventSource gains header support), the `StubEmbeddingClient` returning zeros (forks to CLOUD-EMBEDDING).
-15. ✅ `dotnet ef migrations script` shows the `0002_drop_legacy_processing.cs` migration drops `'processing'` from the check constraint and no other schema changes are touched.
+14. ✅ No `// TODO` markers in shipped code paths. `// FORK:` markers explicitly named at: each `Stub<Name>Client` (forks to handoffs #4–#6), the `StubEmbeddingClient` returning zeros (forks to CLOUD-EMBEDDING). **No FORK marker on SSE auth** — per design-decision #14 the header-on-SSE choice is locked, not provisional.
+15. ✅ `dotnet ef migrations script` shows no new migrations are introduced by this ticket — the schema is already at the post-cleanup shape (`20260518221133_CompositeNoteSchemaV2` + `20260518223246_DropLegacyProcessingStatus` applied).
 
 ## Out of scope (named explicitly)
 
 1. ❌ **Real sidecar HTTP clients.** `OllamaVlmClient`, `DoclingHttpClient`, `ParakeetHttpClient`, `RealUrlFetcherClient` adaptor, `FfmpegVideoSplitterClient` all land in handoffs #4–#6. This ticket only ships stubs.
 2. ❌ **Real Granite Embedding ONNX integration.** `StubEmbeddingClient` returns `float[256]` of zeros. Real ONNX wiring lands in CLOUD-EMBEDDING (handoff #5).
-3. ❌ **Real LLM routing + entity-extraction prompts.** `NoOpLlmClient` is the unconditional Pass-A/B/C LLM. Real prompts land alongside `OllamaVlmClient` (handoff #4 or #5; the LLM ticket may piggy-back on the VLM ticket if MiniCPM-V serves both, per ADR-0043 §"Single model for VLM + routing").
+3. ❌ **Real LLM routing + entity-extraction prompts.** `NoOpLlmClient` is the unconditional LLM in both passes. Real prompts land alongside `OllamaVlmClient` (handoff #4 or #5; the LLM ticket may piggy-back on the VLM ticket if MiniCPM-V serves both, per ADR-0043 §"Single model for VLM + routing").
 4. ❌ **Hub regen.** `kind='hub_regen'` rows are accepted by the orchestrator and routed through the same phase machine, but the trigger logic (entity crosses mention threshold) is implemented when `ExtractingEntitiesHandler` runs real entity dedup — that's the M5 entity ticket (handoff #5 or later). For this ticket, `hub_materialized` SSE events are reserved vocabulary but never fired.
 5. ❌ **Mid-phase cancellation.** Cancellation is checked at phase boundaries only, per ADR-0042 §"Negative / accepted costs". A 45s ASR call cannot be aborted mid-stream.
 6. ❌ **Plugin TS types for new endpoints.** The plugin doesn't exist yet (PLUGIN-001+). Hand-written `ThanyMarcus.Shared/Plugin/*Dto.cs` lands when the plugin needs it; for now the endpoints respond to manual `curl` + the C# test client only.
@@ -653,10 +551,10 @@ Fired by `IIngestEventBus`; serialized by `IngestSseTranslator`; written to SSE 
 
 ## Risks and gotchas
 
-- **The `extracting_attachments` "wait for terminal sub-tasks" loop is the highest-risk piece.** If the orchestrator holds its lease while polling, it monopolizes one of 3 concurrent slots for the full duration of the slowest sub-task — a 45s ASR call ties up 33% of orchestrator capacity. The "release lease, listen for notify, re-claim" pattern fixes this but adds a DB roundtrip per check. **Recommended:** implement the release-and-re-claim pattern from the start, even if it adds a few ms; the alternative scales badly. The Pass-B section's §3 description names this explicitly.
+- **The `extracting_attachments` "wait for terminal sub-tasks" loop is the highest-risk piece.** If the orchestrator holds its lease while polling, it monopolizes one of 3 concurrent slots for the full duration of the slowest sub-task — a 45s ASR call ties up 33% of orchestrator capacity. The "release lease, listen for notify, re-claim" pattern fixes this but adds a DB roundtrip per check. **Recommended:** implement the release-and-re-claim pattern from the start, even if it adds a few ms; the alternative scales badly. Pass A's §3 names this explicitly.
 - **`pg_notify` payload size limit (~8KB).** Notifies carry small payloads (job ids, status strings). If you stuff full event JSON into the notify payload, large `events_log` reads can exceed the limit and Postgres silently truncates. **Recommended:** notify payload = just `<note_id>` (or `<job_id>`); the listener does a second SELECT to fetch the full event row. Trade extra query for safety.
 - **`LISTEN` connection management.** Each SSE connection holds an open `NpgsqlConnection` in LISTEN mode. With 50 concurrent plugin connections, that's 50 long-held connections — Postgres's default `max_connections=100` is tight. **Recommended:** use a dedicated connection pool for LISTEN connections (`NpgsqlConnectionFactory` with a separate pool key) and bump `max_connections` to 200 in the cloud's compose Postgres env (it's a tiny RAM cost).
-- **`access_token` query-string leaks in logs.** nginx and the cloud-api request log will record the full URL including the token. Caddy → nginx swap (already done in `cloud-001-amendment-nginx-handoff.md`) puts the access log on the cloud's host disk; an operator with shell access can read it. **Mitigation:** add a nginx log-format directive that strips `access_token=...` from logged URLs (`map $request_uri $clean_uri { default $request_uri; "~^(.*)access_token=[^&]*(.*)$" "$1access_token=REDACTED$2"; }` then `log_format ... $clean_uri`). Same for the .NET request log (`ILoggerFilter` that scrubs the query string). This is a small follow-up; document the deviation if shipping without it.
+- **Plugin-side SSE client must be `@microsoft/fetch-event-source`, not native `EventSource`.** Per design-decision #14, SSE auth is header-only — native `EventSource` cannot set request headers, so a regression that swaps the client back to native `EventSource` 401s immediately on connect. PLUGIN-* tickets MUST add `@microsoft/fetch-event-source` as a dep and route the SSE connection through it (`fetchEventSource(url, { headers: { Authorization: 'Bearer ' + token }, ... })`). Document the dep choice in the plugin's `package.json` and in `docs/decisions/0049-sse-channel-auth.md`. The cloud-side regression gate is the generic "no `Authorization` header → 401" test on `/api/sync/events`; the cloud deliberately does not recognize *any* URL-borne credential scheme, so a careless plugin-side fallback ("just pass it as a query param if the header API isn't there") cannot accidentally start working.
 - **Concurrent orchestrator + specialist worker writes to the same `attachments` row.** When `ExtractingAttachmentsHandler` re-enters to check "all terminal?" and a specialist worker is mid-UPDATE writing `extracted_text`, optimistic concurrency on `transition_version` will reject one of them. **Resolution:** the orchestrator only READS `extraction_tasks.status` (not `attachments`) for the terminal-check; specialist workers UPDATE `attachments` and `extraction_tasks` in their own transaction. No concurrent writes on the same row.
 - **`pgvector` HNSW build cost on `notes.embedding` UPDATE.** Inserting a new embedding into an HNSW index is O(log n). At thesis scale this is negligible; at 100k+ notes it adds a few ms per insert. Document expectation; not a blocker.
 - **The shared `SagaOwnershipLostException` namespace move (`ThanyMarcus.Portal.SagaWorker.Features.Provisioning` → `ThanyMarcus.Shared.Saga`).** Portal.SagaWorker has two references to this class; updating them is mechanical but easy to miss under warnings-as-errors. Run the portal test suite after the move to confirm.
@@ -681,18 +579,17 @@ Fired by `IIngestEventBus`; serialized by `IngestSseTranslator`; written to SSE 
 
 ## Open contract decisions (carry forward)
 
-1. **`access_token` query-string SSE auth.** Per design-decision #14 — header-on-EventSource (with polyfill) vs query-string (with logging risk). Locked to query-string in MVP; revisit if the plugin's polyfill cost is cheap.
-2. **Provenance schema canonical form.** The "full §22 provenance schema" lands in CLOUD-024; this ticket's `ProvenanceMaterializer` writes a forward-compatible subset. Field renames between this ticket and CLOUD-024 are acceptable (no consumer yet).
-3. **OTel span instrumentation.** Phase-boundary spans + per-specialist-worker spans are the right shape; deferred to a 0.5d follow-up. Track in the M5 demo prep if eval needs them.
-4. **`max_connections` bump in Postgres compose.** Default 100 → 200. The right place to land this is in the schema-v2 ticket's Postgres image bump OR here. Land here as part of `docker-compose.yml` env (`POSTGRES_INITDB_ARGS=-c max_connections=200`) to keep the bump scoped to the LISTEN-connection cost driver.
-5. **Hub regen trigger logic location.** When `extracting_entities` detects an entity crossing the mention threshold, it INSERTs a `hub_regen` job. The threshold value, the "user-created entity auto-creates hub" rule (per F9 of the data-model grilling), and the `is_hub` flag flip all live in `ExtractingEntitiesHandler`. This ticket's no-op LLM means the trigger never fires; verifying it fires correctly is the entity-dedup ticket's problem.
+1. **Provenance schema canonical form.** The "full §22 provenance schema" lands in CLOUD-024; this ticket's `ProvenanceMaterializer` writes a forward-compatible subset. Field renames between this ticket and CLOUD-024 are acceptable (no consumer yet).
+2. **OTel span instrumentation.** Phase-boundary spans + per-specialist-worker spans are the right shape; deferred to a 0.5d follow-up. Track in the M5 demo prep if eval needs them.
+3. **`max_connections` bump in Postgres compose.** Default 100 → 200. The right place to land this is in the schema-v2 ticket's Postgres image bump OR here. Land here as part of `docker-compose.yml` env (`POSTGRES_INITDB_ARGS=-c max_connections=200`) to keep the bump scoped to the LISTEN-connection cost driver.
+4. **Hub regen trigger logic location.** When `extracting_entities` detects an entity crossing the mention threshold, it INSERTs a `hub_regen` job. The threshold value, the "user-created entity auto-creates hub" rule (per F9 of the data-model grilling), and the `is_hub` flag flip all live in `ExtractingEntitiesHandler`. This ticket's no-op LLM means the trigger never fires; verifying it fires correctly is the entity-dedup ticket's problem.
 
 ## What handoffs #4–#6 inherit
 
 After this ticket lands:
 - **Handoff #4** (`CLOUD-VLM-WORKER` + `CLOUD-LLM-INTELLIGENCE`) swaps `StubVlmClient` for `OllamaVlmClient` (calls `http://ollama:11434/api/generate` against MiniCPM-V) and `NoOpLlmClient` for the real LLM client; one DI line change each. No saga changes, no schema changes, no endpoint changes. The regression anchor in `CompositeIngestSagaEndToEndTests.cs` continues to pass with stub assertions; new test files exercise the real models.
 - **Handoff #5** swaps `StubDoclingClient → DoclingHttpClient` and `StubParakeetClient → ParakeetHttpClient`; same shape. Also wires real `IEmbeddingClient` against in-process Granite Embedding 278m ONNX.
-- **Handoff #6** swaps `StubVideoSplitterClient → FfmpegVideoSplitterClient` (uses local ffmpeg to split video into keyframes + audio, then spawns child `extraction_tasks` for each). May also wire real `RealUrlFetcherClient` if Pass-B chose to keep `UrlExtractor` independent.
+- **Handoff #6** swaps `StubVideoSplitterClient → FfmpegVideoSplitterClient` (uses local ffmpeg to split video into keyframes + audio, then spawns child `extraction_tasks` for each). May also wire real `RealUrlFetcherClient` if Pass A chose to keep `UrlExtractor` independent.
 
 The cumulative arc is:
 
@@ -703,7 +600,7 @@ CLOUD-SCHEMA-V2 (handoff #1: migration only)
   ─► CLOUD-VLM-WORKER + CLOUD-LLM-INTELLIGENCE (handoff #4 — stub→real for ollama + LLM)
   ─► CLOUD-DOCLING-WORKER + CLOUD-PARAKEET-WORKER + CLOUD-EMBEDDING (handoff #5 — stub→real for docling + parakeet + Granite)
   ─► CLOUD-VIDEO-SPLITTER + CLOUD-URL-FETCHER-REAL (handoff #6 — stub→real for ffmpeg + URL)
-  ─► [M5 demo: composite capture with URL + image + voice + PDF + video → vault with real extracted content]
+  ─► [M5 demo: composite capture with URL + image + audio + PDF document + video → vault with real extracted content]
   ─► CLOUD-PROJECTS + CLOUD-ENTITY-DEDUP + CLOUD-HUB-REGEN (the LLM-driven knowledge graph)
   ─► [M6 demo: emergent graph from accumulated captures, end-to-end thesis-defensible CPU-only pipeline]
 ```
@@ -723,13 +620,13 @@ The five specialist-worker tickets (`CLOUD-VLM-WORKER`, `CLOUD-DOCLING-WORKER`, 
 - **`docs/decisions/0036-wizard-progress-transport.md`** — SSE translator pattern reused.
 - **`docs/decisions/0045-composite-note-schema.md`** — schema-v2 columns this ticket reads/writes.
 - **`plans/cloud-002-handoff.md`** — baseline saga + ingest endpoints; the `MapIngestEndpoints` + `MapSyncPullEndpoint` shapes stay byte-for-byte.
-- **`plans/cloud-schema-v2-handoff.md`** — schema this ticket consumes; the `0002_drop_legacy_processing.cs` migration ships here as the final cleanup.
+- **`plans/cloud-schema-v2-handoff.md`** — schema this ticket consumes; both schema-v2 migrations (`20260518221133_CompositeNoteSchemaV2` and the legacy-`'processing'` cleanup `20260518223246_DropLegacyProcessingStatus`) are already on disk before this ticket runs.
 - **`plans/cloud-sidecars-handoff.md`** — sidecars this ticket's future siblings will call; `appsettings.json:IngestSaga:Sidecars:*` keys are consumed by stub clients (BaseUrl/HealthPath are ignored; MaxConcurrency is consumed via the worker `Replicas` config).
 - **Memory `composite_ingest_decision.md`** — one composite draft → one processed note (preserved).
 - **Memory `portal_architecture.md`** — Postgres job queue + mutable status + SSE only (applied symmetrically on the cloud side).
 - **Future ADRs** (not in this ticket's scope):
   - **ADR-0048: In-process ingest pipeline runtime topology.**
-  - **ADR-0049: Cloud-side SSE channel auth (`?access_token=` query-string).**
+  - **ADR-0049: Cloud-side SSE channel auth (header-on-SSE via `@microsoft/fetch-event-source`; no query-string fallback).**
 
 ## Definition of done
 

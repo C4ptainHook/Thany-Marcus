@@ -3,6 +3,11 @@
 Date: 2026-05-19
 Status: Draft. First ticket of the ADR-0045 implementation series. **Migration-only.** No endpoints, no workers, no handlers, no saga code, no business logic of any kind.
 
+> **Rebase note 2026-05-19** — this handoff was originally drafted on top of the CLOUD-002 saga (`IngestSagaWorker` + `CompositeIngestHandler`). That saga is already gone in the working tree (replaced by `JobOrchestratorWorker` + `IngestPhaseDispatcher` + the per-phase handlers under `Features/Processing/Phases/`). Two consequences for this brief:
+> 1. The `ck_ingest_jobs_status` check constraint can be authored directly in the ADR-0042 §3 vocabulary — no transitional union with the legacy `'processing'` value is needed. (The on-disk schema-v2 migration shipped with the union for compatibility with an in-flight saga that turned out to be deleted before this ticket ran; the follow-up cleanup migration `20260518223246_DropLegacyProcessingStatus` removed `'processing'` shortly after. A fresh execution of this handoff lands the final shape in one migration.)
+> 2. `notes.SuggestedProject` is dropped outright at the C# level. The `[NotMapped]` keep-alive originally specified to keep `CompositeIngestHandler` compiling is unnecessary — no caller remains. Sections referencing the saga-side knock-on have been removed.
+
+
 **Goal:** land a single EF Core migration that brings the cloud DB from the CLOUD-002 shape ("composite-ingest spine v1") to the ADR-0045 shape ("composite-note schema v2"). Concretely: install the `vector` extension, create three new tables (`entities`, `mentions`, `extraction_tasks`), alter the three existing tables (`notes`, `attachments`, `ingest_jobs`) per ADR-0045 §§5–6 + §"Migration plan", and add every index ADR-0045 names (including the two HNSW indexes for pgvector). After this ticket, every column, FK, constraint, and index needed by CLOUD-003 (extraction-task workers), CLOUD-009/010 (Granite embedding + pgvector helpers), CLOUD-019 (entity dedup), CLOUD-020 (entity hubs), and the M6 routing pipeline exists in the cloud DB schema — but **not a single line of code reads or writes any of the new columns**. The migration plus the matching entity-class + `IEntityTypeConfiguration<T>` scaffolds (the minimum EF needs to round-trip the snapshot) are the entire deliverable.
 
 Estimated **0.5 person-day** with AI-agent assistance. This is intentionally a small, mechanically-checkable ticket: the design work is in ADR-0045; this ticket is the transcription. The reason it ships on its own — instead of bundled with CLOUD-003 — is so the schema can land, be reviewed against ADR-0045 row-by-row, and stop drifting from prose while the consumer tickets are still being scoped.
@@ -37,7 +42,7 @@ Estimated **0.5 person-day** with AI-agent assistance. This is intentionally a s
    - `src/ThanyMarcus.Cloud.Api/Features/Processing/ExtractionTask.cs` + `ExtractionTaskConfiguration.cs` + `static class ExtractionTaskStatus` constants (`Queued`, `Processing`, `Succeeded`, `Failed`, `Skipped`) — **not** living next to `IngestJob.cs` in a sub-namespace; same `Features/Processing/` folder.
    - Extend `src/ThanyMarcus.Cloud.Api/Features/Ingest/Note.cs` with the new properties: `Vector? Embedding`, `Instant? DeletedAt`, `bool IsHub`, `Guid? ProjectId`, `Guid? HubEntityId`, `long TransitionVersion`. **Drop** the existing `string? SuggestedProject` property — it is being replaced by `ProjectId`.
    - Extend `src/ThanyMarcus.Cloud.Api/Features/Ingest/Attachment.cs` with `Guid? ParentAttachmentId`, `string? ExtractionCacheKey`, `string? Url`.
-   - Extend `src/ThanyMarcus.Cloud.Api/Features/Processing/IngestJob.cs` with `string Kind` (defaulting to `IngestJobKind.Capture`), `JsonDocument EventsLog` (initialized to `JsonDocument.Parse("[]")`), `long TransitionVersion`. Add `static class IngestJobKind { Capture, Reprocess, HubRegen }` and **extend** `static class IngestJobStatus` to add the new phase constants from ADR-0042 §3 (six in-flight phase states + five failure terminals). The existing `Queued`, `Processing`, `Succeeded`, `DeadLettered` stay; **`Processing` is removed from the vocabulary in the new check constraint** (replaced by the per-phase states), so callers that wrote `IngestJobStatus.Processing` must be updated to use the appropriate per-phase state — but the only such caller today is `IngestSagaWorker`, and **this ticket does not modify the saga**. The saga rewrite lands in a later ticket; until then the check constraint must continue to allow `'processing'` so the existing worker still runs. See "Status vocabulary" below for the exact resolution.
+   - Extend `src/ThanyMarcus.Cloud.Api/Features/Processing/IngestJob.cs` with `string Kind` (defaulting to `IngestJobKind.Capture`), `JsonDocument EventsLog` (initialized to `JsonDocument.Parse("[]")`), `long TransitionVersion`. Add `static class IngestJobKind { Capture, Reprocess, HubRegen }` and **replace** `static class IngestJobStatus`'s vocabulary with the ADR-0042 §3 set: `Queued`, six in-flight phase states (`ExtractingAttachments`, `Composing`, `Routing`, `ExtractingEntities`, `Embedding`), `Succeeded`, five failure terminals (`FailedExtraction`, `FailedComposition`, `FailedRoute`, `FailedEntities`, `FailedEmbedding`), and `DeadLettered`. The legacy `Processing` constant is gone — see "Status vocabulary" below for the constraint shape.
 
 3. **Register the three new `DbSet<>`s on `CloudDbContext`** (`src/ThanyMarcus.Cloud.Api/Infrastructure/Database/CloudDbContext.cs`). `Entities`, `Mentions`, `ExtractionTasks`. The existing `ApplyConfigurationsFromAssembly(...)` call picks up the new configurations automatically.
 
@@ -58,27 +63,29 @@ Estimated **0.5 person-day** with AI-agent assistance. This is intentionally a s
 
 ### Out of scope (named so they don't sneak in)
 
-- ❌ **Saga rewrites.** `IngestSagaWorker`, `CompositeIngestHandler`, `CompositeMarkdownAssembler` — all stay byte-for-byte the same. Even though the new columns exist, no code reads them yet. The saga is still routing-by-string-and-suggested-project — wait, no — see "Knock-on for the existing saga" below for the one tiny adjustment needed.
+- ❌ **Pipeline-machinery changes.** No worker, handler, dispatcher, or specialist code is touched in this ticket. Even though the new columns exist after this migration, no code reads or writes them yet — that's handoff #3's job. The schema lands cold.
 - ❌ **Endpoints.** No new HTTP route. The existing `/api/ingest/init`, `/api/ingest/{id}/finalize`, `/api/sync/pull` shapes do not change. ADR-0045 §10's `/api/admin/projects/*`, `/api/sync/push`, `/api/sync/events`, `DELETE /api/notes/{id}`, `POST /api/notes/{id}/reprocess` are all later tickets.
 - ❌ **Plugin contract changes.** The Obsidian plugin sees the same JSON shapes from this ticket as it does today. Don't update `ThanyMarcus.Shared` TS types for any of the new columns — they're internal until consumers ship.
 - ❌ **Granite embedding model / ONNX integration.** ADR-0043's Granite Embedding 278m R2 lands in CLOUD-009. The `vector(256)` column is created here; nothing writes to it until then.
 - ❌ **pgvector helper methods on `CloudDbContext` / repos.** Top-K cosine queries land in CLOUD-010.
 - ❌ **Backfill or data migration.** `notes.suggested_project` is dropped; any non-null value is lost. **Acceptable** because no production cloud has yet been provisioned beyond smoke instances (per the cloud-pivot rollout state on 2026-05-19); smoke instances are wiped between runs. If a long-lived dev cloud exists with real data, drop the DB and re-migrate — explicitly documented in the migration's `Down` (which does **not** preserve `suggested_project` data either).
-- ❌ **`notes.llm_mode` check-constraint update.** ADR-0045 §1 implies an `llm_mode` value space of `'safe' | 'unsafe'`; the current constraint allows `'safe' | 'unsafe_anthropic' | 'unsafe_openai'`. Reconciling these is part of the LLM-tier ticket (CLOUD-008 / later) that decides what the API actually returns. Leave the current constraint alone in this ticket.
+- ❌ **`notes.llm_mode` check-constraint update — FOOTGUN, READ BEFORE TOUCHING.** ADR-0045 §1 locks the value space at `'safe' | 'unsafe'`; the current DB constraint still allows `'safe' | 'unsafe_anthropic' | 'unsafe_openai'`. That mismatch is **known debt**, deferred to CLOUD-008, and must not be papered over by handoffs #3–#6:
+   - **Mode is cloud-level, not per-note.** CLOUD-008 settles `llm_mode` as a `cloud_settings` column. The `notes.llm_mode` column becomes either (a) an audit denormalization of the cloud's mode at ingest time, or (b) dropped entirely. Handoffs that write `notes.llm_mode` should copy from `cloud_settings.llm_mode`, never invent a value.
+   - **Provider identity is NOT a mode value.** Anthropic / OpenAI / Google / custom are `cloud_settings` config (provider enum + base_url + encrypted api_key + model), orthogonal to `llm_mode`. Do not reintroduce `unsafe_<provider>` flavors anywhere — that's the drift this footnote exists to prevent.
+   - **Primary path is `safe` + on-cloud model.** Handoff #3 (`cloud-ingest-saga-foundation`) only exercises `llm_mode='safe'` via `NoOpLlmClient`. The `unsafe` flow (third-party provider key, portal-side config UI, endpoint probe on save) is CLOUD-008+ work and stays unbuilt until then.
+   - **No `'unsafe_anthropic' | 'unsafe_openai'` value is ever written by new code.** The legacy enum values exist only because the constraint hasn't been migrated yet. If a code path tempts you to write one of them, that's the signal you're solving CLOUD-008 in the wrong ticket — stop.
+   
+   Leave the current three-value constraint alone in this ticket; CLOUD-008 collapses it to two and reshapes `cloud_settings` in the same migration.
 - ❌ **`cloud_settings` changes.** No new columns. The single-row table stays as-is.
 - ❌ **Hub note materialization, project auto-creation, mention threshold logic.** All deferred to consumer tickets per ADR-0045 §5 keys "behavior" — none of that code runs in this ticket.
 - ❌ **Provenance schema enforcement.** `notes.provenance` is already `jsonb nullable` and stays that way; ADR-0042 §10c run-history schema is consumer-side concern.
 
 ### Status vocabulary — exact resolution
 
-The collision between today's `ingest_jobs.status` check constraint (`'queued','processing','succeeded','dead_lettered'`) and ADR-0042 §3's full phase vocabulary is the one knot in this ticket. Resolution:
-
-**Replace the existing check constraint** with the union of *both* old and new vocabularies, so the existing saga keeps running with `'processing'` and the new schema simultaneously supports the per-phase states for the rewrite-saga ticket to come:
+The pre-existing `ingest_jobs.status` check constraint (`'queued','processing','succeeded','dead_lettered'`) is dropped and replaced with the ADR-0042 §3 phase vocabulary directly. No transitional union: no caller emits `'processing'` (the legacy saga that did is gone).
 
 ```
 check (status in (
-    -- legacy (pre-phase-rewrite saga; CLOUD-002 vintage)
-    'processing',
     -- ADR-0042 §3 phase states
     'queued',
     'extracting_attachments',
@@ -97,9 +104,9 @@ check (status in (
 ))
 ```
 
-The migration `DropCheckConstraint("ck_ingest_jobs_status")` then `AddCheckConstraint` with the union. Both work in EF Core's `MigrationBuilder`. **Note** that the legacy `'processing'` value is a transitional convenience; the saga-rewrite ticket removes it from the constraint and converts any in-flight rows. Adding a TODO at the top of `IngestJobStatus` (`// 'processing' is legacy CLOUD-002; saga-rewrite ticket removes it`) is the rare "non-obvious why" comment allowed by `feedback_no_code_comments`. Otherwise no comments.
+The migration `DropCheckConstraint("ck_ingest_jobs_status")` then `AddCheckConstraint` with the new shape. Both work in EF Core's `MigrationBuilder`.
 
-The new partial-unique index `ix_ingest_jobs_active_per_note` filters on **terminal-state list** = `('succeeded', 'failed_extraction', 'failed_composition', 'failed_route', 'failed_entities', 'failed_embedding', 'dead_lettered')`. `'processing'` is **not** terminal (it's the legacy in-flight state); it gets included in the "active" set so that today's saga continues to enforce "one active job per note" exactly as before.
+The new partial-unique index `ix_ingest_jobs_active_per_note` filters on **terminal-state list** = `('succeeded', 'failed_extraction', 'failed_composition', 'failed_route', 'failed_entities', 'failed_embedding', 'dead_lettered')`. Any non-terminal status enforces "one active job per note":
 
 ```csharp
 migrationBuilder.CreateIndex(
@@ -111,18 +118,7 @@ migrationBuilder.CreateIndex(
             "'failed_route','failed_entities','failed_embedding','dead_lettered')");
 ```
 
-Existing index `ix_ingest_jobs_queued_scheduled_at` (filter `status = 'queued'`) stays untouched. The new `ix_extraction_tasks_claim` per ADR-0045 §4 indexes `(target_sidecar, status, scheduled_at) WHERE status IN ('queued','processing')`.
-
-### Knock-on for the existing saga (the one tiny adjustment)
-
-`Features/Ingest/Note.cs` currently exposes `SuggestedProject : string?` which is read by `CompositeIngestHandler` (`Features/Processing/CompositeIngestHandler.cs`) when computing `relative_path`. Dropping the column without updating that reference will fail the build under warnings-as-errors. Resolution:
-
-- Keep `SuggestedProject` as a **mapped-to-nothing** transient C# property (no DB column) for the duration of this ticket — i.e., `[NotMapped] public string? SuggestedProject { get; set; }` so the saga compiles. The value is computed at write time and used to compute `RelativePath`; it never round-trips through the DB after this ticket. The mapping-replacement (read from `Note.ProjectId` → join `Entity.CanonicalName` → fold into `RelativePath`) is the M6-routing ticket's job.
-- Alternative: temporarily map `SuggestedProject` to a **new, separate** transient column. **Don't** do this — it adds DB surface area for no benefit and creates a second drop migration later.
-
-If `[NotMapped]` feels wrong, the cleaner option is to leave `SuggestedProject` as a plain in-memory C# property without an EF mapping at all (don't list it in `EntityConfiguration`); EF auto-ignores untracked properties. Pick whichever is more idiomatic in the existing codebase — both work, neither is load-bearing.
-
-This is the entire saga-side change. No handler logic moves; no route logic moves; no LLM prompt moves.
+Existing index `ix_ingest_jobs_queued_scheduled_at` (filter `status = 'queued'`) stays untouched. The new `ix_extraction_tasks_claim` per ADR-0045 §4 indexes `(target_sidecar, status, scheduled_at) WHERE status IN ('queued','processing')` — note this `'processing'` is the **`extraction_tasks`** status (per ADR-0042 §3's 5-value vocabulary `queued | processing | succeeded | failed | skipped`), not the obsolete `ingest_jobs` value.
 
 ### pgvector C# type — the one library decision
 
@@ -157,7 +153,7 @@ Thany-Marcus/
 │   │       └── CloudDbContextModelSnapshot.cs              # CHANGED: EF-regenerated
 │   ├── Features/
 │   │   ├── Ingest/
-│   │   │   ├── Note.cs                                     # CHANGED: + Embedding, + DeletedAt, + IsHub, + ProjectId, + HubEntityId, + TransitionVersion; - SuggestedProject as DB column (kept as [NotMapped] transient or just unmapped)
+│   │   │   ├── Note.cs                                     # CHANGED: + Embedding, + DeletedAt, + IsHub, + ProjectId, + HubEntityId, + TransitionVersion; - SuggestedProject (dropped outright; no remaining caller)
 │   │   │   ├── NoteConfiguration.cs                        # CHANGED: + property mappings, + 4 new indexes (client_note_id-partial, embedding-HNSW-via-Sql, updated_at-partial, project, hub_entity-partial), - SuggestedProject mapping
 │   │   │   ├── Attachment.cs                               # CHANGED: + ParentAttachmentId, + ExtractionCacheKey, + Url
 │   │   │   └── AttachmentConfiguration.cs                  # CHANGED: + new column mappings, + ix_attachments_parent, + ix_attachments_cache (sha256+cache_key, filtered)
@@ -168,7 +164,7 @@ Thany-Marcus/
 │   │   │   └── MentionConfiguration.cs                     # NEW
 │   │   └── Processing/
 │   │       ├── IngestJob.cs                                # CHANGED: + Kind, + EventsLog, + TransitionVersion; IngestJobStatus extended with phase + failure-terminal constants; IngestJobKind constants added
-│   │       ├── IngestJobConfiguration.cs                   # CHANGED: drop+re-add ck_ingest_jobs_status with union vocab; + ck_ingest_jobs_kind; + ix_ingest_jobs_active_per_note
+│   │       ├── IngestJobConfiguration.cs                   # CHANGED: drop+re-add ck_ingest_jobs_status with ADR-0042 §3 vocab; + ck_ingest_jobs_kind; + ix_ingest_jobs_active_per_note
 │   │       ├── ExtractionTask.cs                           # NEW: ADR-0045 §4 columns; ExtractionTaskStatus + ExtractionTaskSidecar constants
 │   │       └── ExtractionTaskConfiguration.cs              # NEW
 │   └── (no other files touched)
@@ -323,6 +319,8 @@ Existing indexes (`ix_attachments_note_id`, `ix_attachments_note_id_client_attac
 
 **Data preservation** — `extra->>'url'` is **not** backfilled into the new `url` column in this migration. The consumer ticket (URL extractor work) can either backfill at read time or do a one-off SQL update later; thesis-scale data volume + smoke-only existing rows make this safe to defer.
 
+**Known gap (not in this ticket)** — the `attachments.kind` constants still ship as `voice` (inherited from CLOUD-002), but ADR-0045 §2 (amended 2026-05-19) names the kind `audio`. The rename + CHECK constraint update land in the **processors-light** handoff as a prerequisite step; see `plans/cloud-processors-light-handoff.md` §"Prerequisite: voice → audio rename". The kind vocab stays at four (`url|image|audio|file`); documents and videos are dispatched within `kind=file` via mime + `target_sidecar`.
+
 ### 6. ALTER: `ingest_jobs` (ADR-0042 §3 + ADR-0045)
 
 Column adds:
@@ -337,7 +335,7 @@ Constraint changes:
 
 ```
 - ck_ingest_jobs_status (drop)
-+ ck_ingest_jobs_status (recreate with union vocab — see "Status vocabulary" above)
++ ck_ingest_jobs_status (recreate with ADR-0042 §3 vocab — see "Status vocabulary" above)
 + ck_ingest_jobs_kind   (new)
 ```
 
@@ -368,13 +366,13 @@ migrationBuilder.Sql("DROP EXTENSION IF EXISTS vector;");
 2. ✅ `dotnet ef migrations script <prev> <new> --project src/ThanyMarcus.Cloud.Api` produces a SQL script that:
    - Begins with `CREATE EXTENSION IF NOT EXISTS vector;`
    - Contains exactly two `USING hnsw` index creations.
-   - Contains the union check constraint on `ingest_jobs.status` with all 13 values from "Status vocabulary".
+   - Contains the ADR-0042 §3 check constraint on `ingest_jobs.status` with all 13 phase + terminal values from "Status vocabulary" (no legacy `'processing'`).
    - Contains `DROP COLUMN suggested_project`.
 3. ✅ `dotnet build` is green under `Directory.Build.props` warnings-as-errors.
 4. ✅ `tests/ThanyMarcus.Cloud.Tests/Infrastructure/SchemaV2MigrationTests.cs` passes, asserting the seven checks under "In scope" point 6.
 5. ✅ The existing `Cloud.Tests` suite continues to pass after the fixture image bump (the existing CLOUD-002 tests don't read any new columns).
 6. ✅ The model snapshot `CloudDbContextModelSnapshot.cs` is checked in; `dotnet ef migrations add Noop --no-build` produces an empty migration (proves snapshot == DbContext).
-7. ✅ `CompositeIngestHandler` still compiles and its tests still pass (the `[NotMapped] SuggestedProject` keep-alive is the only saga-side change in this ticket).
+7. ✅ No source file under `Features/Processing/` or `Features/Ingest/` is touched by this ticket beyond `Note.cs` / `Attachment.cs` / `IngestJob.cs` / their `*Configuration.cs` files. Specifically: no handler logic, worker code, or dispatcher code changes shape.
 
 ## Risks and gotchas
 
@@ -389,11 +387,10 @@ migrationBuilder.Sql("DROP EXTENSION IF EXISTS vector;");
 ## Cross-references and follow-ups (NOT in this ticket)
 
 - **CLOUD-003 (extraction-task workers)** — consumes `extraction_tasks` and the new `attachments` columns (`parent_attachment_id`, `extraction_cache_key`).
-- **CLOUD-008 (LLM tier rework)** — reconciles `notes.llm_mode` vocabulary (`'safe'|'unsafe'` per ADR-0045 vs today's three-value enum). May land sooner than CLOUD-003 if priorities shift.
+- **CLOUD-008 (LLM tier rework)** — reconciles `notes.llm_mode` vocabulary (`'safe'|'unsafe'` per ADR-0045 vs today's three-value enum) AND moves mode to a cloud-level setting. Concretely: (a) drop or audit-denormalize `notes.llm_mode`; (b) add `cloud_settings.llm_mode` ('safe'|'unsafe'), `llm_provider` ('openai'|'google'|'anthropic'|'custom'), `llm_base_url`, `llm_model`, `llm_api_key_encrypted` (DEK-encrypted, step-up unlock to write); (c) build the `safe` / on-cloud-model path first — the `unsafe` provider-key UI in the portal is deferred within CLOUD-008 itself. May land sooner than CLOUD-003 if priorities shift.
 - **CLOUD-009 + CLOUD-010 (Granite ONNX + pgvector helpers)** — first consumers of the new `vector(256)` columns and HNSW indexes.
 - **CLOUD-017 / CLOUD-019 / CLOUD-020 (routing + entity dedup + hub regen)** — first consumers of `entities` + `mentions` + `notes.project_id` + `notes.is_hub`.
-- **Saga rewrite (no ticket ID yet)** — moves `ingest_jobs.status` from legacy `'processing'` to per-phase states; converts in-flight rows; drops `'processing'` from the check constraint.
-- **`Note.SuggestedProject` removal** — once routing reads `notes.project_id`, the `[NotMapped]` transient property gets deleted entirely.
+- **Saga foundation (handoff #3, `cloud-ingest-saga-foundation-handoff.md`)** — lands `JobOrchestratorWorker`, the per-phase handlers, the specialist worker pool, the SSE bus, and the reprocess/cancel endpoints on top of this schema.
 
 ## What "done" looks like
 

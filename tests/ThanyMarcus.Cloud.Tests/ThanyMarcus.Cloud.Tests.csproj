@@ -24,6 +24,7 @@
     <PackageReference Include="NodaTime" />
     <PackageReference Include="NodaTime.Testing" />
     <PackageReference Include="WireMock.Net" />
+    <PackageReference Include="SixLabors.ImageSharp" />
   </ItemGroup>
 
   <ItemGroup>

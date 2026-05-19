@@ -3,7 +3,7 @@
 Date: 2026-05-19
 Status: Draft. Handoff #6 of the ADR-0042 implementation series. **Replaces the CLOUD-002-vintage `CompositeMarkdownAssembler` with a structured per-kind composer** and lands the `compose-v1` template version as a first-class artifact on `notes` + provenance. The orchestrator's `ComposingHandler` from `cloud-ingest-saga-foundation-handoff.md` (handoff #3) currently calls the legacy assembler with `enrichment=null` — that call site is rewritten here, but the phase machine, lease, retry, SSE, and cancellation logic are not touched. Real LLM phases (`routing`, `extracting_entities`) continue to pass through with `NoOpLlmClient`; the route from `composing → routing → extracting_entities → embedding` runs end-to-end against the new body output but with no project routing and no entity mentions. **LLM phases land in handoff #7.**
 
-**Goal:** replace `CompositeMarkdownAssembler.Assemble(note, attachments, enrichment, llmMode)` with a `CompositeNoteComposer` that dispatches per attachment kind to one of six renderers (`UrlRenderer`, `ImageRenderer`, `AudioRenderer`, `DocumentRenderer`, `VideoRenderer`, `FailedHiddenRenderer`), assembles YAML frontmatter from `notes` + the resolved attachment kinds, stitches per-kind blocks into a deterministic Markdown body under the `## System Output` heading, writes `notes.body_output`, and stamps `compose-v1` into both the frontmatter and the job's provenance summary. After this ticket: a composite-ingest run produces a vault-ready Markdown file whose shape is locked under a versioned template, the renderers consume only `attachments.extracted_text` + `attachments.extra` + `attachments.kind` + `attachments.parent_attachment_id` (so the composer is oblivious to which extractor produced the text), failed extractions are hidden behind HTML comment markers (no error noise in the rendered note), and the `compose_template` field on `notes` lets future template bumps trigger plugin-side regen prompts without touching the saga.
+**Goal:** replace `CompositeMarkdownAssembler.Assemble(note, attachments, enrichment, llmMode)` with a `CompositeNoteComposer` that dispatches per `(attachment kind, mime_type)` to one of six renderers (`UrlRenderer`, `ImageRenderer`, `AudioRenderer`, `DocumentRenderer`, `VideoRenderer`, `FailedHiddenRenderer`). Dispatch is predicate-based because the four-kind vocab (per ADR-0045 §2, amended 2026-05-19) groups documents and videos under `kind=file` — the Document/Video renderers select on `(kind=file, mime=…)`, assembles YAML frontmatter from `notes` + the resolved attachment kinds, stitches per-kind blocks into a deterministic Markdown body under the `## System Output` heading, writes `notes.body_output`, and stamps `compose-v1` into both the frontmatter and the job's provenance summary. After this ticket: a composite-ingest run produces a vault-ready Markdown file whose shape is locked under a versioned template, the renderers consume only `attachments.extracted_text` + `attachments.extra` + `attachments.kind` + `attachments.parent_attachment_id` (so the composer is oblivious to which extractor produced the text), failed extractions are hidden behind HTML comment markers (no error noise in the rendered note), and the `compose_template` field on `notes` lets future template bumps trigger plugin-side regen prompts without touching the saga.
 
 Estimated **1.5–2 person-days** with AI-agent assistance, split into two passes. Pass A (~1d) lands the six renderers + frontmatter builder + composer + DI swap inside `ComposingHandler`. Pass B (~0.5–1d) wires `compose-v1` versioning into provenance + frontmatter, lands the `failed-hidden` marker semantics, and updates the Pass-C regression anchor from handoff #3 to assert the new body shape. Estimate is rough — it compresses to 1.25d if YamlDotNet is already a transitive dep (likely; SmartReader doesn't pull it but Caddy config tooling may); it stretches to 2d if video-children rendering (keyframe block + audio block under a parent video) surfaces edge cases the surrounding handoffs didn't anticipate.
 
@@ -17,7 +17,7 @@ This handoff **does not** ship: real LLM client wiring (handoff #7); any change 
 - **`docs/decisions/0020-server-push-sse.md`** — **not directly applied** (no new SSE events) but the `note_phase_changed(composing → routing)` event continues to fire after the composer writes `body_output`. The composer should write `body_output` BEFORE the phase transition (handoff #3's `ComposingHandler` already does this; the new composer slots into the same call site).
 - **`docs/decisions/0028-schema-conventions.md`** — `Instant` timestamps via NodaTime; the frontmatter `captured_at` field must serialize as ISO-8601 with `Z` suffix (no offset; the cloud's writer normalizes all timestamps to UTC). Use `Instant.ToString("uuuu-MM-ddTHH:mm:ss.fff'Z'", CultureInfo.InvariantCulture)` to match the portal's existing pattern.
 - **`docs/decisions/0023-test-stack.md`** — xUnit v3 + Shouldly + Testcontainers. The composer is pure (no DB writes inside the renderer code path; only `ComposingHandler` writes `notes.body_output`), so renderer-level tests don't need Testcontainers — plain xUnit theories with seeded `Attachment` records suffice. Only `CompositeNoteComposerTests` (the integration test for the composer-against-the-DB call) needs the Postgres fixture.
-- **`plans/cloud-schema-v2-handoff.md`** — schema this ticket reads. `notes.relative_path` defaults to `Inbox/{noteId}.md` from handoff #3's `ComposingHandler` and stays that way until handoff #7's router writes project paths. `attachments.kind` is a constants-class string (`AttachmentKind.Url`, `Image`, `Voice`, `Video`, `File`) — the composer's dispatch keys off this exact string set.
+- **`plans/cloud-schema-v2-handoff.md`** + **`plans/cloud-processors-light-handoff.md`** §"Prerequisite" — schema + kind constants this ticket reads. `notes.relative_path` defaults to `Inbox/{noteId}.md` from handoff #3's `ComposingHandler` and stays that way until handoff #7's router writes project paths. `attachments.kind` is a constants-class string from the four-kind vocab (`AttachmentKind.Url`, `Image`, `Audio`, `File`); the composer's dispatch keys off `(Kind, MimeType)` because `kind=file` covers documents (PDF/DOCX/…), videos (mime=video/*), and store-only opaque uploads — three different render styles share one kind.
 - **`plans/cloud-ingest-saga-foundation-handoff.md`** — the framework this ticket modifies. **Only `ComposingHandler.cs` is touched.** The orchestrator, dispatcher, retry/lease/heartbeat, SSE bus, reprocess/cancel endpoints, provenance materializer (for everything except the `compose_template` field) all stay byte-for-byte. The handler's contract — "called with the locked job + note + attachments; transitions to `routing` on success; throws on failure for retry budget" — is preserved.
 - **`plans/cloud-processors-light-handoff.md`** — handoff #4 fixes the canonical input shape for image + URL attachments (the composer's renderers read this shape). The `extra` JSONB blob's `from_cache`, `phash`, `dimensions`, `exif`, `model_response` keys are populated by VLM/URL/Docling/Parakeet; the composer **does not consume** any of these for the rendered body, but the frontmatter assembly does consume `attachments.url` on URL kind for the `## Source` line.
 - **`plans/cloud-processors-heavy-handoff.md`** — handoff #5 nails down the video parent + child attachment shape. The parent video attachment carries `extracted_text=null` and `extraction_status='extracted'` (the splitter "succeeds" by fan-out; there's nothing to extract from the parent bytes directly). The children are `kind='image'` (keyframes) and `kind='voice'` (audio track), each with `parent_attachment_id = <video id>` and their own `extracted_text` from `VlmWorker` and `ParakeetWorker`. **The composer renders top-level attachments and groups children under their parent's block** — the SQL filter is `parent_attachment_id IS NULL` for the top-level iteration, then a second query (or in-memory grouping) pulls children per parent.
@@ -34,29 +34,32 @@ Recorded here so the next reader does not re-litigate them.
 
 2. **`compose-v1` is a code-level constant.** `public const string ComposeTemplateVersion = "compose-v1";` lives at `Features/Processing/Composing/CompositeNoteComposer.cs`. Bumping to `compose-v2` is a single source-code change; old notes carry `compose_template: compose-v1` in frontmatter and the saga's reprocess path re-composes them under the new template (because `ComposingHandler` always runs against current code). **No DB-side enumeration of valid versions** — the field is a free-form string in frontmatter + provenance. The plugin can warn the user "your note was composed under compose-v1; current is compose-v2; reprocess to update?" using a simple string compare.
 
-3. **Six renderers, one interface, dispatch via dictionary.**
+3. **Six renderers, one interface, predicate-based dispatch.**
    ```csharp
-   public interface IKindRenderer
+   public interface IAttachmentRenderer
    {
-       string Kind { get; }
+       bool Matches(Attachment attachment);
        string Render(Attachment attachment, IReadOnlyList<Attachment> children, IRenderContext ctx);
    }
    ```
-   Implementations:
-   - `UrlRenderer` (kind `url`)
-   - `ImageRenderer` (kind `image`)
-   - `AudioRenderer` (kind `voice`)
-   - `VideoRenderer` (kind `video`)
-   - `DocumentRenderer` (kind `file`)
-   - `FailedHiddenRenderer` (special — selected when `attachment.extraction_status == "failed"` regardless of kind)
+   Implementations (each implements `bool Matches(Attachment att)` and `Render(...)`):
+   - `UrlRenderer` — matches `kind == "url"`
+   - `ImageRenderer` — matches `kind == "image"`
+   - `AudioRenderer` — matches `kind == "audio"`
+   - `VideoRenderer` — matches `kind == "file" && mime starts with "video/"`
+   - `DocumentRenderer` — matches `kind == "file" && mime in document set (application/pdf, application/{vnd.openxmlformats-...,vnd.ms-...,vnd.oasis.opendocument...,zip,msword})`
+   - `FailedHiddenRenderer` — special — selected when `extraction_status == "failed"` OR `(extraction_status == "skipped" AND extracted_text IS NULL)`, regardless of kind/mime
    
    The composer's dispatch:
    ```csharp
-   if (att.ExtractionStatus == AttachmentExtractionStatus.Failed)
-       return _renderers["failed"].Render(att, [], ctx);
-   return _renderers[att.Kind].Render(att, childrenByParent[att.Id], ctx);
+   if (att.ExtractionStatus == AttachmentExtractionStatus.Failed
+       || (att.ExtractionStatus == AttachmentExtractionStatus.Skipped && att.ExtractedText is null))
+       return _failedRenderer.Render(att, [], ctx);
+   var renderer = _renderers.FirstOrDefault(r => r.Matches(att))
+       ?? throw new InvalidOperationException($"No renderer matches kind={att.Kind} mime={att.MimeType}");
+   return renderer.Render(att, childrenByParent[att.Id], ctx);
    ```
-   `_renderers` is an `IReadOnlyDictionary<string, IKindRenderer>` populated by DI from the registered `IKindRenderer` set, keyed on `Kind`. **The `FailedHiddenRenderer` registers under the synthetic key `"failed"`** — it never appears in `attachments.kind`; the dispatch table reserves it explicitly. Mis-registration (two renderers with the same `Kind`) throws at DI build time, not at runtime.
+   `_renderers` is an ordered `IReadOnlyList<IAttachmentRenderer>` populated by DI from the registered set; ordering matters because `VideoRenderer.Matches` and `DocumentRenderer.Matches` both gate on `kind=file` and are mutually exclusive on mime — the registration order in `Program.cs` documents the precedence. `_failedRenderer` is injected separately (it's not in the predicate list because failure preempts kind dispatch). **Unhandled `kind=file` with unknown mime** throws at compose time; the saga has no path that produces such a row today (BinaryRerouteMap rejects unknown mimes upstream; plugin uploads carry mime), so the exception flags a genuine bug rather than a legitimate edge case.
 
 4. **`failed-hidden` semantics.** A failed extraction renders as a single HTML comment marker, nothing else:
    ```markdown
@@ -163,7 +166,7 @@ Recorded here so the next reader does not re-litigate them.
 
 14. **Routing + extracting_entities + embedding phases stay unchanged.** Their handlers from handoff #3 continue to run with `NoOpLlmClient` + `StubEmbeddingClient`. The composer writes `body_output`; routing reads `body_output` to decide project (always returns null in stub mode); extracting_entities reads `body_output` to find mentions (always empty); embedding reads `body_output` to embed (zero vector). **None of these handlers reach into the per-attachment renderers.** They read the final assembled string. This is the seam the LLM phases in handoff #7 inherit.
 
-15. **DI registration shape.** Each renderer is registered as `services.AddSingleton<IKindRenderer, UrlRenderer>()` etc. The composer takes `IEnumerable<IKindRenderer>` in its constructor and builds the dispatch dictionary itself, throwing on duplicates. The `FailedHiddenRenderer` registers separately under the same interface; its `Kind` property returns the synthetic `"failed"` value. **Test convenience:** registering a fake renderer in tests overrides via `services.RemoveAll<IKindRenderer>()` + `services.AddSingleton<IKindRenderer, FakeUrlRenderer>()` — tests can swap individual renderers without rebuilding the whole stack.
+15. **DI registration shape.** The five non-failure renderers register as `services.AddSingleton<IAttachmentRenderer, UrlRenderer>()` etc.; the composer takes `IEnumerable<IAttachmentRenderer>` and stores them as an ordered list. The `FailedHiddenRenderer` registers as itself (`services.AddSingleton<FailedHiddenRenderer>()`) and is injected separately into the composer — failure preempts kind dispatch, so it's not in the predicate sweep. **Test convenience:** registering a fake renderer in tests overrides via `services.RemoveAll<IAttachmentRenderer>()` + `services.AddSingleton<IAttachmentRenderer, FakeUrlRenderer>()` — tests can swap individual renderers without rebuilding the whole stack.
 
 16. **Empty composite note.** A note with zero attachments (technically supported by the schema but not by the plugin yet) renders:
     ```markdown
@@ -191,12 +194,12 @@ Two passes, totaling ~1.5–2 days. The split is "lay the structure" then "versi
 
 The composer + renderers are all new code under `Features/Processing/Composing/`. `CompositeMarkdownAssembler.cs` is **deleted** (legacy CLOUD-002 file). `ComposingHandler` keeps its existing call-site shape but invokes the new composer.
 
-**1. `IKindRenderer` interface + the six implementations.** Each at `Features/Processing/Composing/Renderers/<Name>Renderer.cs`:
-   - `IKindRenderer.cs` — the interface (see §3 above).
+**1. `IAttachmentRenderer` interface + the six implementations.** Each at `Features/Processing/Composing/Renderers/<Name>Renderer.cs`. Interface renamed from `IAttachmentRenderer` because dispatch is now `(kind, mime)`-predicate-based, not keyed by kind alone:
+   - `IAttachmentRenderer.cs` — the interface (see §3 above). Two members: `bool Matches(Attachment att)` and `Render(...)`.
    - `UrlRenderer.cs` — reads `extracted_text` + `extra.title` + `extra.canonical_url` + `attachments.url`; emits `### Source: <title>\n\n<url-line>\n\n<markdown>\n`.
    - `ImageRenderer.cs` — reads `extracted_text` + `attachments.storage_key`; mints presigned URL via `IArtifactStore`; emits `### Image\n\n![](<presigned-url>)\n\n<extracted-text>\n`. Wraps the presign call in try/catch; on failure emits `### Image\n\n[image: <storage-key>]\n\n<extracted-text>\n` + structured warn log.
    - `AudioRenderer.cs` — reads `extracted_text` + `attachments.original_filename` + `attachments.storage_key`; emits `### Voice memo[: <filename>]\n\n[audio: <filename-or-key>]\n\n<extracted-text>\n`.
-   - `VideoRenderer.cs` — reads parent + children list; emits the heading + `[video: ...]` reference + optional `**Audio:**` block (from the single voice child) + optional `**Keyframes:**` numbered list (each item is the keyframe child's `extracted_text` or its failed-hidden marker). Children are passed in via the `IRenderContext` parameter; the renderer does not re-query the DB.
+   - `VideoRenderer.cs` — reads parent + children list; emits the heading + `[video: ...]` reference + optional `**Audio:**` block (from the single `kind=audio` child) + optional `**Keyframes:**` numbered list (each item is the keyframe child's `extracted_text` or its failed-hidden marker). Children are passed in via the `IRenderContext` parameter; the renderer does not re-query the DB.
    - `DocumentRenderer.cs` — reads `extracted_text` + `attachments.original_filename`; emits `### Document: <filename>\n\n[document: <filename>]\n\n<extracted-text>\n`.
    - `FailedHiddenRenderer.cs` — reads `attachments.id` + `attachments.kind` + `attachments.extraction_status` + `attachments.extraction_error`; emits `<!-- thany-marcus:attachment id=<id> kind=<kind> status=<status> reason=<error-or-"unknown"> -->\n`. The `<reason>` value is `Regex.Replace(att.ExtractionError ?? "unknown", @"[\r\n-]+", " ").Trim()` — strips newlines and dashes so the comment stays on one line and can't be mistaken for an HTML comment closer.
 
@@ -213,7 +216,7 @@ The composer + renderers are all new code under `Features/Processing/Composing/`
 **3. `CompositeNoteComposer.cs`:**
    ```csharp
    public sealed class CompositeNoteComposer(
-       IEnumerable<IKindRenderer> renderers,
+       IEnumerable<IAttachmentRenderer> renderers,
        IArtifactStore artifactStore,
        ILogger<CompositeNoteComposer> logger)
    {
@@ -232,7 +235,7 @@ The composer + renderers are all new code under `Features/Processing/Composing/`
 
    public sealed record ComposedNote(string Frontmatter, string Body, string ComposeTemplateVersion);
    ```
-   The composer's constructor validates the renderer dictionary (no duplicate `Kind` keys; `"failed"` key exists; each first-class kind from `AttachmentKind` constants has a renderer registered). Throws `InvalidOperationException` at construction if the invariants don't hold; the host fails to start. **This is the right place** — catching it at DI registration time is too early (renderers register before composers); at request time is too late.
+   The composer's constructor validates the renderer set against a fixture of synthetic attachments — one per `(kind, mime)` combination the saga can actually produce (kind=url; kind=image; kind=audio; kind=file+pdf; kind=file+docx; kind=file+video/mp4). Every fixture row must be matched by exactly one renderer; missing coverage or ambiguous matches throw `InvalidOperationException` at construction so the host fails to start. The `FailedHiddenRenderer` is injected separately and not part of the predicate sweep. **This is the right place** — catching it at DI registration time is too early (renderers register before composers); at request time is too late.
 
 **4. `FrontmatterBuilder.cs` (`Features/Processing/Composing/`):**
    ```csharp
@@ -305,14 +308,14 @@ The composer + renderers are all new code under `Features/Processing/Composing/`
    ```
    The `RelativePath` `??=` operator keeps backward compatibility: routing-phase handler (handoff #3 + future #7) can overwrite. **Do not** touch `RelativePath` here unless it's null — preserves the LLM-routing semantics for reprocess.
 
-**7. `Program.cs` registrations:**
+**7. `Program.cs` registrations:** (registration order documents predicate precedence — `VideoRenderer` and `DocumentRenderer` are mutually exclusive on mime within `kind=file`, but listing video first makes the precedence visible at the registration site.)
    ```csharp
-   services.AddSingleton<IKindRenderer, UrlRenderer>();
-   services.AddSingleton<IKindRenderer, ImageRenderer>();
-   services.AddSingleton<IKindRenderer, AudioRenderer>();
-   services.AddSingleton<IKindRenderer, VideoRenderer>();
-   services.AddSingleton<IKindRenderer, DocumentRenderer>();
-   services.AddSingleton<IKindRenderer, FailedHiddenRenderer>();
+   services.AddSingleton<IAttachmentRenderer, UrlRenderer>();
+   services.AddSingleton<IAttachmentRenderer, ImageRenderer>();
+   services.AddSingleton<IAttachmentRenderer, AudioRenderer>();
+   services.AddSingleton<IAttachmentRenderer, VideoRenderer>();
+   services.AddSingleton<IAttachmentRenderer, DocumentRenderer>();
+   services.AddSingleton<FailedHiddenRenderer>();  // injected by concrete type; not part of the predicate sweep
    services.AddSingleton<CompositeNoteComposer>();
    ```
    Inject `CompositeNoteComposer` into `ComposingHandler`'s primary constructor.
@@ -399,7 +402,7 @@ Thany-Marcus/
 ├── plans/
 │   └── cloud-compose-phase-handoff.md                        # THIS FILE
 ├── src/ThanyMarcus.Cloud.Api/
-│   ├── Program.cs                                            # CHANGED: + 6 IKindRenderer registrations + CompositeNoteComposer singleton
+│   ├── Program.cs                                            # CHANGED: + 6 IAttachmentRenderer registrations + CompositeNoteComposer singleton
 │   ├── Features/
 │   │   └── Processing/
 │   │       ├── CompositeMarkdownAssembler.cs                 # DELETED (legacy CLOUD-002 assembler)
@@ -414,7 +417,7 @@ Thany-Marcus/
 │   │           ├── UserNotesPreserver.cs                     # NEW: regex extraction of preserved User Notes block
 │   │           ├── IRenderContext.cs                         # NEW: ChildrenFor + TryGetPresignedDownloadUrl
 │   │           ├── RenderContext.cs                          # NEW: concrete impl wrapping IArtifactStore
-│   │           ├── IKindRenderer.cs                          # NEW: interface
+│   │           ├── IAttachmentRenderer.cs                          # NEW: interface
 │   │           └── Renderers/
 │   │               ├── UrlRenderer.cs                        # NEW
 │   │               ├── ImageRenderer.cs                      # NEW
@@ -538,7 +541,7 @@ For a video with one audio child + three keyframe children (one failed):
 
 1. ✅ `dotnet build` clean with warnings-as-errors. `dotnet test` green; every test file from handoff #3 continues to pass with assertions updated to match the new body shape.
 2. ✅ `CompositeMarkdownAssembler.cs` deleted; no compile-time references remain (`grep -rn "CompositeMarkdownAssembler" src tests` returns nothing).
-3. ✅ Six `IKindRenderer` implementations registered; `CompositeNoteComposer` constructed at host startup verifies the dispatch dictionary (no duplicates; `"failed"` key present; each first-class `AttachmentKind` covered).
+3. ✅ Five `IAttachmentRenderer` implementations (Url/Image/Audio/Video/Document) + the `FailedHiddenRenderer` registered; `CompositeNoteComposer` constructed at host startup sweeps a synthetic-attachment fixture covering each `(kind, mime)` combo the saga produces and verifies exactly one renderer matches each row.
 4. ✅ `CompositeNoteComposer.ComposeTemplateVersion == "compose-v1"`; the constant appears in:
    - YAML frontmatter `compose_template: compose-v1`
    - `notes.provenance.compose_template == "compose-v1"` (read via `/api/sync/pull?include=provenance`)
@@ -598,7 +601,7 @@ For a video with one audio child + three keyframe children (one failed):
 - **The deleted `CompositeMarkdownAssembler.cs` is referenced by handoff-#3 documentation.** Update handoff-#3's `ComposingHandler` description to point at `CompositeNoteComposer` after this ticket lands — a one-line edit. Easy to forget under warnings-as-errors (the build is clean either way; only the prose drifts). **Not a blocker** but a follow-up; track in the PR description.
 - **Failed-hidden marker as plugin-parsed contract.** The regex shape in §5 of Pass B is the parser contract. Changing the marker shape later (e.g., adding a `phase=` field) breaks parsers built against compose-v1. Treat the marker as part of the compose-v1 contract; bumps go with `compose-v2`. Document in the handoff that the marker shape is locked.
 - **Empty `extracted_text` after a successful extraction.** Per §10 above, the composer falls back to a no-content comment. If this happens in production with any frequency, it indicates an extractor bug (a sidecar returning empty success). The renderer logs at info level on this branch so it's visible in dashboards but doesn't fail. **Acceptable.**
-- **Renderer registration ordering.** `IEnumerable<IKindRenderer>` order is registration order. The composer doesn't care (it dispatches by `Kind` key), but a test that snapshots the dispatch dictionary by iterating it must sort first. Add a one-line sort in the dictionary-build path to make the iteration order deterministic regardless of DI registration shuffling.
+- **Renderer registration ordering matters.** `IEnumerable<IAttachmentRenderer>` order is registration order, and the predicate sweep returns the first match. `VideoRenderer` and `DocumentRenderer` both gate on `kind=file` and select on mime; they are mutually exclusive in practice but if a future renderer gates on the same kind without a precise mime guard, registration order would silently bias the dispatch. **Mitigation:** the constructor-time fixture sweep (§3 above) asserts exactly-one-match per fixture row, so any accidental overlap fails fast at host start. Don't rely on ordering for correctness; let the predicate uniqueness invariant carry it.
 - **YAML `>` and `|` block scalars.** `YamlDotNet` may emit multi-line strings as block scalars (`>` or `|`) which look odd in frontmatter but parse correctly. The default emitter prefers double-quoted single-line for short strings; long strings get block-scalar treatment. **Risk:** a captured URL or note title that's >80 chars gets wrapped as `>` block scalar, which surprises a reader of the raw file. **Mitigation:** the `SerializerBuilder` chain includes `.WithDefaultScalarStyle(ScalarStyle.Plain)` — verify this option exists in the YamlDotNet version pulled in (it does, since 11.x). Plain scalars handle the captured-at timestamp and UUIDs cleanly.
 - **Reprocess race with concurrent user edits.** The plugin pushes user edits via `/api/sync/push` (not yet implemented — that's a later ticket); until then, reprocess only round-trips edits already saved in `notes.body_output`. If the user is mid-edit on Device A and Device B triggers reprocess, the edit is lost. This is a vault-sync concern, not a compose concern. Document but don't gate.
 - **EF change tracking + `[NotMapped]` `LastComposeTemplate`.** Verify EF doesn't try to track or update it. A simple test: set the property, call `db.SaveChangesAsync()`, observe no SQL UPDATE column for `last_compose_template`. `[NotMapped]` should handle this but verify in `IngestJobConfigurationTests` (or write a one-off test in `CompositeNoteComposerTests` if no such test class exists yet).
@@ -676,8 +679,8 @@ $ grep -rn '"compose-v1"' src
 src/ThanyMarcus.Cloud.Api/Features/Processing/Composing/CompositeNoteComposer.cs:    public const string ComposeTemplateVersion = "compose-v1";
                                               # one and only one source of truth
 
-$ grep -rn "IKindRenderer" src/ThanyMarcus.Cloud.Api
-src/ThanyMarcus.Cloud.Api/Features/Processing/Composing/IKindRenderer.cs:...
+$ grep -rn "IAttachmentRenderer" src/ThanyMarcus.Cloud.Api
+src/ThanyMarcus.Cloud.Api/Features/Processing/Composing/IAttachmentRenderer.cs:...
 src/ThanyMarcus.Cloud.Api/Features/Processing/Composing/Renderers/UrlRenderer.cs:...
 src/ThanyMarcus.Cloud.Api/Features/Processing/Composing/Renderers/ImageRenderer.cs:...
 src/ThanyMarcus.Cloud.Api/Features/Processing/Composing/Renderers/AudioRenderer.cs:...

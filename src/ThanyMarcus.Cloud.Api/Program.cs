@@ -23,7 +23,9 @@ using ThanyMarcus.Cloud.Api.Features.Sync;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Cloud.Api.Infrastructure.Extraction;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
+using ThanyMarcus.Cloud.Api.Infrastructure.Ffmpeg;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Stubs;
 using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sweepers;
@@ -115,6 +117,83 @@ builder.Services.AddScoped<RequireCloudAdminTokenFilter>();
 
 builder.Services.AddHttpClient(UrlExtractor.HttpClientName);
 builder.Services.AddSingleton<IUrlExtractor, UrlExtractor>();
+
+builder.Services.AddHttpClient(RealUrlFetcherClient.HttpClientName, c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("IngestSaga:Sidecars:Url:GetTimeoutSeconds", 10));
+});
+builder.Services.AddHttpClient(OllamaClientNames.Vlm, c =>
+{
+    c.BaseAddress = new Uri(
+        builder.Configuration["IngestSaga:Sidecars:Ollama:BaseUrl"]
+            ?? "http://localhost:11434");
+    c.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("IngestSaga:Sidecars:Ollama:RequestTimeoutSeconds", 90));
+});
+
+builder.Services.AddSingleton(_ => new DoclingOptions
+{
+    BaseUrl              = builder.Configuration["IngestSaga:Sidecars:Docling:BaseUrl"] ?? "http://docling:5001",
+    HealthPath           = builder.Configuration["IngestSaga:Sidecars:Docling:HealthPath"] ?? "/health",
+    ConvertSourcePath    = builder.Configuration["IngestSaga:Sidecars:Docling:ConvertSourcePath"] ?? "/v1alpha/convert/source",
+    RequestTimeoutSeconds = builder.Configuration.GetValue("IngestSaga:Sidecars:Docling:RequestTimeoutSeconds", 120),
+});
+builder.Services.AddHttpClient(DoclingHttpClient.HttpClientName, (sp, c) =>
+{
+    var o = sp.GetRequiredService<DoclingOptions>();
+    c.BaseAddress = new Uri(o.BaseUrl);
+    c.Timeout     = TimeSpan.FromSeconds(o.RequestTimeoutSeconds);
+});
+
+builder.Services.AddSingleton(_ => new DocumentFilterOptions
+{
+    MaxSizeBytes = builder.Configuration.GetValue("IngestSaga:Filters:Document:MaxSizeBytes", 52428800L),
+    MaxPageCount = builder.Configuration.GetValue("IngestSaga:Filters:Document:MaxPageCount", 200),
+});
+builder.Services.AddSingleton<IDocumentPreflighter, PdfPreflighter>();
+
+builder.Services.AddSingleton(_ => new ParakeetOptions
+{
+    BaseUrl              = builder.Configuration["IngestSaga:Sidecars:Parakeet:BaseUrl"] ?? "http://parakeet:5092",
+    HealthPath           = builder.Configuration["IngestSaga:Sidecars:Parakeet:HealthPath"] ?? "/health",
+    TranscribePath       = builder.Configuration["IngestSaga:Sidecars:Parakeet:TranscribePath"] ?? "/v1/audio/transcriptions",
+    RequestTimeoutSeconds = builder.Configuration.GetValue("IngestSaga:Sidecars:Parakeet:RequestTimeoutSeconds", 180),
+});
+builder.Services.AddHttpClient(ParakeetHttpClient.HttpClientName, (sp, c) =>
+{
+    var o = sp.GetRequiredService<ParakeetOptions>();
+    c.BaseAddress = new Uri(o.BaseUrl);
+    c.Timeout     = TimeSpan.FromSeconds(o.RequestTimeoutSeconds);
+});
+
+builder.Services.AddSingleton(_ => new AudioFilterOptions
+{
+    MaxSizeBytes        = builder.Configuration.GetValue("IngestSaga:Filters:Audio:MaxSizeBytes", 209_715_200L),
+    MaxDurationSeconds  = builder.Configuration.GetValue("IngestSaga:Filters:Audio:MaxDurationSeconds", 600),
+    SilenceRmsThreshold = builder.Configuration.GetValue("IngestSaga:Filters:Audio:SilenceRmsThreshold", 0.005f),
+    SilenceWindowMs     = builder.Configuration.GetValue("IngestSaga:Filters:Audio:SilenceWindowMs", 100),
+});
+
+builder.Services.AddSingleton(_ => new VideoFilterOptions
+{
+    MaxDurationSeconds      = builder.Configuration.GetValue("IngestSaga:Filters:Video:MaxDurationSeconds", 300),
+    KeyframeIntervalSeconds = builder.Configuration.GetValue("IngestSaga:Filters:Video:KeyframeIntervalSeconds", 5),
+    MaxKeyframes            = builder.Configuration.GetValue("IngestSaga:Filters:Video:MaxKeyframes", 60),
+    JpegQuality             = builder.Configuration.GetValue("IngestSaga:Filters:Video:JpegQuality", 85),
+});
+
+builder.Services.AddSingleton<IFfmpegRunner, FfmpegRunner>();
+builder.Services.AddSingleton<IFfprobeRunner, FfprobeRunner>();
+builder.Services.AddSingleton<IAudioPreflighter, AudioPreflighter>();
+
+builder.Services.AddHttpClient(FfmpegVideoSplitterClient.HttpClientName, c =>
+{
+    c.Timeout = TimeSpan.FromMinutes(
+        builder.Configuration.GetValue("IngestSaga:Sidecars:VideoSplitter:DownloadTimeoutMinutes", 5));
+});
+
+builder.Services.AddScoped<AttachmentExtractionCache>();
 builder.Services.AddSingleton<IImageExtractor, NotImplementedImageExtractor>();
 builder.Services.AddSingleton<IVoiceExtractor, NotImplementedVoiceExtractor>();
 builder.Services.AddSingleton<IFileExtractor, NotImplementedFileExtractor>();
@@ -124,11 +203,11 @@ builder.Services.AddSingleton(_ =>
 builder.Services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
 
 builder.Services.AddSingleton<IEmbeddingClient, StubEmbeddingClient>();
-builder.Services.AddSingleton<IVlmClient, StubVlmClient>();
-builder.Services.AddSingleton<IDoclingClient, StubDoclingClient>();
-builder.Services.AddSingleton<IParakeetClient, StubParakeetClient>();
-builder.Services.AddSingleton<IUrlFetcherClient, StubUrlFetcherClient>();
-builder.Services.AddSingleton<IVideoSplitterClient, StubVideoSplitterClient>();
+builder.Services.AddScoped<IVlmClient, OllamaVlmClient>();
+builder.Services.AddSingleton<IDoclingClient, DoclingHttpClient>();
+builder.Services.AddSingleton<IParakeetClient, ParakeetHttpClient>();
+builder.Services.AddScoped<IUrlFetcherClient, RealUrlFetcherClient>();
+builder.Services.AddSingleton<IVideoSplitterClient, FfmpegVideoSplitterClient>();
 
 builder.Services.AddScoped<IIngestEventBus, PostgresIngestEventBus>();
 builder.Services.AddSingleton<IngestSseTranslator>();

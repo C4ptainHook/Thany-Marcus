@@ -81,5 +81,15 @@
     <!-- pgvector EF mapping (CLOUD-SCHEMA-V2). -->
     <PackageVersion Include="Pgvector" Version="0.3.*" />
     <PackageVersion Include="Pgvector.EntityFrameworkCore" Version="0.3.*" />
+
+    <!-- Image decode + EXIF + pHash for VLM pre-flight (CLOUD-PROCESSORS-LIGHT). -->
+    <PackageVersion Include="SixLabors.ImageSharp" Version="3.*" />
+    <PackageVersion Include="CoenM.ImageSharp.ImageHash" Version="1.*" />
+
+    <!-- PDF page-count + size preflight for Docling (CLOUD-PROCESSORS-HEAVY Pass A). -->
+    <PackageVersion Include="PdfPig" Version="0.1.*" />
+
+    <!-- WAV decoding for silence-VAD audio preflight (CLOUD-PROCESSORS-HEAVY Pass B). -->
+    <PackageVersion Include="NAudio.Core" Version="2.2.*" />
   </ItemGroup>
 </Project>

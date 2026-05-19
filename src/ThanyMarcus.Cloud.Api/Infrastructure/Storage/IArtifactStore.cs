@@ -13,6 +13,11 @@ public interface IArtifactStore
     Task<ObjectMetadata?> HeadAsync(string key, CancellationToken ct);
 
     Task DeleteAsync(string key, CancellationToken ct);
+
+    Task<Stream> OpenReadAsync(string key, CancellationToken ct);
+
+    Task UploadBytesAsync(
+        string key, byte[] bytes, string mimeType, bool finalized, CancellationToken ct);
 }
 
 public sealed record PresignedUpload(

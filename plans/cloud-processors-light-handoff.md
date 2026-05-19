@@ -105,7 +105,31 @@ Recorded here so the next reader does not re-litigate them.
 
 ## Scope boundary (precise)
 
-One pass. Two new client classes + one shared cache-lookup helper + small extractor record extension + tests + smoke. ~1.5–2 days because the WireMock fixture for Ollama needs careful payload setup (the multimodal generate request) and the URL-binary-reroute path needs three distinct test cases (HEAD-200-html, HEAD-200-image, HEAD-405-fallback-GET).
+One pass. Two new client classes + one shared cache-lookup helper + small extractor record extension + tests + smoke + a tiny `voice → audio` rename (see Prerequisite below). ~1.5–2 days.
+
+### Prerequisite: voice → audio rename
+
+CLOUD-SCHEMA-V2 (commit `45ff98f`) shipped the `AttachmentKind` set as `url|image|voice|file`. ADR-0045 §2 (amended 2026-05-19) lands on `url|image|audio|file` — same four kinds, but `voice` is renamed to `audio` because the kind covers any audio recording, not just speech, and `audio` matches the mime prefix. Documents and videos do not get their own kinds: they live under `file` with mime + `target_sidecar` doing the discrimination (PDF/office → `file` + `target_sidecar='docling'`; mp4 → `file` + `target_sidecar='video'`). `BinaryRerouteMap.cs` already routes this way.
+
+The rename lands as the first commit of this ticket so the real-client work below compiles:
+
+```sql
+-- new EF migration: RenameVoiceKindToAudio (bumps to schema_version 3)
+update attachments set kind = 'audio' where kind = 'voice';
+alter table attachments drop constraint if exists ck_attachments_kind;
+alter table attachments add  constraint ck_attachments_kind
+  check (kind in ('url','image','audio','file'));
+```
+
+C# side, same commit:
+
+- `src/ThanyMarcus.Cloud.Api/Features/Ingest/Attachment.cs:38-50` — rename `AttachmentKind.Voice` → `AttachmentKind.Audio`, string value `"voice"` → `"audio"`. Update `IsValid` and `IsBinary` patterns.
+- `src/ThanyMarcus.Cloud.Api/Features/Ingest/AttachmentConfiguration.cs:13` — CHECK string `'voice'` → `'audio'`.
+- `src/ThanyMarcus.Cloud.Api/Features/Processing/Phases/ExtractingAttachmentsHandler.cs:228-235` — `AttachmentKind.Voice` switch arm renames to `AttachmentKind.Audio`. Other arms unchanged.
+- `src/ThanyMarcus.Cloud.Api/Infrastructure/Sidecars/BinaryRerouteMap.cs:17` — `audio/*` arm `AttachmentKind.Voice` → `AttachmentKind.Audio`. The `video/*` and pdf/office arms stay on `AttachmentKind.File`.
+- Test fixtures referencing `AttachmentKind.Voice` (8 files: `CompositeIngestSagaEndToEndTests`, `IngestEndpointsTests`, `OrphanIngestSweeperTests`, `ProvenanceMaterializerTests`, `PhaseDispatcherTests`, `SpecialistBindingTests`, `CompositeMarkdownAssemblerTests`, `BinaryRerouteMapTests`) rename in lockstep. No fixture asserts the literal string `"voice"`.
+
+Plugin TS contract is not yet shipped, so no cross-repo rename needed.
 
 ### In scope
 
@@ -133,16 +157,16 @@ One pass. Two new client classes + one shared cache-lookup helper + small extrac
         - Other → error: `extraction_error='unsupported_content_type:<mime>'`, throw `UrlFetcherException`.
      4. On HEAD 405 / Method Not Allowed: fall back to `GET` with `Range: bytes=0-0`. Same content-type inspection. If even that fails (no `Content-Type` header, HTTP error), throw with `cannot_determine_content_type`.
      5. **HTML path:** call existing `UrlExtractor.ExtractAsync(url, ct)`. Wrap result in `UrlFetchOutcome(ExtractedText: result.Markdown, ExtractionCacheKey: null, Extra: BuildExtraFromExtractor(result), RedirectedToAttachmentId: null)`. **Note:** the URL extractor's output is content-derived (Markdown), not model-derived — no `extraction_cache_key` because there's no model to invalidate against. The cache-lookup helper SKIPS URL attachments (they re-extract on reprocess, which is fast + idempotent).
-     6. **Reroute path:** map content-type to new attachment kind via `BinaryRerouteMap.Resolve(mimeType)` (new static class):
+     6. **Reroute path:** map content-type via `BinaryRerouteMap.Resolve(mimeType)` (already shipped at `src/ThanyMarcus.Cloud.Api/Infrastructure/Sidecars/BinaryRerouteMap.cs`; the Prerequisite step above only renames the `audio/*` arm's `Voice → Audio`):
         ```
-        image/*               → AttachmentKind.Image,   target_sidecar='ollama'
-        audio/*               → AttachmentKind.Voice,   target_sidecar='parakeet'
-        video/*               → AttachmentKind.Video,   target_sidecar='video'
-        application/pdf       → AttachmentKind.File,    target_sidecar='docling' (mime_type populated)
-        application/{zip,..ms-office,..opendocument,..}→ AttachmentKind.File,    target_sidecar='docling'
-        other                 → throw UnsupportedRerouteException
+        image/*                                        → AttachmentKind.Image, target_sidecar='ollama'
+        audio/*                                        → AttachmentKind.Audio, target_sidecar='parakeet'
+        video/*                                        → AttachmentKind.File,  target_sidecar='video'
+        application/pdf                                → AttachmentKind.File,  target_sidecar='docling'
+        application/{zip,..ms-office,..opendocument,..}→ AttachmentKind.File,  target_sidecar='docling'
+        other                                          → throw UnsupportedRerouteException
         ```
-        (Note: `AttachmentKind` only knows `Url|Image|Voice|File` per `Features/Ingest/Attachment.cs:38`. Documents are `File` with mime_type populated; Docling's target_sidecar is selected by `ExtractingAttachmentsHandler`'s existing dispatch on mime — verify this works after the schema-v2 vocabulary extension; if not, extend `AttachmentKind` in a small companion change. **DO NOT extend `AttachmentKind` if it requires a schema migration** — the kinds are stored as text; no DB change needed beyond updating the `IsValid` whitelist.)
+        Note the deliberate asymmetry: `kind` is the user-facing category (image/audio/url/file); `target_sidecar` is the implementation choice. PDFs and videos share `kind=file` but route to different sidecars via mime. This keeps the kind vocab small (per ADR-0045 §2) without losing dispatch resolution.
      7. INSERT the new `attachments` row: same `note_id`, `parent_attachment_id = <original URL att.id>`, `kind = <new>`, `mime_type = <from HEAD>`, `storage_provider = "external"` (special sentinel), `storage_bucket = ""`, `storage_key = ""`, `url = <original URL>`, `status = 'uploaded'` (the binary is "already uploaded" by virtue of living on the public internet — no plugin upload step), `extraction_status = 'pending'`, `extra = JsonDocument.Parse("{}")`, `created_at = now`.
      8. INSERT the matching `extraction_tasks` row: `ingest_job_id = <current job id>` (carry forward), `attachment_id = <new att.id>`, `target_sidecar = <from map>`, `status = 'queued'`, `scheduled_at = now`, `attempts = 0`.
      9. `pg_notify('extraction_tasks_<sidecar>_new', '<ingest_job_id>')` so the corresponding specialist worker wakes immediately.
@@ -434,7 +458,7 @@ Thany-Marcus/
     # → 202
 
     # Stream events
-    curl -N "https://<cloud>.thany.click/api/sync/events?access_token=$PLUGIN_TOKEN"
+    curl -N -H "Authorization: Bearer $PLUGIN_TOKEN" "https://<cloud>.thany.click/api/sync/events"
     # → event: attachment_status_changed
     #   data: {"noteId":"...","attachmentId":"<url>","from":"pending","to":"skipped"}
     #   event: attachment_status_changed

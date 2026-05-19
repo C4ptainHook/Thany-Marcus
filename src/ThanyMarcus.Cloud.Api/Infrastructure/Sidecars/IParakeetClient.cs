@@ -2,5 +2,9 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 
 public interface IParakeetClient
 {
-    Task<string> TranscribeAsync(string storageKey, CancellationToken ct);
+    Task<ParakeetTranscript> TranscribeAsync(string storageKey, CancellationToken ct);
 }
+
+public sealed record ParakeetTranscript(
+    string Text,
+    string? LanguageDetected);

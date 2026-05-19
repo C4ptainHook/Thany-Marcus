@@ -18,10 +18,15 @@ has to be CPU-tractable. GPU acceleration is a future-work hook
 ([[0035-burst-worker-llm-tier]]); the thesis architecture defends the
 CPU-only baseline.
 
-The user cloud handles seven attachment "kinds" defined by the data model
-(per [[0045-composite-note-schema]]): `url`, `image`, `audio`, `document`,
-`video`, `file`, plus the implicit "pure text body" pseudo-kind. Each kind
-needs a different processor with different runtime, accuracy, and license
+The user cloud handles four attachment kinds defined by the data model
+(per [[0045-composite-note-schema]] §2, amended 2026-05-19): `url`, `image`,
+`audio`, `file`, plus the implicit "pure text body" pseudo-kind. Documents
+(PDF, DOCX, ...) and videos live under `kind=file` discriminated by
+`mime_type` + `extraction_tasks.target_sidecar` — `kind` carries the
+user-facing category, the sidecar carries the implementation choice. The
+table below indexes processors by the *modality* they handle; for documents
+and videos that translates to `(kind=file, mime=…)`. Each modality needs a
+different processor with different runtime, accuracy, and license
 characteristics. The 2026 open-weight ecosystem (verified via WebFetch on
 2026-05-18/19) offers strong CPU-friendly options for each kind — much better
 than the 2024 picks that earlier ticket files (CLOUD-007 through CLOUD-015)
@@ -32,15 +37,15 @@ anchored on.
 A fixed lineup of six processors, each invoked via HTTP from in-process
 specialist workers (per [[0042-cloud-ingest-pipeline-architecture]] §1):
 
-| Kind | Processor | Runtime |
+| Modality (kind + mime) | Processor | Runtime |
 |---|---|---|
-| `image` | **MiniCPM-V 4.6** (1.3 B, Q4_K_M GGUF) | Ollama sidecar |
-| `document` (PDF / DOCX / XLSX / PPTX / HTML) | **Docling** (Granite-Docling-258M + TableFormer + Layout) | docling-serve sidecar |
-| `audio` | **Parakeet TDT 0.6B v3** (NVIDIA, INT8 ONNX) | parakeet-server sidecar (achetronic/parakeet, Go + ONNX Runtime) |
-| `url` | **AngleSharp + Readability (port) → ReverseMarkdown** | in-process .NET libraries |
-| `video` | **ffmpeg** (keyframe extraction + audio track) | in-process binary, decomposes into `image` × N + `audio` |
+| `kind=image` | **MiniCPM-V 4.6** (1.3 B, Q4_K_M GGUF) | Ollama sidecar |
+| `kind=file` + mime ∈ {PDF, DOCX, XLSX, PPTX, HTML} | **Docling** (Granite-Docling-258M + TableFormer + Layout) | docling-serve sidecar |
+| `kind=audio` | **Parakeet TDT 0.6B v3** (NVIDIA, INT8 ONNX) | parakeet-server sidecar (achetronic/parakeet, Go + ONNX Runtime) |
+| `kind=url` | **AngleSharp + Readability (port) → ReverseMarkdown** | in-process .NET libraries |
+| `kind=file` + mime=`video/*` | **ffmpeg** (keyframe extraction + audio track) | in-process binary, decomposes into `kind=image` × N + `kind=audio` |
 | (text embedding for retrieval) | **IBM Granite Embedding 278m R2** (Matryoshka cut @ 256 dim) | in-process ONNX Runtime |
-| `file` | mime-sniff → re-route to one of the above; otherwise passthrough | orchestrator dispatch logic |
+| `kind=file`, other mime | mime-sniff → store-only fallback | orchestrator dispatch logic |
 
 Each processor is invoked synchronously by its specialist worker; the worker
 holds a per-sidecar `SemaphoreSlim` to cap concurrency (Ollama=1, Docling=2,
@@ -72,16 +77,23 @@ bottleneck.
 The orchestrator (`JobOrchestratorWorker` from
 [[0042-cloud-ingest-pipeline-architecture]] §1) creates one
 `extraction_tasks` row per attachment, selecting `target_sidecar` from the
-attachment's `kind`:
+attachment's `(kind, mime_type)`:
 
 ```
-kind=url       → target_sidecar='url'       (UrlFetcherWorker)
-kind=image     → target_sidecar='ollama'    (VlmWorker)
-kind=audio     → target_sidecar='parakeet'  (ParakeetWorker)
-kind=document  → target_sidecar='docling'   (DoclingWorker)
-kind=video     → target_sidecar='video'     (VideoSplitterWorker)
-kind=file      → mime-sniff (see §"File catch-all" below)
+kind=url                       → target_sidecar='url'       (UrlFetcherWorker)
+kind=image                     → target_sidecar='ollama'    (VlmWorker)
+kind=audio                     → target_sidecar='parakeet'  (ParakeetWorker)
+kind=file + mime=application/{pdf,...office,...odf,zip}
+                               → target_sidecar='docling'   (DoclingWorker)
+kind=file + mime=video/*       → target_sidecar='video'     (VideoSplitterWorker)
+kind=file + other mime         → store-only; extraction_status='skipped',
+                                 extraction_error='unsupported_mime:<mime>'
 ```
+
+The `kind=file` row carries the discrimination: same kind, different sidecar
+chosen by mime. This lets one kind route to multiple processors without
+schema churn (e.g., a scan-only PDF could fall through Docling and rerun via
+the VLM with no migration).
 
 ### Classical pre-flight per kind (the "staged filter")
 
@@ -91,14 +103,14 @@ sidecar. Filter rejection writes `extraction_status='skipped'` +
 load-bearing efficiency lever: garbage inputs (blank audio, blurry photos,
 oversized PDFs) cost ~10 ms instead of ~10–45 s.
 
-| Kind | Pre-flight | Skip reason |
+| Modality | Pre-flight | Skip reason |
 |---|---|---|
-| `url` | HTTP HEAD; check status, content-type. If binary → re-classify and re-route (see "URL → binary re-route" below) | 4xx/5xx, redirect loop, login-redirect (paywall) |
-| `image` | EXIF read; pHash compute (dedup signal); dimension check (skip if < 100 px or > 16384 px); optional Laplacian blur score | too-blurry-to-OCR (configurable threshold), trivial dimensions |
-| `audio` | ffprobe (duration, sample rate, codec); silence-VAD scan (RMS amplitude over windows); duration cap (default 10 min) | pure silence, duration over cap |
-| `document` | Page count via Docling preflight or PdfPig; size cap (default 50 MB) | >200 pages, oversized |
-| `video` | ffprobe (duration, codec, resolution); duration cap (default 5 min) | duration over cap, no decodable streams |
-| `file` | mime sniff only | unknown mime → keep as `file`, store-only |
+| `kind=url` | HTTP HEAD; check status, content-type. If binary → re-classify and re-route (see "URL → binary re-route" below) | 4xx/5xx, redirect loop, login-redirect (paywall) |
+| `kind=image` | EXIF read; pHash compute (dedup signal); dimension check (skip if < 100 px or > 16384 px); optional Laplacian blur score | too-blurry-to-OCR (configurable threshold), trivial dimensions |
+| `kind=audio` | ffprobe (duration, sample rate, codec); silence-VAD scan (RMS amplitude over windows); duration cap (default 10 min) | pure silence, duration over cap |
+| `kind=file`, document mime | Page count via Docling preflight or PdfPig; size cap (default 50 MB) | >200 pages, oversized |
+| `kind=file`, mime=`video/*` | ffprobe (duration, codec, resolution); duration cap (default 5 min) | duration over cap, no decodable streams |
+| `kind=file`, other mime | mime sniff only | unknown mime → store-only |
 
 All thresholds in `appsettings.json:IngestSaga:Filters:*`. Tunable for eval
 without code changes.
@@ -107,19 +119,20 @@ without code changes.
 
 When `UrlFetcherWorker` HEADs the URL and detects a binary content-type:
 
-- `image/*` → INSERT new `image` attachment row, copy content URL to `storage_key`, enqueue extraction_task with `target_sidecar='ollama'`. URL task succeeds with `extra.redirected_to: <new_attachment_id>`.
-- `video/*` → same pattern, kind=`video`, target_sidecar=`video`.
-- `audio/*` → kind=`audio`, target_sidecar=`parakeet`.
-- `application/pdf` etc. → kind=`document`, target_sidecar=`docling`.
+- `image/*` → INSERT new `kind=image` attachment row, copy content URL to `storage_key`, enqueue extraction_task with `target_sidecar='ollama'`. URL task succeeds with `extra.redirected_to: <new_attachment_id>`.
+- `video/*` → same pattern, `kind=file` + mime=video/*, `target_sidecar='video'`.
+- `audio/*` → `kind=audio`, `target_sidecar='parakeet'`.
+- `application/pdf` etc. → `kind=file` + document mime, `target_sidecar='docling'`.
 - `text/html` → proceed with AngleSharp+Readability extraction (the normal URL path).
-- Other → kind=`file`, no extraction, just store reference.
+- Other → `kind=file`, no extraction, just store reference.
 
 This lets users paste an image-URL or PDF-URL into the plugin and have the
 cloud transparently route it to the right processor.
 
 ### Video as composite extraction
 
-`kind=video` decomposes into multiple sub-extractions via the
+A video attachment (`kind=file` + mime=`video/*`, claimed by
+`target_sidecar='video'`) decomposes into multiple sub-extractions via the
 `VideoSplitterWorker`:
 
 1. Presigned GET URL for the video from Spaces (via `IArtifactStore`).
@@ -130,7 +143,7 @@ cloud transparently route it to the right processor.
    `notes/<note-id>/attachments/<video-id>/audio.wav`.
 4. INSERT child `attachments` rows linked to the video via
    `parent_attachment_id` (FK CASCADE per
-   [[0045-composite-note-schema]]): N rows kind=`image`, 1 row kind=`audio`.
+   [[0045-composite-note-schema]]): N rows `kind=image`, 1 row `kind=audio`.
 5. INSERT extraction_tasks for each child (N × ollama + 1 × parakeet).
 6. Mark the video's own task `succeeded` with
    `extra={keyframe_count, audio_duration, frame_offsets}`.
@@ -227,7 +240,7 @@ Verified 2026-05-18 via WebFetch.
 | Florence-2-large (770 M, MIT) | Strong for detection/grounding | Optimized for vision tasks (detection, captioning) not free-form description; less suited to the "describe a whiteboard photo" use case. Available as fallback for specific tasks (face detection, region grounding). |
 | Anthropic Claude / OpenAI GPT-4V (external API) | Best absolute quality | Defeats the "user cloud" thesis architecture — sends user data to a third-party API. Available via the `llm_mode='unsafe'` path defined in [[0044-cloud-intelligence-layer]] §D8. |
 
-### Document processing (document kind)
+### Document processing (`kind=file` + document mime)
 
 | Option | Why considered | Why rejected |
 |---|---|---|

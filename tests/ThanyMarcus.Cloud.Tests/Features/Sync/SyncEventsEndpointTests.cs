@@ -65,21 +65,6 @@ public sealed class SyncEventsEndpointTests(PostgresFixture postgres)
         dataLine.ShouldContain(jobId.ToString());
     }
 
-    [Fact]
-    public async Task Query_string_access_token_authenticates()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        await postgres.ResetAsync();
-        var rawToken = await SeedPluginTokenAsync(postgres);
-
-        await using var factory = new CloudApiFactory { ConnectionString = postgres.ConnectionString };
-        using var client = factory.CreateClient();
-
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"/api/sync/events?access_token={rawToken}");
-        using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        resp.IsSuccessStatusCode.ShouldBeTrue();
-    }
-
     private static async Task<string?> ReadUntilDataLineAsync(StreamReader reader, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)

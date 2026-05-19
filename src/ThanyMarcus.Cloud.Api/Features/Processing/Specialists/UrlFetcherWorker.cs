@@ -17,25 +17,26 @@ public sealed class UrlFetcherWorker : SpecialistWorkerBase<IUrlFetcherClient>
         ILogger<UrlFetcherWorker> log)
         : base(services, config, env, clock, log) { }
 
-    protected override Task<string> ExtractAsync(IUrlFetcherClient client, Attachment att, CancellationToken ct)
+    protected override async Task<SpecialistExtractionOutcome> ExtractAsync(
+        IServiceProvider scopeServices, IUrlFetcherClient client, ExtractionTask task, Attachment att, CancellationToken ct)
     {
-        var url = att.Url ?? TryExtractUrlFromExtra(att) ?? att.StorageKey;
-        return client.FetchMarkdownAsync(url, ct);
-    }
+        var outcome = await client.FetchAsync(att.NoteId, att, ct);
 
-    private static string? TryExtractUrlFromExtra(Attachment att)
-    {
-        try
+        if (outcome.RedirectedToAttachmentId is not null)
         {
-            var root = att.Extra.RootElement;
-            if (root.ValueKind == System.Text.Json.JsonValueKind.Object
-                && root.TryGetProperty("url", out var u)
-                && u.ValueKind == System.Text.Json.JsonValueKind.String)
-            {
-                return u.GetString();
-            }
+            return new SpecialistExtractionOutcome(
+                ExtractedText: null,
+                ExtractionCacheKey: null,
+                Extra: outcome.Extra,
+                AttachmentStatus: AttachmentExtractionStatus.Skipped,
+                ExtractionError: "redirected_to_binary");
         }
-        catch (ObjectDisposedException) { }
-        return null;
+
+        return new SpecialistExtractionOutcome(
+            ExtractedText: outcome.ExtractedText,
+            ExtractionCacheKey: null,
+            Extra: outcome.Extra,
+            AttachmentStatus: AttachmentExtractionStatus.Extracted,
+            ExtractionError: null);
     }
 }

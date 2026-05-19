@@ -1,6 +1,6 @@
 # ADR-0045: Composite note schema — notes, attachments, entities, mentions, projects, embeddings
 
-Status: Accepted (drafted from 2026-05-18/19 grilling; implementation lands as a single migration before M5+)
+Status: Accepted (drafted from 2026-05-18/19 grilling; implementation lands as a single migration before M5+; §2 kind vocab amended same-day to four kinds per design-pressure review)
 Date: 2026-05-19
 
 ## Context
@@ -52,7 +52,7 @@ Schema overview:
 ```
 Existing (extended):
   notes               — capture-derived OR hub-generated; body_output is the user-visible artifact
-  attachments         — raw inputs (url/image/audio/document/video/file) with extraction results
+  attachments         — raw inputs (url/image/audio/file) with extraction results; documents and videos live under `file` with mime + target_sidecar discriminating
   ingest_jobs         — per-note pipeline orchestration (driven by [[0042]])
 
 New for M5:
@@ -117,7 +117,7 @@ attachments:
   note_id                UUID NOT NULL FK→notes(id) ON DELETE CASCADE
   client_attachment_id   TEXT NOT NULL                            -- per-note idempotency key
   parent_attachment_id   UUID NULL FK→attachments(id) ON DELETE CASCADE   -- for video keyframes/audio children
-  kind                   TEXT NOT NULL                            -- 'url'|'image'|'audio'|'document'|'video'|'file'
+  kind                   TEXT NOT NULL                            -- 'url'|'image'|'audio'|'file'
   storage_provider       TEXT NOT NULL                            -- 's3' (DO Spaces)
   storage_bucket         TEXT NOT NULL
   storage_key            TEXT NOT NULL                            -- notes/<note-id>/attachments/<att-id>
@@ -145,13 +145,13 @@ Key behaviors:
 
 | Aspect | Decision |
 |---|---|
-| `kind` vocabulary | Six values (`url`, `image`, `audio`, `document`, `video`, `file`). String, not enum — adding values doesn't require migration. Dispatch logic in [[0043-cloud-side-model-lineup]] §"Per-kind dispatch". |
+| `kind` vocabulary | Four values (`url`, `image`, `audio`, `file`). String, not enum — adding values doesn't require migration. `kind` is the user-facing category; documents (PDF/DOCX/...) and videos live under `file` with mime + `extraction_tasks.target_sidecar` doing the implementation dispatch (per [[0043]] §"Per-kind dispatch"). The kind/sidecar split lets one kind route to multiple processors (e.g., scan-only PDF → VLM fallback) without schema churn. |
 | `storage_key` | `notes/<note-id>/attachments/<att-id>` (or `…/keyframes/<i>.jpg` for video children). Cloud generates; never user-visible. |
 | Hash-based extraction cache | Across notes: if a new attachment's `sha256` matches an existing row with same `extraction_cache_key`, the worker copies `extracted_text` + `extra` and skips the sidecar call. Cross-note dedup is free. |
 | `extraction_cache_key` | Composite: `sha256:sidecar:model:version`. Model-version bumps invalidate correctly. |
-| `parent_attachment_id` | For video decomposition (per [[0043]] §"Video as composite extraction"): keyframe + audio children link back to the video parent. CASCADE on parent delete. |
+| `parent_attachment_id` | For video decomposition (per [[0043]] §"Video as composite extraction"): the video parent is `kind=file` with mime=`video/*`; keyframe children are `kind=image`, audio child is `kind=audio`; all link back via this FK. CASCADE on parent delete. |
 | `client_attachment_id` | Per-note idempotency. UNIQUE on `(note_id, client_attachment_id)`. Plugin retries with same ID return same attachment row. |
-| `extra` JSONB | Per-kind structured metadata: image has `{exif, phash, blur}`; audio has `{duration_s, lang}`; document has `{page_count, has_tables}`; etc. Eval queries this for stage-specific metrics. |
+| `extra` JSONB | Structured metadata, conventional shape by `(kind, mime_type)`: image has `{exif, phash, blur}`; audio has `{duration_s, lang}`; file with PDF mime has `{page_count, has_tables}`; file with video mime has `{duration_s, codec, resolution}`. Eval queries this for stage-specific metrics. |
 | Failed / skipped attachments | NOT rendered in `notes.body_output` (per [[0042]] §4 best-effort + clean-vault policy). Plugin skips downloading their binaries on sync_pull. Binary stays in Spaces for potential reprocess. |
 
 ### 3. `ingest_jobs` — per-note pipeline orchestration
@@ -470,9 +470,10 @@ to apply on a populated DB (smoke clouds with existing notes don't break).
 
 | Option | Why considered | Why rejected |
 |---|---|---|
-| **Discriminated kinds + mime_type (chosen)** | Schema-explicit; clean dispatch logic; aliases handle plugin/cloud mismatch | — |
-| Minimal + mime-driven dispatch | Smaller enum, fewer migrations | Dispatch logic gets messy; "what does kind=file mean?" is ambiguous |
-| Processor-keyed kinds (`vlm`, `docling`, etc.) | Direct mapping to processors | Bakes processor choice into schema; swapping models requires data migration |
+| **Four kinds + mime + target_sidecar (chosen, amended 2026-05-19)** | `kind` carries the user-facing category that drives lifecycle (upload-vs-fetch, pre-flight class); mime + `target_sidecar` carry the implementation choice. Lets one kind route to multiple processors without schema churn. | — |
+| Six kinds (`url`/`image`/`audio`/`document`/`video`/`file`) | Schema-explicit per modality; eval queries like "video extraction P/R" are one-column. | Encodes the same routing decision twice (kind AND target_sidecar in lockstep). Doesn't let two processors share a kind. `document` is functionally identical to `file` (same Docling sidecar, same pre-flight); `video` is `file + mime=video/* + sidecar=video`. Originally accepted in the F2 draft; reverted same-day after design pressure showed the discrimination didn't earn its row. |
+| Minimal + mime-driven dispatch (single `kind=binary`) | Smallest enum | Loses the lifecycle distinction between fetched URLs and uploaded binaries — those genuinely diverge on storage_provider, pre-flight, and reprocess semantics. |
+| Processor-keyed kinds (`vlm`, `docling`, etc.) | Direct mapping to processors | Bakes processor choice into schema; swapping models requires data migration. |
 
 ### Hub representation (F8)
 

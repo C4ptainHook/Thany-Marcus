@@ -12,7 +12,12 @@ public abstract partial class SpecialistWorkerBase<TClient> : BackgroundService
     where TClient : notnull
 {
     protected abstract string TargetSidecar { get; }
-    protected abstract Task<string> ExtractAsync(TClient client, Attachment att, CancellationToken ct);
+    protected abstract Task<SpecialistExtractionOutcome> ExtractAsync(
+        IServiceProvider scopeServices,
+        TClient client,
+        ExtractionTask task,
+        Attachment att,
+        CancellationToken ct);
 
     private readonly IServiceProvider services;
     private readonly IConfiguration config;
@@ -157,13 +162,13 @@ public abstract partial class SpecialistWorkerBase<TClient> : BackgroundService
 
         try
         {
-            var text = await ExtractAsync(client, attachment, ct);
-            await MarkSucceededAsync(db, task, attachment, text, ct);
+            var outcome = await ExtractAsync(scope.ServiceProvider, client, task, attachment, ct);
+            await MarkSucceededAsync(db, task, attachment, outcome, ct);
             await NotifyChangedAsync(db, task.IngestJobId, ct);
             await bus.PublishAttachmentStatusChangedAsync(
                 attachment.NoteId, attachment.Id,
                 AttachmentExtractionStatus.Pending,
-                AttachmentExtractionStatus.Extracted,
+                outcome.AttachmentStatus,
                 ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -183,7 +188,7 @@ public abstract partial class SpecialistWorkerBase<TClient> : BackgroundService
     }
 
     private async Task MarkSucceededAsync(
-        CloudDbContext db, ExtractionTask task, Attachment att, string text, CancellationToken ct)
+        CloudDbContext db, ExtractionTask task, Attachment att, SpecialistExtractionOutcome outcome, CancellationToken ct)
     {
         var now = clock.GetCurrentInstant();
         var expectedVersion = task.TransitionVersion;
@@ -203,11 +208,15 @@ public abstract partial class SpecialistWorkerBase<TClient> : BackgroundService
         {
             throw new SagaOwnershipLostException(task.Id, workerId);
         }
+        var extraJson = outcome.Extra is null ? null : outcome.Extra.RootElement.GetRawText();
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE attachments SET
-                extracted_text    = {text},
-                extraction_status = 'extracted',
-                updated_at        = {now}
+                extracted_text        = {outcome.ExtractedText},
+                extraction_status     = {outcome.AttachmentStatus},
+                extraction_error      = {outcome.ExtractionError},
+                extraction_cache_key  = {outcome.ExtractionCacheKey},
+                extra                 = COALESCE({extraJson}::jsonb, extra),
+                updated_at            = {now}
               WHERE id = {att.Id}
             """, ct);
     }

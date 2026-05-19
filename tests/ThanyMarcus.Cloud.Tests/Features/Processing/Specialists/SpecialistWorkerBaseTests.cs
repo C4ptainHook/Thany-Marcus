@@ -205,14 +205,20 @@ public sealed class SpecialistWorkerBaseTests(PostgresFixture postgres)
     {
         public int ThrowCount { get; set; } = int.MaxValue;
 
-        public Task<string> DescribeImageAsync(string storageKey, CancellationToken ct)
+        public Task<VlmExtractionOutcome> ExtractAsync(Attachment att, CancellationToken ct)
         {
             if (ThrowCount > 0)
             {
                 ThrowCount--;
                 throw new InvalidOperationException("synthetic vlm failure");
             }
-            return Task.FromResult($"described:{storageKey}");
+            var extra = JsonDocument.Parse("{}");
+            return Task.FromResult(new VlmExtractionOutcome(
+                ExtractedText: $"described:{att.StorageKey}",
+                ExtractionCacheKey: ExtractionCacheKeys.ForOllama("stub-v1"),
+                Extra: extra,
+                Skipped: false,
+                SkipReason: null));
         }
     }
 }
