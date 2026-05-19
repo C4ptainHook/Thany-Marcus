@@ -1,13 +1,11 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { untrack } from 'svelte';
   import { setPassphrase } from './stepUpClient';
   import type { MeResponse } from './types/auth';
 
   let { me, onPassphraseSet }: { me: MeResponse; onPassphraseSet: () => void } = $props();
 
   let passphraseSet = $state(untrack(() => me.passphraseSet === true));
-  let doConnected = $state<boolean | null>(null);
-  let doStatus    = $state<string>('connected');
 
   let expanded = $state<1 | null>(null);
 
@@ -15,32 +13,6 @@
   let pp2 = $state('');
   let ppError = $state<string | null>(null);
   let ppBusy = $state(false);
-
-  async function refreshDoConnection() {
-    try {
-      const r = await fetch('/api/clouds/connections/digitalocean');
-      if (!r.ok) { doConnected = false; return; }
-      const body = await r.json() as { connected: boolean; status?: string };
-      doConnected = body.connected === true;
-      doStatus    = body.status ?? 'connected';
-    } catch {
-      doConnected = false;
-    }
-  }
-
-  function onVisibility() {
-    if (document.visibilityState === 'visible') refreshDoConnection();
-  }
-
-  onMount(() => {
-    refreshDoConnection();
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('focus', onVisibility);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('focus', onVisibility);
-    };
-  });
 
   async function submitPassphrase(e: SubmitEvent) {
     e.preventDefault();
@@ -69,8 +41,6 @@
   function toggle(step: 1) {
     expanded = expanded === step ? null : step;
   }
-
-  let doStepDone = $derived(doConnected === true && doStatus === 'connected');
 </script>
 
 <section class="card">
@@ -103,47 +73,20 @@
       {/if}
     </li>
 
-    <li class={'step ' + (doStepDone ? 'done' : passphraseSet ? 'open' : 'locked')}>
+    <li class={'step ' + (passphraseSet ? 'open' : 'locked')}>
       <div class="step-head static">
-        <span class="icon success">{doStepDone ? '[●]' : passphraseSet ? '[○]' : '[—]'}</span>
-        <span class="title">2. Connect DigitalOcean</span>
+        <span class="icon success">{passphraseSet ? '[○]' : '[—]'}</span>
+        <span class="title">2. Provision your cloud</span>
         {#if !passphraseSet}<span class="muted lock-note">(locked)</span>{/if}
-        {#if passphraseSet && doConnected === true && doStatus === 'needs_reauth'}
-          <span class="muted lock-note">(needs re-authorization)</span>
-        {/if}
       </div>
       <p class="desc">
-        {#if !passphraseSet}
+        {#if passphraseSet}
+          Pick a provider and region. Authorization happens inline if needed.
+        {:else}
           Needs passphrase set first.
-        {:else if doStepDone}
-          One-time authorization. Used to provision droplets + Spaces buckets for every cloud you create.
-        {:else if doConnected === true && doStatus === 'needs_reauth'}
-          Token refresh failed. Re-authorize to continue provisioning.
-        {:else}
-          One-time authorization. No tokens to paste — opens DigitalOcean's consent page.
         {/if}
       </p>
-      {#if passphraseSet && !doStepDone}
-        <a class="btn btn-primary go" href="/oauth/digitalocean/start?return_to=/">
-          {doConnected === true && doStatus === 'needs_reauth' ? 'Reconnect DigitalOcean' : 'Connect DigitalOcean'}
-        </a>
-      {/if}
-    </li>
-
-    <li class={'step ' + (doStepDone ? 'open' : 'locked')}>
-      <div class="step-head static">
-        <span class="icon success">{doStepDone ? '[○]' : '[—]'}</span>
-        <span class="title">3. Provision your cloud</span>
-        {#if !doStepDone}<span class="muted lock-note">(locked)</span>{/if}
-      </div>
-      <p class="desc">
-        {#if doStepDone}
-          Pick a region and click Provision.
-        {:else}
-          Needs DigitalOcean connected first.
-        {/if}
-      </p>
-      {#if doStepDone}
+      {#if passphraseSet}
         <a class="btn btn-primary go" href="/clouds/new">Provision cloud</a>
       {/if}
     </li>
