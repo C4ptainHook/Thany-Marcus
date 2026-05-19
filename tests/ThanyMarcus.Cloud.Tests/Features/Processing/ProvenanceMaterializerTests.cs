@@ -65,6 +65,47 @@ public sealed class ProvenanceMaterializerTests
     }
 
     [Fact]
+    public void BuildJson_llm_calls_includes_embedding_events()
+    {
+        var now = SystemClock.Instance.GetCurrentInstant();
+        var noteId = Guid.CreateVersion7();
+        var job = new IngestJob
+        {
+            Id = Guid.CreateVersion7(),
+            NoteId = noteId,
+            Kind = IngestJobKind.Capture,
+            Status = IngestJobStatus.Succeeded,
+            CreatedAt = now,
+            UpdatedAt = now,
+            EventsLog = JsonDocument.Parse("""
+                [
+                  {"stage":"llm_route","prompt_id":"route@v1","retry_index":0,"confidence":0.9,"llm_mode":"safe","decision":"accept"},
+                  {"stage":"embedding_emit","model":"ibm-granite/granite-embedding-311m-multilingual-r2","duration_ms":42,"dim":256,"body_hash":"AB12"},
+                  {"stage":"embedding_skip","reason":"unchanged_body","body_hash":"AB12"}
+                ]
+                """),
+        };
+        var note = new Note
+        {
+            Id = noteId,
+            CapturedAt = now,
+            Status = NoteStatus.Ready,
+            BodyInput = "x",
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        var json = ProvenanceMaterializer.BuildJson(job, note, Array.Empty<Attachment>(), Array.Empty<ExtractionTask>());
+        using var doc = JsonDocument.Parse(json);
+        var calls = doc.RootElement.GetProperty("llm_calls");
+        calls.GetArrayLength().ShouldBe(3);
+        var stages = calls.EnumerateArray().Select(e => e.GetProperty("stage").GetString()).ToList();
+        stages.ShouldContain("llm_route");
+        stages.ShouldContain("embedding_emit");
+        stages.ShouldContain("embedding_skip");
+    }
+
+    [Fact]
     public void BuildJson_collects_failure_entries()
     {
         var now = SystemClock.Instance.GetCurrentInstant();

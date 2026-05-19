@@ -21,6 +21,7 @@ public sealed class Note : IHasUpdatedAt
     public JsonDocument? Provenance { get; set; }
 
     public Vector? Embedding { get; set; }
+    public string? BodyHash { get; set; }
     public Instant? DeletedAt { get; set; }
     public bool IsHub { get; set; }
     public Guid? ProjectId { get; set; }

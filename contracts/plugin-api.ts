@@ -1,100 +1,126 @@
-// Mirror of ThanyMarcus.Shared.PluginApi. Snake_case wire shape.
+// Mirror of ThanyMarcus.Shared.PluginApi. camelCase wire shape.
 // When the Obsidian plugin is scaffolded (PLUGIN-001), copy this file
 // to the plugin repo's src/types/cloud-api.ts.
 
 export type IsoInstant = string;
 export type Uuid = string;
 
-export const IngestPartKind = {
-  Url:   "url",
-  Text:  "text",
-  Image: "image",
-  Audio: "audio",
-  Pdf:   "pdf",
-} as const;
-export type IngestPartKind = typeof IngestPartKind[keyof typeof IngestPartKind];
+// ---------- Ingest ----------
 
-export interface IngestCompositePart {
-  part_id: string;
-  kind: IngestPartKind;
-  inline_value?: string;
-  multipart_name?: string;
+export const AttachmentKind = {
+  TextBody:    "text_body",
+  TextSnippet: "text_snippet",
+  Url:         "url",
+  Image:       "image",
+  Audio:       "audio",
+  Pdf:         "pdf",
+  Document:    "document",
+  Video:       "video",
+} as const;
+export type AttachmentKind = typeof AttachmentKind[keyof typeof AttachmentKind];
+
+export interface IngestInitAttachment {
+  clientAttachmentId: string;
+  kind: AttachmentKind | string;
+  mimeType?: string;
+  byteSize?: number;
+  sha256?: string;
   filename?: string;
-  captured_at?: IsoInstant;
+  extra: unknown;
 }
 
-export interface IngestCompositeManifest {
-  draft_id: Uuid;
-  body_markdown: string;
-  parts: IngestCompositePart[];
-  client_timestamp: IsoInstant;
-  vault_hint?: string;
+export interface IngestInitRequest {
+  clientNoteId: string;
+  capturedAt: IsoInstant;
+  body: string;
+  attachments: IngestInitAttachment[];
 }
 
-export const IngestStatus = { Accepted: "accepted" } as const;
-export type IngestStatus = typeof IngestStatus[keyof typeof IngestStatus];
-
-export interface IngestResponse {
-  artifact_id: Uuid;
-  draft_id: Uuid;
-  status: IngestStatus;
-  received_at: IsoInstant;
+export interface IngestInitUpload {
+  clientAttachmentId: string;
+  attachmentId: Uuid;
+  uploadUrl: string;
+  requiredHeaders: Record<string, string>;
+  expiresAt: IsoInstant;
 }
 
-export const IngestErrorCode = {
-  ProcessorFailed:   "processor_failed",
-  WorkerUnavailable: "worker_unavailable",
-  InvalidManifest:   "invalid_manifest",
-  UnsupportedKind:   "unsupported_kind",
-  PayloadTooLarge:   "payload_too_large",
-} as const;
-export type IngestErrorCode = typeof IngestErrorCode[keyof typeof IngestErrorCode];
-
-export interface IngestError {
-  code: IngestErrorCode;
-  message: string;
-  part_id?: string;
+export interface IngestInitResponse {
+  noteId: Uuid;
+  uploads: IngestInitUpload[];
 }
 
-export const WorkerState = {
-  Idle:     "idle",
-  Spawning: "spawning",
-  Warm:     "warm",
-} as const;
-export type WorkerState = typeof WorkerState[keyof typeof WorkerState];
+// ---------- Sync pull ----------
 
-export const SyncItemStatus = {
-  Processing: "processing",
-  Done:       "done",
-  Failed:     "failed",
-} as const;
-export type SyncItemStatus = typeof SyncItemStatus[keyof typeof SyncItemStatus];
-
-export interface ProcessedAsset {
-  vault_path: string;
-  download_url: string;
-  sha256: string;
-  size_bytes: number;
-}
-
-export interface ProcessedNote {
-  vault_path: string;
-  frontmatter_yaml: string;
-  body_markdown: string;
-  assets: ProcessedAsset[];
+export interface SyncPullAttachment {
+  attachmentId: Uuid;
+  kind: AttachmentKind | string;
+  filename?: string | null;
+  mimeType?: string | null;
+  byteSize?: number | null;
+  sha256?: string | null;
+  downloadUrl?: string | null;
+  downloadUrlExpiresAt?: IsoInstant | null;
+  extra: unknown;
 }
 
 export interface SyncPullItem {
-  artifact_id: Uuid;
-  draft_id: Uuid;
-  status: SyncItemStatus;
-  processed_note?: ProcessedNote;
-  error?: IngestError;
-  updated_at: IsoInstant;
+  noteId: Uuid;
+  relativePath: string;
+  body: string;
+  suggestedProject?: string | null;
+  tags: string[];
+  llmMode?: string | null;
+  attachments: SyncPullAttachment[];
+  updatedAt: IsoInstant;
+  deleted: boolean;
+  provenance?: unknown;
+  status?: string;
+  deletedAt?: IsoInstant;
+}
+
+export interface SyncPullProject {
+  entityId: Uuid;
+  canonicalName: string;
+  aliases: string[];
+  description?: string | null;
+  vaultFolder?: string | null;
+  isUserSource: boolean;
+  updatedAt: IsoInstant;
+  deletedAt?: IsoInstant;
 }
 
 export interface SyncPullResponse {
   items: SyncPullItem[];
-  worker_state: WorkerState;
-  server_timestamp: IsoInstant;
+  projects: SyncPullProject[];
+  nextSince: IsoInstant | null;
+}
+
+// ---------- Sync push ----------
+
+export interface SyncPushRequest {
+  noteId: Uuid;
+  body: string;
+  baseUpdatedAt: IsoInstant;
+  deleted?: boolean;
+}
+
+export interface SyncPushResponse {
+  noteId: Uuid;
+  updatedAt: IsoInstant;
+  transitionVersion: number;
+}
+
+export const SyncPushConflictCode = {
+  StaleBaseline: "stale_baseline",
+} as const;
+export type SyncPushConflictCode = typeof SyncPushConflictCode[keyof typeof SyncPushConflictCode];
+
+export interface SyncPushConflict {
+  code: SyncPushConflictCode | string;
+  currentUpdatedAt: IsoInstant;
+  currentTransitionVersion: number;
+}
+
+export interface SyncPushNotFound {
+  code: "note_not_found";
 }

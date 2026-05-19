@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NodaTime;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -14,9 +15,11 @@ using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
 {
     [DbContext(typeof(CloudDbContext))]
-    partial class CloudDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260519134751_AddNotesBodyHash")]
+    partial class AddNotesBodyHash
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -640,7 +643,7 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
 
                     b.ToTable("ingest_jobs", null, t =>
                         {
-                            t.HasCheckConstraint("ck_ingest_jobs_kind", "kind IN ('capture','hub_regen','reprocess','user_edit_embed')");
+                            t.HasCheckConstraint("ck_ingest_jobs_kind", "kind IN ('capture','hub_regen','reprocess')");
 
                             t.HasCheckConstraint("ck_ingest_jobs_status", "status IN ('queued','extracting_attachments','composing','routing','extracting_entities','embedding','succeeded','failed_extraction','failed_composition','failed_route','failed_entities','failed_embedding','dead_lettered')");
                         });

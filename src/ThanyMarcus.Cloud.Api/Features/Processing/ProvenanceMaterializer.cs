@@ -116,7 +116,10 @@ public sealed partial class ProvenanceMaterializer
         {
             if (!el.TryGetProperty("stage", out var stage) || stage.ValueKind != JsonValueKind.String) continue;
             var stageStr = stage.GetString();
-            if (stageStr is null || !stageStr.StartsWith("llm_", StringComparison.Ordinal)) continue;
+            if (stageStr is null) continue;
+            if (!stageStr.StartsWith("llm_", StringComparison.Ordinal) &&
+                !stageStr.StartsWith("embedding_", StringComparison.Ordinal) &&
+                !stageStr.StartsWith("user_edit_", StringComparison.Ordinal)) continue;
             list.Add(new LlmCallRollup(
                 Stage:       stageStr,
                 PromptId:    el.TryGetProperty("prompt_id", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null,

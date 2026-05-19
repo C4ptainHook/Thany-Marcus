@@ -98,7 +98,8 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         {
             if (note.DeletedAt is not null) break;
 
-            var candEmb = await embeddings.EmbedAsync(cand.CandidateCanonical, ct);
+            var candVec = await EntityEmbeddingHelper.EmbedCanonicalAsync(embeddings, cand.CandidateCanonical, ct);
+            var candEmb = candVec.ToArray();
             var neighbors = await EntityVectorQueries.NearestAsync(
                 db, cand.CandidateKind, candEmb, o.Pgvector.DedupTopK, ct);
 
@@ -150,7 +151,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
                     Aliases = (cand.Aliases ?? Array.Empty<string>()).ToArray(),
                     Source = EntitySource.Llm,
                     IsProvisional = true,
-                    Embedding = new Vector(candEmb),
+                    Embedding = candVec,
                 };
                 db.Entities.Add(target);
             }

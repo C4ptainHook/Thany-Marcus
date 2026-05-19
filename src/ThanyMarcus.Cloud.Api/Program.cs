@@ -27,8 +27,8 @@ using ThanyMarcus.Cloud.Api.Infrastructure.Extraction;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 using ThanyMarcus.Cloud.Api.Infrastructure.Ffmpeg;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Embedding;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Preflight;
-using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Stubs;
 using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sweepers;
 using ThanyMarcus.Shared.Database;
@@ -213,7 +213,10 @@ builder.Services.AddSingleton<ILlmClient>(sp => sp.GetRequiredService<SafeLlmCli
 builder.Services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
 builder.Services.AddScoped<LlmEventAppender>();
 
-builder.Services.AddSingleton<IEmbeddingClient, StubEmbeddingClient>();
+builder.Services.Configure<GraniteEmbeddingOptions>(
+    builder.Configuration.GetSection("IngestSaga:Models:Embedding"));
+builder.Services.AddSingleton<IEmbeddingClient, GraniteEmbeddingClient>();
+builder.Services.AddHostedService<GraniteEmbeddingWarmupService>();
 builder.Services.AddScoped<IVlmClient, OllamaVlmClient>();
 builder.Services.AddSingleton<IDoclingClient, DoclingHttpClient>();
 builder.Services.AddSingleton<IParakeetClient, ParakeetHttpClient>();
@@ -296,6 +299,7 @@ app.MapIngestEndpoints();
 app.MapReprocessEndpoint();
 app.MapNoteDeleteEndpoint();
 app.MapSyncPullEndpoint();
+app.MapSyncPushEndpoint();
 app.MapSyncEventsEndpoint();
 app.MapAdminSettingsEndpoints();
 app.MapAdminPluginTokenEndpoints();

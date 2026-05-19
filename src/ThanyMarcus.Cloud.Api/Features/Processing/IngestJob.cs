@@ -81,4 +81,5 @@ public static class IngestJobKind
     public const string Capture = "capture";
     public const string Reprocess = "reprocess";
     public const string HubRegen = "hub_regen";
+    public const string UserEditEmbed = "user_edit_embed";
 }

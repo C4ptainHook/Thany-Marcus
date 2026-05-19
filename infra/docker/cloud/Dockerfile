@@ -1,3 +1,15 @@
+ARG GRANITE_HF_REPO=ibm-granite/granite-embedding-311m-multilingual-r2
+ARG GRANITE_REVISION=main
+
+FROM python:3.12-slim AS granite
+ARG GRANITE_HF_REPO
+ARG GRANITE_REVISION
+RUN pip install --no-cache-dir "huggingface_hub[cli]"
+RUN huggingface-cli download "$GRANITE_HF_REPO" \
+        --revision "$GRANITE_REVISION" \
+        --include "onnx/model.onnx" "tokenizer.json" "config.json" \
+        --local-dir /tmp/granite
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY ["Directory.Build.props", "Directory.Packages.props", "global.json", "./"]
@@ -16,5 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app .
+COPY --from=granite /tmp/granite/onnx/model.onnx     /app/models/granite/model.onnx
+COPY --from=granite /tmp/granite/tokenizer.json      /app/models/granite/tokenizer.json
+COPY --from=granite /tmp/granite/config.json         /app/models/granite/config.json
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "ThanyMarcus.Cloud.Api.dll"]

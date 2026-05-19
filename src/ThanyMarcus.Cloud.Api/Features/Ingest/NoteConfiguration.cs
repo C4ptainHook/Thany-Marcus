@@ -28,6 +28,7 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note>
         builder.Property(n => n.Provenance).HasColumnType("jsonb");
 
         builder.Property(n => n.Embedding).HasColumnType("vector(256)");
+        builder.Property(n => n.BodyHash).HasColumnType("text");
         builder.Property(n => n.DeletedAt);
         builder.Property(n => n.IsHub).IsRequired().HasDefaultValue(false);
         builder.Property(n => n.ProjectId);

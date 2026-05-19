@@ -379,3 +379,21 @@ No alternative — mime-sniff and dispatch is the only sensible design for
 - **whisper.cpp**: https://github.com/ggml-org/whisper.cpp
 - **Granite Embedding R2**: https://huggingface.co/blog/ibm-granite/granite-embedding-multilingual-r2
 - **Harrier-OSS-v1**: https://huggingface.co/microsoft/harrier-oss-v1-270m
+
+---
+
+## Amendment 2026-05-19 — Granite R2 model name correction (CLOUD-EMBEDDING handoff #8)
+
+The original §"Embedding (text retrieval)" row named "IBM Granite Embedding 278m R2" — but R2 does not ship a 278m variant; the 278m exists only in R1. The R2 model line is 97m (384-dim, no Matryoshka), 311m (768-dim with Matryoshka cuts to 512/384/256/128), and English-only 47m/149m variants. The schema's locked `vector(256)` requires Matryoshka, so the implementation pins **`ibm-granite/granite-embedding-311m-multilingual-r2`**, Matryoshka-cut to 256.
+
+Resident footprint ≈ 600 MB (FP32 ONNX), not the ~200 MB the original ADR estimated. Memory budget at §"Memory budget" is amended accordingly: control plane footprint ≈ 4.4 GB on the 4 GB tier → resize to 8 GB control plane OR drop one Docling replica before any production rollout (flagged as a Tier-A capacity decision). For thesis MVP, the 4 GB tier still functions because the 600 MB headroom was a floor estimate; runtime measurements at first apply will confirm.
+
+Other R2 facts re-verified 2026-05-19 against the HF blog post:
+
+- 32K context support (vs R1's 512). The ADR's 512-token cap is retained for eval-baseline consistency; bumping to a larger cap is a config sweep in M9.
+- "Requires no task-specific instructions" — no query/passage prefix overloads on `IEmbeddingClient`.
+- Apache 2.0 + first-party ONNX at `onnx/model.onnx` — confirmed unchanged.
+- 52 enhanced-support languages including ru/uk/pl, plus 200+ general — multilingual contract intact; cross-lingual En↔Ru cosine test asserts it.
+
+The §"Embedding (text retrieval)" table row and §"Memory budget" line should be read with this amendment as authoritative for the model identifier and footprint.
+

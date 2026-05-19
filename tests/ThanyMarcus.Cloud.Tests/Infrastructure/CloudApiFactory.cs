@@ -4,7 +4,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ThanyMarcus.Cloud.Api.Features.Processing;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Embedding;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sweepers;
+using ThanyMarcus.Cloud.Tests.Infrastructure.Embedding;
 
 namespace ThanyMarcus.Cloud.Tests.Infrastructure;
 
@@ -65,6 +68,15 @@ public sealed class CloudApiFactory : WebApplicationFactory<Program>
                     s.ImplementationType == typeof(JobOrchestratorWorker) ||
                     s.ImplementationType == typeof(OrphanIngestSweeper));
             }
+            services.RemoveAll<IHostedService>(s =>
+                s.ImplementationType == typeof(GraniteEmbeddingWarmupService));
+            for (var i = services.Count - 1; i >= 0; i--)
+            {
+                if (services[i].ServiceType == typeof(IEmbeddingClient))
+                    services.RemoveAt(i);
+            }
+            services.AddSingleton<IEmbeddingClient>(_ =>
+                new FakeEmbeddingClient(FakeEmbeddingClient.DeterministicUnitVector));
             CustomizeServices?.Invoke(services);
         });
     }

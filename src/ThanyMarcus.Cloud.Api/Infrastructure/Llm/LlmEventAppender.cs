@@ -45,6 +45,47 @@ public sealed class LlmEventAppender
               WHERE id = {jobId}
             """, ct);
     }
+
+    public async Task AppendEmbeddingEmitAsync(
+        Guid jobId, string model, string modelVersion, long durationMs, int dim, string bodyHash, CancellationToken ct)
+    {
+        var now = clock.GetCurrentInstant();
+        var payload = JsonSerializer.Serialize(new
+        {
+            at = now.ToString(),
+            stage = EmbeddingEventStages.Emit,
+            model,
+            model_version = modelVersion,
+            duration_ms = durationMs,
+            dim,
+            body_hash = bodyHash,
+        }, JsonOpts);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE ingest_jobs SET
+                events_log = events_log || {payload}::jsonb,
+                updated_at = {now}
+              WHERE id = {jobId}
+            """, ct);
+    }
+
+    public async Task AppendEmbeddingSkipAsync(
+        Guid jobId, string bodyHash, CancellationToken ct)
+    {
+        var now = clock.GetCurrentInstant();
+        var payload = JsonSerializer.Serialize(new
+        {
+            at = now.ToString(),
+            stage = EmbeddingEventStages.Skip,
+            reason = "unchanged_body",
+            body_hash = bodyHash,
+        }, JsonOpts);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE ingest_jobs SET
+                events_log = events_log || {payload}::jsonb,
+                updated_at = {now}
+              WHERE id = {jobId}
+            """, ct);
+    }
 }
 
 public sealed record LlmEvent(
@@ -67,4 +108,10 @@ public static class LlmEventStages
     public const string Extract = "llm_extract";
     public const string Dedup = "llm_dedup";
     public const string HubGenerate = "llm_hub_generate";
+}
+
+public static class EmbeddingEventStages
+{
+    public const string Emit = "embedding_emit";
+    public const string Skip = "embedding_skip";
 }

@@ -154,9 +154,11 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
         pullResp.StatusCode.ShouldBe(HttpStatusCode.OK);
         var pullBody = await pullResp.Content.ReadFromJsonAsync<SyncPullResponse>(ct);
         pullBody.ShouldNotBeNull();
+        pullBody.Projects.ShouldBeEmpty();
         var item = pullBody!.Items.SingleOrDefault(i => i.NoteId == initResp.NoteId);
         item.ShouldNotBeNull();
-        item!.RelativePath.ShouldBe($"Inbox/{initResp.NoteId}.md");
+        item!.Deleted.ShouldBeFalse();
+        item.RelativePath.ShouldBe($"Inbox/{initResp.NoteId}.md");
         item.Body.ShouldContain("[stub URL extraction]");
         item.Body.ShouldContain("[stub VLM description");
         item.Body.ShouldContain("[stub parakeet transcription]");
@@ -216,6 +218,33 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
         item2.Provenance!.Value.GetProperty("compose_template").GetString()
             .ShouldBe(CompositeNoteComposer.ComposeTemplateVersion);
         item2.Body!.ShouldContain("## User Notes\n\nmy preserved notes\n\n## System Output");
+
+        // -------- Push lane: user-edit body round-trip + re-embed --------
+        var bodyBeforePush = item2.Body!;
+        var baselineUpdatedAt = item2.UpdatedAt;
+        var pushedBody = bodyBeforePush.Replace(
+            "## User Notes\n\nmy preserved notes\n\n",
+            "## User Notes\n\nedited via plugin push\n\n",
+            StringComparison.Ordinal);
+
+        var pushReq = new SyncPushRequest(
+            NoteId:        initResp.NoteId,
+            Body:          pushedBody,
+            BaseUpdatedAt: baselineUpdatedAt,
+            Deleted:       false);
+        var pushResp = await client.PostAsJsonAsync(
+            new Uri("/api/sync/push", UriKind.Relative), pushReq, ct);
+        pushResp.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        await WaitForUserEditEmbedTerminalAsync(postgres.ConnectionString, initResp.NoteId, ct);
+
+        var pullResp_push = await client.GetAsync(
+            new Uri("/api/sync/pull?include=provenance", UriKind.Relative), ct);
+        var pullBody_push = await pullResp_push.Content.ReadFromJsonAsync<SyncPullResponse>(ct);
+        var item_push = pullBody_push!.Items.SingleOrDefault(i => i.NoteId == initResp.NoteId);
+        item_push.ShouldNotBeNull();
+        item_push!.Body.ShouldContain("edited via plugin push");
+        item_push.Body.ShouldNotContain("\n\nmy preserved notes\n\n");
 
         var deleteResp = await client.DeleteAsync(
             new Uri($"/api/notes/{initResp.NoteId}", UriKind.Relative), ct);
@@ -333,6 +362,26 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
             : new List<ExtractionTask>();
         var diag = $"note.Status={note?.Status} jobs=[{string.Join(",", allJobs.Select(j => j.Status))}] atts=[{string.Join(",", atts.Select(a => a.ExtractionStatus))}] tasks=[{string.Join(",", tasks.Select(t => t.Status))}]";
         throw new TimeoutException($"reprocess for note {noteId} did not complete within {TerminalTimeout}; {diag}");
+    }
+
+    private static async Task WaitForUserEditEmbedTerminalAsync(
+        string connStr, Guid noteId, CancellationToken ct)
+    {
+        var deadline = DateTimeOffset.UtcNow + TerminalTimeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            using var db = NewDb(connStr);
+            var job = await db.IngestJobs.AsNoTracking()
+                .Where(j => j.NoteId == noteId && j.Kind == IngestJobKind.UserEditEmbed)
+                .OrderByDescending(j => j.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            if (job is not null && IngestJobStatus.IsTerminal(job.Status))
+            {
+                return;
+            }
+            await Task.Delay(200, ct);
+        }
+        throw new TimeoutException($"user-edit-embed job for note {noteId} did not terminate within {TerminalTimeout}");
     }
 
     private static async Task WaitForDeletedAsync(

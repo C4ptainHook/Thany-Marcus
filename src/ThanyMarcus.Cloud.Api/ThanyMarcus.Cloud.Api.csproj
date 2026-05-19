@@ -45,6 +45,11 @@
     <PackageReference Include="PdfPig" />
     <PackageReference Include="NAudio.Core" />
 
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <PackageReference Include="Tokenizers.DotNet" />
+    <PackageReference Include="Tokenizers.DotNet.runtime.osx-arm64" />
+    <PackageReference Include="Tokenizers.DotNet.runtime.linux-x64" />
+
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 

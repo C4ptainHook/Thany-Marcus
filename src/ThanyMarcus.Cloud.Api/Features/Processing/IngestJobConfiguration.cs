@@ -17,7 +17,7 @@ public sealed class IngestJobConfiguration : IEntityTypeConfiguration<IngestJob>
                 "'failed_extraction','failed_composition','failed_route'," +
                 "'failed_entities','failed_embedding','dead_lettered')");
             t.HasCheckConstraint("ck_ingest_jobs_kind",
-                "kind IN ('capture','hub_regen','reprocess')");
+                "kind IN ('capture','hub_regen','reprocess','user_edit_embed')");
         });
         builder.HasKey(j => j.Id);
 

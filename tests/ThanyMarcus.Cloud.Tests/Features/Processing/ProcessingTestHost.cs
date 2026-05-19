@@ -15,6 +15,7 @@ using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Stubs;
 using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
 using ThanyMarcus.Cloud.Tests.Infrastructure;
+using ThanyMarcus.Cloud.Tests.Infrastructure.Embedding;
 using ThanyMarcus.Shared.Database;
 
 namespace ThanyMarcus.Cloud.Tests.Features.Processing;
@@ -65,7 +66,8 @@ public static class ProcessingTestHost
         services.AddSingleton<ILlmClient, StubLlmClient>();
         services.AddSingleton<ILlmClientFactory, StubLlmClientFactory>();
         services.AddScoped<LlmEventAppender>();
-        services.AddSingleton<IEmbeddingClient, StubEmbeddingClient>();
+        services.AddSingleton<IEmbeddingClient>(_ =>
+            new FakeEmbeddingClient(FakeEmbeddingClient.DeterministicUnitVector));
         services.AddSingleton<IIngestEventBus, NoOpIngestEventBus>();
 
         services.AddSingleton<IArtifactStore, FakeArtifactStore>();
