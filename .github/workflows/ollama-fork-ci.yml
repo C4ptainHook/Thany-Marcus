@@ -24,12 +24,23 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: checkout repo (for ollama-fork.Dockerfile)
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
       - name: checkout fork at pinned sha
         uses: actions/checkout@v4
         with:
           repository: tc-mb/ollama
           ref: ${{ github.event.inputs.fork_sha || 'd12fda49fac50c5e420886bfc0ac58070b23b193' }}
           path: ollama-fork
+
+      - name: free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
 
       - uses: docker/setup-buildx-action@v3
 
@@ -50,10 +61,8 @@ jobs:
       - uses: docker/build-push-action@v5
         with:
           context: ollama-fork
-          file: ollama-fork/Dockerfile
+          file: repo/infra/docker/cloud/ollama-fork.Dockerfile
           platforms: linux/amd64
-          build-args: |
-            FLAVOR=cpu
           push: true
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/thany-ollama-minicpm:minicpm-v-${{ env.FORK_SHA_SHORT }}

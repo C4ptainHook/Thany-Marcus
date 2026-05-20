@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 using ThanyMarcus.Portal.Tests.Infrastructure;
 
@@ -45,7 +46,7 @@ public sealed class AwaitingCloudCallbackHandlerTests(PostgresFixture postgres) 
             ct: ct);
 
         var tracked = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
-        tracked.PhaseStartedAt = Clock.GetCurrentInstant() - Duration.FromMinutes(16);
+        tracked.PhaseStartedAt = Clock.GetCurrentInstant() - SagaTimeouts.AwaitingCloudCallback - Duration.FromMinutes(1);
         await Db.SaveChangesAsync(ct);
         Db.ChangeTracker.Clear();
 

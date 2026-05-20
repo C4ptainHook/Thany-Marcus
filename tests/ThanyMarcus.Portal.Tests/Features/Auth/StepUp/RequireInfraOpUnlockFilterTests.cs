@@ -68,7 +68,7 @@ public sealed class RequireInfraOpUnlockFilterTests(PostgresFixture postgres) : 
         var ok = await client.GetAsync(new Uri("/api/test/step-up-only", UriKind.Relative), ct);
         ok.StatusCode.ShouldBe(HttpStatusCode.OK);
 
-        Clock.Advance(Duration.FromMinutes(11));
+        Clock.Advance(PostgresInfraOpUnlockCache.SlidingTtl + Duration.FromMinutes(1));
 
         var expired = await client.GetAsync(new Uri("/api/test/step-up-only", UriKind.Relative), ct);
         expired.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
