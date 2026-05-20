@@ -42,7 +42,10 @@ public sealed partial class RollingBackTfHandler(
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
 
         var workdir = workspaceLayout.GetJobDir(job.Id);
-        var hasState = Directory.Exists(workdir);
+        if (!Directory.Exists(workdir))
+        {
+            workdir = await workspaceLayout.RenderAsync(job, cloud, ct);
+        }
 
         var dek = new byte[32];
         byte[]? providerToken = null;
@@ -57,32 +60,35 @@ public sealed partial class RollingBackTfHandler(
                 providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
             }
 
-            if (hasState)
+            var connStr = config.GetConnectionString("Portal")
+                ?? throw new InvalidOperationException("ConnectionStrings:Portal not configured");
+            var pgUrl = TfPlanningHandler.ToPostgresUrl(connStr);
+            var initResult = await tf.InitAsync(workdir, new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                var connStr = config.GetConnectionString("Portal")
-                    ?? throw new InvalidOperationException("ConnectionStrings:Portal not configured");
-                var initResult = await tf.InitAsync(workdir, new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["conn_str"] = connStr,
-                }, ct);
-                EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", initResult.Stdout);
+                ["conn_str"] = pgUrl,
+            }, ct);
+            EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", initResult.Stdout);
 
-                if (initResult.Success)
-                {
-                    var destroyEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
-                    var destroyResult = await tf.DestroyAsync(workdir, destroyEnv, ct);
-                    EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", destroyResult.Stdout);
-                    EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", destroyResult.Stderr);
+            if (!initResult.Success)
+            {
+                EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["error"] = "rollback_init_failed" });
+                await HandleDestroyFailureAsync(job, cloud, ct);
+                return;
+            }
 
-                    if (!destroyResult.Success)
-                    {
-                        await HandleDestroyFailureAsync(job, cloud, ct);
-                        return;
-                    }
-                }
-                else
+            var wsResult = await tf.SelectWorkspaceAsync(workdir, cloud.Id.ToString(), ct);
+            EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", wsResult.Stdout);
+            EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", wsResult.Stderr);
+
+            if (wsResult.Success)
+            {
+                var destroyEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
+                var destroyResult = await tf.DestroyAsync(workdir, destroyEnv, ct);
+                EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", destroyResult.Stdout);
+                EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", destroyResult.Stderr);
+
+                if (!destroyResult.Success)
                 {
-                    EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["error"] = "rollback_init_failed" });
                     await HandleDestroyFailureAsync(job, cloud, ct);
                     return;
                 }
@@ -91,7 +97,7 @@ public sealed partial class RollingBackTfHandler(
             {
                 EventsLogAppender.Append(job, clock, Phase, new JsonObject
                 {
-                    ["event"] = "no_workdir_to_destroy",
+                    ["event"] = "no_workspace_to_destroy",
                 });
             }
 

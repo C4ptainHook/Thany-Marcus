@@ -75,6 +75,9 @@ public static class DestroyCloudEndpoints
             };
             db.ProvisioningJobs.Add(job);
 
+            cloud.ProvisioningStatus = SagaStatus.Destroying;
+            cloud.UpdatedAt = now;
+
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
 

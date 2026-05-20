@@ -112,6 +112,12 @@ public sealed class ListenNotifyTests(PostgresFixture postgres) : DbIntegrationT
         public Task<TerraformResult> InitAsync(string workdir, IReadOnlyDictionary<string, string> backendConfig, CancellationToken ct) =>
             Task.FromResult(new TerraformResult(0, "", ""));
 
+        public Task<TerraformResult> SelectOrCreateWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct) =>
+            Task.FromResult(new TerraformResult(0, "", ""));
+
+        public Task<TerraformResult> SelectWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct) =>
+            Task.FromResult(new TerraformResult(0, "", ""));
+
         public Task<TerraformResult> PlanAsync(string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct)
         {
             Interlocked.Increment(ref planCalls);

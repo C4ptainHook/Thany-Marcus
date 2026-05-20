@@ -2,7 +2,6 @@
 bootcmd:
   - mkdir -p /opt/thany-cloud /etc/thany-cloud /var/log/thany-cloud /run/cloud-secrets
   - chmod 0700 /run/cloud-secrets
-  - timedatectl set-timezone ${timezone}
 
 users:
   - default
@@ -209,7 +208,7 @@ write_files:
           networks: [cloud]
           mem_limit: 3g
           healthcheck:
-            test: ["CMD-SHELL", "wget -q -O- http://localhost:11434/api/version | grep -q version || exit 1"]
+            test: ["CMD", "/bin/ollama", "list"]
             interval: 15s
             timeout: 5s
             retries: 10
@@ -261,12 +260,6 @@ write_files:
           command: ["-models", "/models", "-port", "5092"]
           networks: [cloud]
           mem_limit: 2500m
-          healthcheck:
-            test: ["CMD-SHELL", "wget -q -O- http://localhost:5092/health | grep -q '\"status\":\"ok\"' || exit 1"]
-            interval: 15s
-            timeout: 5s
-            retries: 10
-            start_period: 45s
 
       volumes:
         pg-data:
@@ -277,6 +270,7 @@ write_files:
         cloud:
 
 runcmd:
+  - timedatectl set-timezone ${timezone}
   - ufw default deny incoming
   - ufw default allow outgoing
   - ufw limit OpenSSH

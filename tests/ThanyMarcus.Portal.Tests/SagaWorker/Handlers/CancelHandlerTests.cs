@@ -260,6 +260,14 @@ public sealed class CancelHandlerTests(PostgresFixture postgres) : DbIntegration
             string workdir, IReadOnlyDictionary<string, string> backendConfig, CancellationToken ct) =>
             throw new InvalidOperationException("boom: provider unreachable");
 
+        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> SelectOrCreateWorkspaceAsync(
+            string workdir, string workspaceName, CancellationToken ct) =>
+            throw new NotImplementedException();
+
+        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> SelectWorkspaceAsync(
+            string workdir, string workspaceName, CancellationToken ct) =>
+            throw new NotImplementedException();
+
         public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> PlanAsync(
             string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct) =>
             throw new NotImplementedException();

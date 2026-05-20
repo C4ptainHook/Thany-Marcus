@@ -99,6 +99,22 @@ public sealed partial class TfPlanningHandler(
                 return;
             }
 
+            var wsResult = await tf.SelectOrCreateWorkspaceAsync(workdir, cloud.Id.ToString(), ct);
+            EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", wsResult.Stdout);
+            EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", wsResult.Stderr);
+            if (!wsResult.Success)
+            {
+                EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                {
+                    ["error"] = "workspace_select_failed",
+                    ["exit_code"] = wsResult.ExitCode,
+                });
+                job.LastError = "terraform workspace select/new failed";
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, SagaStatus.FailedTf, ct);
+                return;
+            }
+
             var planEnv = await BuildEnvAsync(cloud, job, providerToken, dek, ct);
             var planResult = await tf.PlanAsync(workdir, planEnv, ct);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", planResult.Stdout);

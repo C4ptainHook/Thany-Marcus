@@ -5,6 +5,8 @@ namespace ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 public interface ITerraformRunner
 {
     Task<TerraformResult> InitAsync(string workdir, IReadOnlyDictionary<string, string> backendConfig, CancellationToken ct);
+    Task<TerraformResult> SelectOrCreateWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct);
+    Task<TerraformResult> SelectWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct);
     Task<TerraformResult> PlanAsync(string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct);
     Task<TerraformResult> ApplyAsync(string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct);
     Task<TerraformResult> DestroyAsync(string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct);

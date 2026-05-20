@@ -36,8 +36,8 @@
     }
     if (data.cloud && data.cloud.provisioningStatus === 'succeeded') {
       try {
-        const r = await fetch(`https://${data.cloud.hostname}/healthz`, { signal: AbortSignal.timeout(3000) });
-        if (r.ok) healthz = (await r.json()) as CloudHealthz;
+        const r = await fetch(`https://${data.cloud.hostname}/health/live`, { signal: AbortSignal.timeout(3000) });
+        if (r.ok) healthz = { status: 'Healthy' };
       } catch { /* fail soft */ }
     }
   });
