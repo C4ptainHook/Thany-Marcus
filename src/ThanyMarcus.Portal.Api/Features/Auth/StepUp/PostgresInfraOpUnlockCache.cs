@@ -11,7 +11,7 @@ public sealed class PostgresInfraOpUnlockCache(
     IDataProtectionProvider dp,
     IClock clock) : IInfraOpUnlockCache
 {
-    private static readonly Duration SlidingTtl = Duration.FromMinutes(60);
+    public static readonly Duration SlidingTtl = Duration.FromMinutes(60);
     private readonly IDataProtector _protector = dp.CreateProtector("step-up-unlock.v1");
 
     public async Task<bool> TryGetAsync(Guid userId, byte[] dekDestination, CancellationToken ct)

@@ -1,8 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NodaTime;
+using NodaTime.Serialization.SystemTextJson;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
@@ -14,6 +17,8 @@ namespace ThanyMarcus.Portal.Tests.Features.CloudManagement.ProviderTokens;
 public sealed class ProviderTokenEndpointsTests(PostgresFixture postgres) : FactoryDbTestBase(postgres)
 {
     private static readonly Uri Root = new("/api/clouds/provider-tokens", UriKind.Relative);
+    private static readonly JsonSerializerOptions NodaJson =
+        new JsonSerializerOptions(JsonSerializerDefaults.Web).ConfigureForNodaTime(DateTimeZoneProviders.Tzdb);
 
     private async Task<User> InsertUserAsync()
     {
@@ -235,7 +240,7 @@ public sealed class ProviderTokenEndpointsTests(PostgresFixture postgres) : Fact
         rawBody.ShouldNotContain("nonce");
         rawBody.ShouldNotContain("tag");
 
-        var summaries = await res.Content.ReadFromJsonAsync<List<ProviderTokenSummary>>(ct);
+        var summaries = await res.Content.ReadFromJsonAsync<List<ProviderTokenSummary>>(NodaJson, ct);
         summaries!.Select(s => s.Provider).ShouldBe([KnownProviders.Azure, KnownProviders.Cloudflare]);
     }
 

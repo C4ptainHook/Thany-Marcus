@@ -90,7 +90,7 @@ public sealed class PostgresInfraOpUnlockCacheTests(PostgresFixture postgres) : 
         var cache = CreateCache();
         await cache.SetAsync(user.Id, MakeDek(), ct);
 
-        Clock.Advance(Duration.FromMinutes(11));
+        Clock.Advance(PostgresInfraOpUnlockCache.SlidingTtl + Duration.FromMinutes(1));
 
         var ok = await cache.TryGetAsync(user.Id, new byte[32], ct);
 
@@ -107,13 +107,15 @@ public sealed class PostgresInfraOpUnlockCacheTests(PostgresFixture postgres) : 
         var cache = CreateCache();
         await cache.SetAsync(user.Id, MakeDek(), ct);
 
-        Clock.Advance(Duration.FromMinutes(5));
+        var halfTtl = Duration.FromTicks(PostgresInfraOpUnlockCache.SlidingTtl.BclCompatibleTicks / 2);
+
+        Clock.Advance(halfTtl);
         (await cache.TryGetAsync(user.Id, new byte[32], ct)).ShouldBeTrue();
 
-        Clock.Advance(Duration.FromMinutes(9));
+        Clock.Advance(halfTtl);
         (await cache.TryGetAsync(user.Id, new byte[32], ct)).ShouldBeTrue();
 
-        Clock.Advance(Duration.FromMinutes(11));
+        Clock.Advance(PostgresInfraOpUnlockCache.SlidingTtl + Duration.FromMinutes(1));
         (await cache.TryGetAsync(user.Id, new byte[32], ct)).ShouldBeFalse();
     }
 
@@ -141,7 +143,8 @@ public sealed class PostgresInfraOpUnlockCacheTests(PostgresFixture postgres) : 
         var cache = CreateCache();
         await cache.SetAsync(stale.Id, MakeDek(0x01), ct);
 
-        Clock.Advance(Duration.FromMinutes(9));
+        var almostTtl = PostgresInfraOpUnlockCache.SlidingTtl - Duration.FromMinutes(1);
+        Clock.Advance(almostTtl);
         await cache.SetAsync(fresh.Id, MakeDek(0x02), ct);
 
         Clock.Advance(Duration.FromMinutes(2));
