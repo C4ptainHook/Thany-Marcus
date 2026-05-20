@@ -36,7 +36,7 @@ public static class GetCloudStatusEndpoints
             CancellationToken ct) =>
         {
             var userId = Guid.Parse(user.FindFirstValue(AuthClaimTypes.SubUs)!);
-            var cloud = await db.Clouds.IgnoreQueryFilters()
+            var cloud = await db.Clouds
                 .Where(c => c.UserId == userId)
                 .OrderByDescending(c => c.CreatedAt)
                 .FirstOrDefaultAsync(ct);

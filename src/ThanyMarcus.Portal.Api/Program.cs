@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using NodaTime;
+using NodaTime.Serialization.SystemTextJson;
 using Polly;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -43,6 +44,9 @@ builder.Logging.AddJsonConsole(o =>
     o.IncludeScopes = true;
     o.UseUtcTimestamp = true;
 });
+
+builder.Services.ConfigureHttpJsonOptions(o =>
+    o.SerializerOptions.ConfigureForNodaTime(DateTimeZoneProviders.Tzdb));
 
 builder.Services.AddOpenApi();
 

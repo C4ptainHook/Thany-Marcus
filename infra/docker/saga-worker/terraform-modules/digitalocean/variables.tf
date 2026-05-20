@@ -86,3 +86,9 @@ variable "ollama_pull_tag" {
   type        = string
   default     = "openbmb/minicpm-v4.6:q4_K_M"
 }
+
+variable "ollama_image_tag" {
+  description = "Tag for ghcr.io/c4ptainhook/thany-ollama-minicpm — the tc-mb/ollama MiniCPM-V fork built by ollama-fork-ci.yml. Upstream Ollama lacks 4.6 model support."
+  type        = string
+  default     = "latest"
+}

@@ -31,6 +31,7 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL.NodaTime" />
     <PackageReference Include="EFCore.NamingConventions" />
     <PackageReference Include="NodaTime" />
+    <PackageReference Include="NodaTime.Serialization.SystemTextJson" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
 
     <PackageReference Include="Microsoft.Extensions.Http.Polly" />

@@ -42,6 +42,7 @@ resource "digitalocean_droplet" "cloud" {
     storage_access_key_id = digitalocean_spaces_key.artifacts.access_key
     storage_access_secret = digitalocean_spaces_key.artifacts.secret_key
     ollama_pull_tag       = var.ollama_pull_tag
+    ollama_image_tag      = var.ollama_image_tag
   })
 
   lifecycle {
@@ -55,9 +56,10 @@ resource "digitalocean_volume_attachment" "data" {
 }
 
 resource "digitalocean_spaces_bucket" "artifacts" {
-  name   = local.bucket_name
-  region = var.region
-  acl    = "private"
+  name          = local.bucket_name
+  region        = var.region
+  acl           = "private"
+  force_destroy = true
 }
 
 resource "digitalocean_spaces_bucket_cors_configuration" "artifacts" {

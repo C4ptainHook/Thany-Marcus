@@ -50,7 +50,6 @@ public sealed partial class OllamaVlmClient : IVlmClient
         var temperature = config.GetValue("IngestSaga:Models:Vlm:Temperature", 0.2);
         var presignTtl = TimeSpan.FromMinutes(5);
 
-        string imageSource;
         byte[] imageBytes;
 
         if (string.Equals(att.StorageProvider, "external", StringComparison.OrdinalIgnoreCase))
@@ -59,13 +58,11 @@ public sealed partial class OllamaVlmClient : IVlmClient
             {
                 throw new InvalidOperationException($"external attachment {att.Id} has no url");
             }
-            imageSource = att.Url;
             imageBytes = await DownloadAsync(new Uri(att.Url), ct);
         }
         else
         {
             var presigned = await store.IssueDownloadUrlAsync(att.StorageKey, presignTtl, ct);
-            imageSource = presigned.Url.ToString();
             imageBytes = await DownloadAsync(presigned.Url, ct);
         }
 
@@ -100,7 +97,7 @@ public sealed partial class OllamaVlmClient : IVlmClient
         {
             model = modelTag,
             prompt = prompt,
-            images = new[] { imageSource },
+            images = new[] { Convert.ToBase64String(imageBytes) },
             format = "json",
             stream = false,
             options = new { num_ctx = numCtx, temperature = temperature },

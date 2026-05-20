@@ -110,6 +110,11 @@ public sealed partial class RollingBackTfHandler(
                 var reason = ReadRollbackReason(job);
                 var terminal = MapTerminal(reason);
 
+                cloud.DestroyedAt = clock.GetCurrentInstant();
+                cloud.VmIp = null;
+                cloud.EncryptedCloudAdminToken = null;
+                cloud.TerraformWorkspace = null;
+
                 EventsLogAppender.Append(job, clock, Phase, new JsonObject
                 {
                     ["event"] = "tf_rollback_complete",

@@ -37,6 +37,7 @@
 
     <!-- Time -->
     <PackageVersion Include="NodaTime" Version="3.*" />
+    <PackageVersion Include="NodaTime.Serialization.SystemTextJson" Version="1.*" />
 
     <!-- Auth / TOTP (PORTAL-003a) -->
     <PackageVersion Include="Otp.NET" Version="1.4.*" />

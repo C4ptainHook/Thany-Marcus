@@ -36,12 +36,11 @@ public sealed partial class ParakeetHttpClient : IParakeetClient
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storageKey);
 
-        var presigned = await store.IssueDownloadUrlAsync(storageKey, options.PresignedUrlTtl, ct);
-
-        using var form = new MultipartFormDataContent
-        {
-            { new StringContent(presigned.Url.ToString()), "url" },
-        };
+        await using var stream = await store.OpenReadAsync(storageKey, ct);
+        using var form = new MultipartFormDataContent();
+        var fileContent = new StreamContent(stream);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        form.Add(fileContent, "file", Path.GetFileName(storageKey));
         using var http = clientFactory.CreateClient(HttpClientName);
         using var req = new HttpRequestMessage(HttpMethod.Post, options.TranscribePath)
         {

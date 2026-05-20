@@ -65,6 +65,7 @@ write_files:
       JWT_SIGNING_KEY=$${JWT_SIGNING_KEY}
       POSTGRES_PASSWORD=$${POSTGRES_PASSWORD}
       OLLAMA_PULL_TAG=${ollama_pull_tag}
+      OLLAMA_IMAGE_TAG=${ollama_image_tag}
 
   - path: /etc/thany-cloud/nginx-site.tpl
     owner: root:root
@@ -196,7 +197,7 @@ write_files:
             retries: 10
 
         ollama:
-          image: ollama/ollama:0.24.0
+          image: ghcr.io/c4ptainhook/thany-ollama-minicpm:$${OLLAMA_IMAGE_TAG:-latest}
           restart: unless-stopped
           environment:
             OLLAMA_HOST: "0.0.0.0:11434"
@@ -215,7 +216,7 @@ write_files:
             start_period: 30s
 
         ollama-puller:
-          image: ollama/ollama:0.24.0
+          image: ghcr.io/c4ptainhook/thany-ollama-minicpm:$${OLLAMA_IMAGE_TAG:-latest}
           profiles: ["init"]
           restart: "no"
           entrypoint: ["/bin/sh", "-c"]
@@ -223,7 +224,7 @@ write_files:
             set -e
             ollama serve &
             SERVE_PID=$$!
-            until wget -q -O- http://127.0.0.1:11434/api/version >/dev/null 2>&1; do sleep 1; done
+            until ollama list >/dev/null 2>&1; do sleep 1; done
             ollama pull "$${OLLAMA_PULL_TAG}"
             kill -TERM $$SERVE_PID
             wait $$SERVE_PID || true
