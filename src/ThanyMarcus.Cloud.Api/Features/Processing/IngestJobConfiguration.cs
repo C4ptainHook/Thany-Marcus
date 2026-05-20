@@ -25,6 +25,7 @@ public sealed class IngestJobConfiguration : IEntityTypeConfiguration<IngestJob>
         builder.Property(j => j.Kind).IsRequired().HasDefaultValue(IngestJobKind.Capture);
         builder.Property(j => j.Status).IsRequired();
         builder.Property(j => j.Attempts).IsRequired();
+        builder.Property(j => j.ConsecutiveCrashes).IsRequired().HasDefaultValue((short)0);
         builder.Property(j => j.LastError);
         builder.Property(j => j.LeaseOwner);
         builder.Property(j => j.LeaseExpiresAt);

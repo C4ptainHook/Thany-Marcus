@@ -14,9 +14,9 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens.Sync;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
-using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloud;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloudflare;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 using ThanyMarcus.Portal.Tests.SagaWorker.Fakes;
@@ -118,6 +118,10 @@ internal static class SagaHostBuilder
         public Task<Guid> PostAsync(string cloudUrl, string cloudAdminToken,
             byte[] tokenHashBytes, string label, CancellationToken ct)
             => Task.FromResult(Guid.CreateVersion7());
+
+        public Task RevokeAsync(string cloudUrl, string cloudAdminToken,
+            byte[] tokenHashBytes, CancellationToken ct)
+            => Task.CompletedTask;
     }
 
     private sealed class ScriptedHandler(bool certReady) : HttpMessageHandler

@@ -7,4 +7,5 @@ public sealed class ParakeetOptions
     public string TranscribePath { get; init; } = "/v1/audio/transcriptions";
     public int RequestTimeoutSeconds { get; init; } = 180;
     public TimeSpan PresignedUrlTtl { get; init; } = TimeSpan.FromMinutes(5);
+    public int MaxChunkSeconds { get; init; } = 30;
 }

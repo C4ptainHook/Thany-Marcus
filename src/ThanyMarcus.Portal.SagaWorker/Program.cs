@@ -15,7 +15,7 @@ using ThanyMarcus.Shared.Database;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
-using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloud;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens.Sync;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloudflare;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 

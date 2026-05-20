@@ -1,4 +1,4 @@
-namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
+namespace ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens.Sync;
 
 public sealed class PluginTokenSyncOptions
 {

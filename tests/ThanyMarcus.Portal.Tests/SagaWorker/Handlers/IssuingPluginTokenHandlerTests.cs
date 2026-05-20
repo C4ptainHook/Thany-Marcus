@@ -9,9 +9,8 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
-using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens.Sync;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
-using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloud;
 using ThanyMarcus.Portal.Tests.Infrastructure;
 
 namespace ThanyMarcus.Portal.Tests.SagaWorker.Handlers;
@@ -178,6 +177,9 @@ public sealed class IssuingPluginTokenHandlerTests(PostgresFixture postgres) : D
             }
             return Task.FromResult(Guid.CreateVersion7());
         }
+
+        public Task RevokeAsync(string cloudUrl, string cloudAdminToken, byte[] tokenHashBytes, CancellationToken ct)
+            => Task.CompletedTask;
     }
 
     private sealed class RecordingEventBus : IProvisioningEventBus

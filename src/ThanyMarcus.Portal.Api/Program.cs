@@ -29,6 +29,7 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.Create;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Destroy;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens.Sync;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderMeta;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
@@ -114,6 +115,16 @@ builder.Services.AddHttpClient<IDigitalOceanOAuthClient, DigitalOceanOAuthClient
     .HandleTransientHttpError()
     .WaitAndRetryAsync(3, n => TimeSpan.FromMilliseconds(200 * Math.Pow(5, n - 1))));
 builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
+
+builder.Services.Configure<PluginTokenSyncOptions>(
+    builder.Configuration.GetSection(PluginTokenSyncOptions.SectionName));
+builder.Services.AddSingleton<IPortalToCloudPluginTokenClient, PortalToCloudPluginTokenClient>();
+var pluginTokenSyncOpts = builder.Configuration
+    .GetSection(PluginTokenSyncOptions.SectionName)
+    .Get<PluginTokenSyncOptions>() ?? new PluginTokenSyncOptions();
+builder.Services.AddHttpClient(PortalToCloudPluginTokenClient.HttpClientName, c =>
+    c.Timeout = TimeSpan.FromSeconds(pluginTokenSyncOpts.HttpTimeoutSeconds));
+
 builder.Services.AddScoped<EnqueueGuard>();
 builder.Services.AddSingleton<EnrollmentTokenGenerator>();
 builder.Services.AddSingleton<IRandomHexProvider, CryptoRandomHexProvider>();

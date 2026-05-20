@@ -1,4 +1,4 @@
-namespace ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloud;
+namespace ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens.Sync;
 
 public interface IPortalToCloudPluginTokenClient
 {
@@ -7,6 +7,12 @@ public interface IPortalToCloudPluginTokenClient
         string cloudAdminToken,
         byte[] tokenHashBytes,
         string label,
+        CancellationToken ct);
+
+    Task RevokeAsync(
+        string cloudUrl,
+        string cloudAdminToken,
+        byte[] tokenHashBytes,
         CancellationToken ct);
 }
 
