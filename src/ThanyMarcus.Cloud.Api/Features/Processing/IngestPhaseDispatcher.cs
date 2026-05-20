@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
-using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.Processing.Phases;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Saga;
@@ -134,25 +133,7 @@ public sealed partial class IngestPhaseDispatcher
 
         if (attempts >= maxAttempts)
         {
-            var terminal = IngestJobStatus.FailureTerminalFor(phase);
-            await transitions.TransitionAsync(
-                job,
-                nextStatus: terminal,
-                lastError: ex.Message,
-                clearLease: true,
-                setFinishedAt: true,
-                ct);
-
-            var now = clock.GetCurrentInstant();
-            await db.Database.ExecuteSqlInterpolatedAsync($"""
-                UPDATE notes SET
-                    status              = 'failed',
-                    transition_version  = transition_version + 1,
-                    updated_at          = {now}
-                  WHERE id = {job.NoteId}
-                """, ct);
-            await provenance.MaterializeAndPersistAsync(job, ct);
-            await eventBus.PublishNoteFailedAsync(job.NoteId, ex.Message, ct);
+            await TransitionToFailureTerminalAsync(job, ex.Message, ct);
         }
         else
         {
@@ -160,6 +141,29 @@ public sealed partial class IngestPhaseDispatcher
             var nextAt = clock.GetCurrentInstant().Plus(Duration.FromSeconds(backoffSeconds));
             await transitions.RescheduleAsync(job, nextAt, ex.Message, ct);
         }
+    }
+
+    private async Task TransitionToFailureTerminalAsync(IngestJob job, string lastError, CancellationToken ct)
+    {
+        var terminal = IngestJobStatus.FailureTerminalFor(job.Status);
+        await transitions.TransitionAsync(
+            job,
+            nextStatus: terminal,
+            lastError: lastError,
+            clearLease: true,
+            setFinishedAt: true,
+            ct);
+
+        var now = clock.GetCurrentInstant();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE notes SET
+                status              = 'failed',
+                transition_version  = transition_version + 1,
+                updated_at          = {now}
+              WHERE id = {job.NoteId}
+            """, ct);
+        await provenance.MaterializeAndPersistAsync(job, ct);
+        await eventBus.PublishNoteFailedAsync(job.NoteId, lastError, ct);
     }
 
     internal static int DefaultMaxAttempts(string phase) => phase switch

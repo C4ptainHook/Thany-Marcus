@@ -12,6 +12,14 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
 {
     public string Phase => IngestJobStatus.ExtractingAttachments;
 
+    private static readonly string[] SidecarPriority =
+    [
+        ExtractionTaskSidecar.Url,
+        ExtractionTaskSidecar.Docling,
+        ExtractionTaskSidecar.Parakeet,
+        ExtractionTaskSidecar.Ollama,
+    ];
+
     private readonly CloudDbContext db;
     private readonly IClock clock;
     private readonly IConfiguration config;
@@ -51,16 +59,26 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
         var newlyQueuedBySidecar = new Dictionary<string, int>(StringComparer.Ordinal);
         var attachmentsWithCacheHit = new List<Attachment>();
 
-        foreach (var att in attachments.Where(a =>
-            a.ExtractionStatus == AttachmentExtractionStatus.Pending &&
-            !alreadyQueued.Contains(a.Id)))
+        var candidates = attachments
+            .Where(a => a.ExtractionStatus == AttachmentExtractionStatus.Pending && !alreadyQueued.Contains(a.Id))
+            .Select(a => (Attachment: a, Sidecar: ResolveSidecar(a)))
+            .ToList();
+        foreach (var (att, sidecar) in candidates.Where(c => c.Sidecar is null))
         {
-            var sidecar = ResolveSidecar(att);
-            if (sidecar is null)
-            {
-                att.ExtractionStatus = AttachmentExtractionStatus.Skipped;
-                continue;
-            }
+            att.ExtractionStatus = AttachmentExtractionStatus.Skipped;
+        }
+        var pendingBySidecar = candidates
+            .Where(c => c.Sidecar is not null)
+            .GroupBy(c => c.Sidecar!)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Attachment).ToList(), StringComparer.Ordinal);
+        var targetSidecar = SidecarPriority.FirstOrDefault(s => pendingBySidecar.ContainsKey(s));
+        var toProcess = targetSidecar is null
+            ? new List<Attachment>()
+            : pendingBySidecar[targetSidecar];
+
+        foreach (var att in toProcess)
+        {
+            var sidecar = targetSidecar!;
 
             var cacheKey = $"sha256:{sidecar}:{modelVersion}";
             att.ExtractionCacheKey = cacheKey;

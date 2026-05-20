@@ -258,7 +258,7 @@ write_files:
         parakeet:
           image: ghcr.io/achetronic/parakeet:0.3.0-int8
           restart: unless-stopped
-          command: ["-models", "/models", "-port", "5092"]
+          command: ["-models", "/models", "-port", "5092", "-workers", "1"]
           networks: [cloud]
           mem_limit: 2500m
 
