@@ -67,6 +67,18 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
         {
             att.ExtractionStatus = AttachmentExtractionStatus.Skipped;
         }
+        await db.SaveChangesAsync(ct);
+
+        var hasActive = await db.ExtractionTasks
+            .AnyAsync(t => t.IngestJobId == job.Id &&
+                (t.Status == ExtractionTaskStatus.Queued ||
+                 t.Status == ExtractionTaskStatus.Processing), ct);
+        if (hasActive)
+        {
+            await ReleaseLeaseAsync(job, ct);
+            return PhaseHandlerResult.Waiting;
+        }
+
         var pendingBySidecar = candidates
             .Where(c => c.Sidecar is not null)
             .GroupBy(c => c.Sidecar!)
@@ -200,10 +212,11 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
         var expectedVersion = job.TransitionVersion;
         var rows = await db.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE ingest_jobs SET
-                lease_owner        = NULL,
-                lease_expires_at   = NULL,
-                transition_version = transition_version + 1,
-                updated_at         = {now}
+                lease_owner         = NULL,
+                lease_expires_at    = NULL,
+                consecutive_crashes = 0,
+                transition_version  = transition_version + 1,
+                updated_at          = {now}
               WHERE id = {job.Id}
                 AND lease_owner = {job.LeaseOwner}
                 AND transition_version = {expectedVersion}
@@ -212,6 +225,7 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
         {
             job.LeaseOwner = null;
             job.LeaseExpiresAt = null;
+            job.ConsecutiveCrashes = 0;
             job.TransitionVersion = expectedVersion + 1;
             job.UpdatedAt = now;
         }

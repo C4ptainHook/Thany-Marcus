@@ -297,6 +297,35 @@ public sealed class CloudInitTemplateRenderTests
     }
 
     [Fact]
+    public void Ollama_puller_hardened_with_pipefail_and_post_pull_verification()
+    {
+        var compose = ExtractWriteFile("/opt/thany-cloud/docker-compose.yml");
+        compose.ShouldContain("set -eu -o pipefail");
+        compose.ShouldContain("ollama pull");
+        compose.ShouldContain("ollama list | grep -q");
+    }
+
+    [Fact]
+    public void Runcmd_persists_puller_logs_and_writes_sentinel_only_on_success()
+    {
+        var runcmd = RuncmdText();
+        runcmd.ShouldContain("tee /var/log/thany-cloud/ollama-puller.log");
+        runcmd.ShouldContain("touch /opt/thany-cloud/.ollama-puller-ok");
+        runcmd.ShouldNotContain("--profile init run --rm ollama-puller");
+    }
+
+    [Fact]
+    public void Certbot_block_skips_when_puller_sentinel_missing()
+    {
+        var runcmd = RuncmdText();
+        var sentinelGateIdx = runcmd.IndexOf("/opt/thany-cloud/.ollama-puller-ok", StringComparison.Ordinal);
+        var certbotIdx = runcmd.IndexOf("certbot --nginx", StringComparison.Ordinal);
+        sentinelGateIdx.ShouldBeGreaterThanOrEqualTo(0);
+        certbotIdx.ShouldBeGreaterThan(sentinelGateIdx);
+        runcmd.ShouldMatch(@"\[\s*!\s*-f\s+/opt/thany-cloud/\.ollama-puller-ok\s*\]");
+    }
+
+    [Fact]
     public void Le_acme_ca_empty_does_not_add_staging_flag_unconditionally()
     {
         var rendered = Rendered.Value;

@@ -32,14 +32,15 @@ public sealed class JobStateTransitions
 
         var rows = await db.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE ingest_jobs SET
-                status             = {nextStatus},
-                last_error         = {lastError},
-                lease_owner        = CASE WHEN {clearLease} THEN NULL ELSE lease_owner END,
-                lease_expires_at   = CASE WHEN {clearLease} THEN NULL ELSE lease_expires_at END,
-                finished_at        = CASE WHEN {setFinishedAt} THEN {now} ELSE finished_at END,
-                events_log         = events_log || {payload}::jsonb,
-                transition_version = transition_version + 1,
-                updated_at         = {now}
+                status              = {nextStatus},
+                last_error          = {lastError},
+                lease_owner         = CASE WHEN {clearLease} THEN NULL ELSE lease_owner END,
+                lease_expires_at    = CASE WHEN {clearLease} THEN NULL ELSE lease_expires_at END,
+                consecutive_crashes = 0,
+                finished_at         = CASE WHEN {setFinishedAt} THEN {now} ELSE finished_at END,
+                events_log          = events_log || {payload}::jsonb,
+                transition_version  = transition_version + 1,
+                updated_at          = {now}
               WHERE id = {job.Id}
                 AND lease_owner = {job.LeaseOwner}
                 AND transition_version = {expectedVersion}
@@ -52,6 +53,7 @@ public sealed class JobStateTransitions
 
         job.Status = nextStatus;
         job.LastError = lastError;
+        job.ConsecutiveCrashes = 0;
         job.TransitionVersion = expectedVersion + 1;
         if (clearLease)
         {
@@ -78,13 +80,14 @@ public sealed class JobStateTransitions
 
         var rows = await db.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE ingest_jobs SET
-                last_error         = {lastError},
-                lease_owner        = NULL,
-                lease_expires_at   = NULL,
-                scheduled_at       = {nextAt},
-                events_log         = events_log || {payload}::jsonb,
-                transition_version = transition_version + 1,
-                updated_at         = {now}
+                last_error          = {lastError},
+                lease_owner         = NULL,
+                lease_expires_at    = NULL,
+                consecutive_crashes = 0,
+                scheduled_at        = {nextAt},
+                events_log          = events_log || {payload}::jsonb,
+                transition_version  = transition_version + 1,
+                updated_at          = {now}
               WHERE id = {job.Id}
                 AND lease_owner = {job.LeaseOwner}
                 AND transition_version = {expectedVersion}
@@ -96,6 +99,7 @@ public sealed class JobStateTransitions
         }
 
         job.LastError = lastError;
+        job.ConsecutiveCrashes = 0;
         job.ScheduledAt = nextScheduledAt;
         job.TransitionVersion = expectedVersion + 1;
         job.LeaseOwner = null;

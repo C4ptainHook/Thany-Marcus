@@ -81,6 +81,29 @@ public sealed partial class IngestPhaseDispatcher
             return;
         }
 
+        if (IngestJobStatus.InFlightPhases.Contains(job.Status))
+        {
+            var maxCrashes = config.GetValue(
+                $"IngestSaga:Phases:{job.Status}:MaxConsecutiveCrashes",
+                DefaultMaxConsecutiveCrashes);
+            if (job.ConsecutiveCrashes >= maxCrashes)
+            {
+                LogCrashLoopCap(log, job.Id, job.Status, job.ConsecutiveCrashes, maxCrashes);
+                try
+                {
+                    await TransitionToFailureTerminalAsync(
+                        job,
+                        $"crash_loop_cap_exceeded: phase={job.Status} consecutive_crashes={job.ConsecutiveCrashes}",
+                        ct);
+                }
+                catch (SagaOwnershipLostException ex)
+                {
+                    LogOwnershipLost(log, ex.JobId, ex.AttemptedWorkerId);
+                }
+                return;
+            }
+        }
+
         IPhaseHandler? handler;
         if (job.Status == IngestJobStatus.Composing && job.Kind == IngestJobKind.HubRegen)
         {
@@ -176,6 +199,8 @@ public sealed partial class IngestPhaseDispatcher
         _ => 1,
     };
 
+    internal const int DefaultMaxConsecutiveCrashes = 3;
+
     [LoggerMessage(EventId = 1, Level = LogLevel.Debug,
         Message = "Claim observed terminal status; dropping (job={JobId} status={Status})")]
     private static partial void LogTerminalClaim(ILogger logger, Guid jobId, string status);
@@ -191,6 +216,10 @@ public sealed partial class IngestPhaseDispatcher
     [LoggerMessage(EventId = 4, Level = LogLevel.Error,
         Message = "Phase handler failed (job={JobId} phase={Phase})")]
     private static partial void LogHandlerFailure(ILogger logger, Exception ex, Guid jobId, string phase);
+
+    [LoggerMessage(EventId = 5, Level = LogLevel.Error,
+        Message = "Crash-loop cap reached; terminating (job={JobId} phase={Phase} consecutive_crashes={Crashes} cap={Cap})")]
+    private static partial void LogCrashLoopCap(ILogger logger, Guid jobId, string phase, short crashes, int cap);
 
     private sealed class HubGenerationHandlerAdapter : IPhaseHandler
     {

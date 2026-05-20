@@ -73,6 +73,11 @@ public static class IngestEndpoints
 
                 totalBinaryBytes += a.ByteSize.Value;
             }
+            else if (a.Kind == AttachmentKind.Url)
+            {
+                if (string.IsNullOrWhiteSpace(ExtractUrl(a.Extra)))
+                    return Results.Problem("extra.url required for url attachment", statusCode: StatusCodes.Status400BadRequest);
+            }
         }
 
         if (totalBinaryBytes > MaxTotalBytes)
@@ -135,6 +140,7 @@ public static class IngestEndpoints
                                          ? AttachmentStatus.AwaitingUpload
                                          : AttachmentStatus.Uploaded,
                     Extra              = ToJsonDocument(a.Extra),
+                    Url                = a.Kind == AttachmentKind.Url ? ExtractUrl(a.Extra) : null,
                     CreatedAt          = now,
                     UpdatedAt          = now,
                 };
@@ -284,4 +290,11 @@ public static class IngestEndpoints
         element.ValueKind == JsonValueKind.Undefined
             ? JsonDocument.Parse("{}")
             : JsonDocument.Parse(element.GetRawText());
+
+    private static string? ExtractUrl(JsonElement extra) =>
+        extra.ValueKind == JsonValueKind.Object
+        && extra.TryGetProperty("url", out var u)
+        && u.ValueKind == JsonValueKind.String
+            ? u.GetString()
+            : null;
 }

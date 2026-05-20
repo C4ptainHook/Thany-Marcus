@@ -22,6 +22,13 @@ public static class AdminPluginTokenEndpoints
              .Produces<AdminIssuePluginTokenResponse>(StatusCodes.Status200OK)
              .ProducesProblem(StatusCodes.Status400BadRequest)
              .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        group.MapPost("/revoke", RevokeAsync)
+             .WithName("PostAdminPluginTokensRevoke")
+             .Produces(StatusCodes.Status204NoContent)
+             .ProducesProblem(StatusCodes.Status400BadRequest)
+             .ProducesProblem(StatusCodes.Status401Unauthorized)
+             .ProducesProblem(StatusCodes.Status404NotFound);
     }
 
     private static async Task<IResult> PostAsync(
@@ -75,5 +82,47 @@ public static class AdminPluginTokenEndpoints
         await db.SaveChangesAsync(ct);
 
         return Results.Ok(new AdminIssuePluginTokenResponse(row.Id));
+    }
+
+    private static async Task<IResult> RevokeAsync(
+        AdminRevokePluginTokenRequest req,
+        CloudDbContext db,
+        IClock clock,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(req.TokenHashBase64))
+        {
+            return Results.Problem("missing_token_hash", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        byte[] hashBytes;
+        try
+        {
+            hashBytes = Convert.FromBase64String(req.TokenHashBase64);
+        }
+        catch (FormatException)
+        {
+            return Results.Problem("invalid_hash_encoding", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (hashBytes.Length != ExpectedHashLength)
+        {
+            return Results.Problem("invalid_hash_length", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var existing = await db.PluginTokens
+            .SingleOrDefaultAsync(t => t.TokenHash == hashBytes, ct);
+        if (existing is null)
+        {
+            return Results.NotFound();
+        }
+        if (existing.RevokedAt is not null)
+        {
+            return Results.NoContent();
+        }
+
+        existing.RevokedAt = clock.GetCurrentInstant();
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
     }
 }

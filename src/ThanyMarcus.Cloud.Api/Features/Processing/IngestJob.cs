@@ -12,6 +12,7 @@ public sealed class IngestJob : IHasUpdatedAt
     public string Kind { get; set; } = IngestJobKind.Capture;
     public string Status { get; set; } = IngestJobStatus.Queued;
     public short Attempts { get; set; }
+    public short ConsecutiveCrashes { get; set; }
     public string? LastError { get; set; }
     public string? LeaseOwner { get; set; }
     public Instant? LeaseExpiresAt { get; set; }

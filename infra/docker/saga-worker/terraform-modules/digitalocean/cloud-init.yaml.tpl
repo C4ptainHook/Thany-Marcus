@@ -201,7 +201,7 @@ write_files:
           restart: unless-stopped
           environment:
             OLLAMA_HOST: "0.0.0.0:11434"
-            OLLAMA_KEEP_ALIVE: "30m"
+            OLLAMA_KEEP_ALIVE: "30s"
             OLLAMA_NUM_PARALLEL: "1"
             OLLAMA_MAX_LOADED_MODELS: "1"
           volumes:
@@ -221,13 +221,26 @@ write_files:
           restart: "no"
           entrypoint: ["/bin/sh", "-c"]
           command: |
-            set -e
+            set -eu -o pipefail
+            echo "[puller] starting ollama serve"
             ollama serve &
             SERVE_PID=$$!
-            until ollama list >/dev/null 2>&1; do sleep 1; done
-            ollama pull "$${OLLAMA_PULL_TAG}"
-            kill -TERM $$SERVE_PID
-            wait $$SERVE_PID || true
+            trap 'kill -TERM $$SERVE_PID 2>/dev/null || true; wait $$SERVE_PID 2>/dev/null || true' EXIT
+            echo "[puller] waiting for ollama to accept connections (max 60s)"
+            ready=0
+            for _ in $$(seq 1 60); do
+              if ollama list >/dev/null 2>&1; then ready=1; break; fi
+              sleep 1
+            done
+            if [ "$$ready" != "1" ]; then
+              echo "[puller] FATAL: ollama serve never came up" >&2
+              exit 1
+            fi
+            echo "[puller] pulling $${OLLAMA_PULL_TAG}"
+            ollama pull "$${OLLAMA_PULL_TAG}" || { echo "[puller] FATAL: ollama pull failed" >&2; exit 1; }
+            echo "[puller] verifying model is present after pull"
+            ollama list | grep -q "$${OLLAMA_PULL_TAG%:*}" || { echo "[puller] FATAL: model missing from ollama list after pull" >&2; exit 1; }
+            echo "[puller] done"
           environment:
             OLLAMA_HOST: "127.0.0.1:11434"
             OLLAMA_PULL_TAG: $${OLLAMA_PULL_TAG:-openbmb/minicpm-v4.6:q4_K_M}
@@ -322,13 +335,25 @@ runcmd:
     sudo -u ${admin_user} docker compose --profile init pull ollama-puller
 
   - |
+    set -o pipefail
     cd /opt/thany-cloud
-    sudo -u ${admin_user} docker compose --profile init run --rm ollama-puller
+    rm -f /opt/thany-cloud/.ollama-puller-ok
+    if sudo -u ${admin_user} docker compose --profile init run \
+         --name thany-cloud-ollama-puller-run \
+         ollama-puller 2>&1 | tee /var/log/thany-cloud/ollama-puller.log; then
+      touch /opt/thany-cloud/.ollama-puller-ok
+    else
+      echo "[cloud-init] ollama-puller FAILED — log at /var/log/thany-cloud/ollama-puller.log; container retained as thany-cloud-ollama-puller-run for 'docker logs'" >&2
+    fi
 
   - systemctl daemon-reload
   - systemctl enable --now thany-cloud.service
 
   - |
+    if [ ! -f /opt/thany-cloud/.ollama-puller-ok ]; then
+      echo "[cloud-init] skipping certbot + registration callback — ollama-puller did not complete; cloud will not register so portal sees failed provisioning" >&2
+      exit 0
+    fi
     set -a
     . /opt/thany-cloud/.env
     set +a

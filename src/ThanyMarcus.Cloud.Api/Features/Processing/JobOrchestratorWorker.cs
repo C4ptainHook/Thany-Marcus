@@ -141,6 +141,11 @@ public sealed partial class JobOrchestratorWorker : BackgroundService
                 lease_owner        = {workerId},
                 lease_expires_at   = now() + (interval '1 second' * {lease}),
                 attempts           = attempts + 1,
+                consecutive_crashes = CASE
+                                        WHEN lease_owner IS NOT NULL
+                                          THEN consecutive_crashes + 1
+                                        ELSE consecutive_crashes
+                                      END,
                 transition_version = transition_version + 1,
                 started_at         = COALESCE(started_at, {now}),
                 updated_at         = {now}

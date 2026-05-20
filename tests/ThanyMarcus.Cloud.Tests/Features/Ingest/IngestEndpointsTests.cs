@@ -54,6 +54,64 @@ public sealed class IngestEndpointsTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Init_persists_url_column_for_url_attachment()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var rawToken = await SeedPluginTokenAsync(postgres);
+
+        var fakeStore = new FakeArtifactStore();
+        await using var factory = NewFactory(postgres.ConnectionString, fakeStore);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", rawToken);
+
+        var req = new IngestInitRequest(
+            ClientNoteId: Guid.NewGuid().ToString(),
+            CapturedAt:   DateTimeOffset.UtcNow,
+            Body:         "body",
+            Attachments:
+            [
+                new("a-url", AttachmentKind.Url, null, null, null, null,
+                    System.Text.Json.JsonDocument.Parse("{\"url\":\"https://example.com/article\"}").RootElement),
+            ]);
+
+        var resp = await client.PostAsJsonAsync(new Uri("/api/ingest/init", UriKind.Relative), req, ct);
+        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await resp.Content.ReadFromJsonAsync<IngestInitResponse>(ct);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CloudDbContext>();
+        var attachment = await db.Attachments.SingleAsync(a => a.NoteId == body!.NoteId, ct);
+        attachment.Url.ShouldBe("https://example.com/article");
+    }
+
+    [Fact]
+    public async Task Init_rejects_url_attachment_without_extra_url()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var rawToken = await SeedPluginTokenAsync(postgres);
+
+        var fakeStore = new FakeArtifactStore();
+        await using var factory = NewFactory(postgres.ConnectionString, fakeStore);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", rawToken);
+
+        var req = new IngestInitRequest(
+            ClientNoteId: Guid.NewGuid().ToString(),
+            CapturedAt:   DateTimeOffset.UtcNow,
+            Body:         "body",
+            Attachments:
+            [
+                new("a-url", AttachmentKind.Url, null, null, null, null,
+                    System.Text.Json.JsonDocument.Parse("{}").RootElement),
+            ]);
+
+        var resp = await client.PostAsJsonAsync(new Uri("/api/ingest/init", UriKind.Relative), req, ct);
+        resp.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
     public async Task Init_is_idempotent_on_clientNoteId()
     {
         var ct = TestContext.Current.CancellationToken;
