@@ -21,8 +21,6 @@ public sealed class CloudSecret : IHasUpdatedAt
 
 public static class CloudSecretKind
 {
-    public const string DoOAuthAccess    = "do_oauth_access";
-    public const string DoOAuthRefresh   = "do_oauth_refresh";
     public const string DoSpacesAccessId = "do_spaces_access_id";
     public const string DoSpacesSecret   = "do_spaces_secret";
 }

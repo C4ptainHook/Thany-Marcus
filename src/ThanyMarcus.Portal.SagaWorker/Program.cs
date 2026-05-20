@@ -65,6 +65,7 @@ public static class Program
         builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
         builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
         builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
+        builder.Services.AddScoped<IDigitalOceanOAuthConnections, DigitalOceanOAuthConnections>();
         builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
 
         builder.Services.Configure<DigitalOceanOAuthOptions>(builder.Configuration.GetSection("DigitalOcean:OAuth"));

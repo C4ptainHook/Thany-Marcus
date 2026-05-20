@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import StatusPill from './StatusPill.svelte';
-  import type { CloudStatusResponse, CloudHealthz, WorkerState } from './types/cloud';
+  import type { CloudStatusResponse, WorkerState } from './types/cloud';
 
   let { cloud }: { cloud: CloudStatusResponse } = $props();
 
@@ -18,11 +18,10 @@
   async function ping() {
     try {
       const ctrl = AbortSignal.timeout(3000);
-      const r = await fetch(`https://${cloud.hostname}/healthz`, { signal: ctrl });
+      const r = await fetch(`https://${cloud.hostname}/health/live`, { signal: ctrl });
       if (!r.ok) { unavailable = true; return; }
-      const body = (await r.json()) as CloudHealthz;
-      workerState = body.workerState ?? null;
       unavailable = false;
+      workerState = 'warm';
     } catch {
       unavailable = true;
     }

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
@@ -21,6 +22,7 @@ public sealed partial class CancelHandler(
     IInfraOpUnlockCache unlockCache,
     IProviderTokenVault providerVault,
     ICloudSecretBundle secrets,
+    IDigitalOceanOAuthConnections connections,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
     IConfiguration config,
@@ -190,7 +192,7 @@ public sealed partial class CancelHandler(
         };
         if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
         {
-            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.Id, dek, secrets, ct);
+            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.UserId, cloud.Id, dek, connections, secrets, ct);
         }
         else if (providerToken is not null)
         {

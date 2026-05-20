@@ -29,6 +29,30 @@ public sealed class FakeTerraformRunner : ITerraformRunner
         return Task.FromResult(initResults.Count > 0 ? initResults.Dequeue() : new TerraformResult(0, "", ""));
     }
 
+    public List<string> WorkspaceSelectCalls { get; } = [];
+    public bool WorkspaceSelectShouldFail { get; set; }
+
+    public Task<TerraformResult> SelectOrCreateWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct)
+    {
+        Calls.Add(("workspace-select", workdir));
+        WorkspaceSelectCalls.Add(workspaceName);
+        return Task.FromResult(WorkspaceSelectShouldFail
+            ? new TerraformResult(1, "", "workspace select/new boom (fake)")
+            : new TerraformResult(0, "", ""));
+    }
+
+    public List<string> WorkspaceSelectOnlyCalls { get; } = [];
+    public bool WorkspaceSelectOnlyShouldFail { get; set; }
+
+    public Task<TerraformResult> SelectWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct)
+    {
+        Calls.Add(("workspace-select-only", workdir));
+        WorkspaceSelectOnlyCalls.Add(workspaceName);
+        return Task.FromResult(WorkspaceSelectOnlyShouldFail
+            ? new TerraformResult(1, "", "workspace select boom (fake)")
+            : new TerraformResult(0, "", ""));
+    }
+
     public Task<TerraformResult> PlanAsync(string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct)
     {
         Calls.Add(("plan", workdir));

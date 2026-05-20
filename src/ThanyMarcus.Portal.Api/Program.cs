@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using NodaTime;
+using NodaTime.Serialization.SystemTextJson;
 using Polly;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -43,6 +44,9 @@ builder.Logging.AddJsonConsole(o =>
     o.IncludeScopes = true;
     o.UseUtcTimestamp = true;
 });
+
+builder.Services.ConfigureHttpJsonOptions(o =>
+    o.SerializerOptions.ConfigureForNodaTime(DateTimeZoneProviders.Tzdb));
 
 builder.Services.AddOpenApi();
 
@@ -100,6 +104,7 @@ builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
 
 builder.Services.Configure<DigitalOceanOAuthOptions>(builder.Configuration.GetSection("DigitalOcean:OAuth"));
 builder.Services.AddSingleton<DigitalOceanOAuthStateCookie>();
+builder.Services.AddScoped<IDigitalOceanOAuthConnections, DigitalOceanOAuthConnections>();
 builder.Services.AddScoped<DigitalOceanTokenRefresher>();
 builder.Services.AddHttpClient<IDigitalOceanOAuthClient, DigitalOceanOAuthClient>(c =>
 {
@@ -237,6 +242,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 
 app.MapAuthEndpoints();
 app.MapDigitalOceanOAuthEndpoints();
+app.MapDigitalOceanConnectionEndpoints();
 app.MapTotpEndpoints();
 app.MapPassphraseEndpoints();
 app.MapProviderTokenEndpoints();

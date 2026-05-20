@@ -64,6 +64,35 @@ public sealed class OllamaVlmClientTests : IDisposable
     }
 
     [Fact]
+    public async Task Generate_request_sends_base64_bytes_not_a_url()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var imageBytes = MakeJpeg(640, 480);
+        wm.Given(Request.Create().WithPath("/img/test.jpg").UsingGet())
+          .RespondWith(Response.Create().WithStatusCode(200)
+              .WithHeader("Content-Type", "image/jpeg")
+              .WithBody(imageBytes));
+
+        var inner = JsonSerializer.Serialize(new { description = "ok", text_in_image = (string?)null });
+        wm.Given(Request.Create().WithPath("/api/generate").UsingPost())
+          .RespondWith(Response.Create().WithStatusCode(200)
+              .WithBody(JsonSerializer.Serialize(new { model = "m", response = inner, done = true, eval_count = 1L, eval_duration = 1L })));
+
+        var client = BuildClient();
+        await client.ExtractAsync(MakeAttachment(), ct);
+
+        var generateCalls = wm.FindLogEntries(Request.Create().WithPath("/api/generate"));
+        generateCalls.Count.ShouldBe(1);
+        var body = generateCalls[0].RequestMessage.Body!;
+        using var doc = JsonDocument.Parse(body);
+        var images = doc.RootElement.GetProperty("images");
+        images.GetArrayLength().ShouldBe(1);
+        var only = images[0].GetString()!;
+        only.ShouldNotStartWith("http");
+        only.ShouldBe(Convert.ToBase64String(imageBytes));
+    }
+
+    [Fact]
     public async Task Description_with_text_in_image_is_appended()
     {
         var ct = TestContext.Current.CancellationToken;

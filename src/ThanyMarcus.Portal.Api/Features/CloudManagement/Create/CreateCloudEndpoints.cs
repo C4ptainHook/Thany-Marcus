@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
@@ -23,6 +24,7 @@ public static class CreateCloudEndpoints
             EnqueueGuard guard,
             HostnameGenerator hostnameGen,
             EnrollmentTokenGenerator tokenGen,
+            IDigitalOceanOAuthConnections doConnections,
             IClock clock,
             CancellationToken ct) =>
         {
@@ -32,6 +34,11 @@ public static class CreateCloudEndpoints
                 return Results.BadRequest(new { error = "unsupported_provider", supported = SupportedProviders });
             if (!DigitalOceanRegions.IsAllowed(body.Region))
                 return Results.BadRequest(new { error = "invalid_region", region = body.Region });
+
+            if (!await doConnections.IsConnectedAsync(userId, ct))
+                return Results.Json(
+                    new { error = "connect_required", provider = "digitalocean", start = "/oauth/digitalocean/start" },
+                    statusCode: StatusCodes.Status412PreconditionFailed);
 
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
 
@@ -54,6 +61,10 @@ public static class CreateCloudEndpoints
             var enrollmentToken = tokenGen.Generate();
             var now = clock.GetCurrentInstant();
 
+            var initialStatus = body.Provider == "digitalocean"
+                ? SagaStatus.MintingSpaces
+                : SagaStatus.TfPlanning;
+
             var cloud = new Cloud
             {
                 UserId             = userId,
@@ -61,7 +72,7 @@ public static class CreateCloudEndpoints
                 Provider           = body.Provider,
                 Region             = body.Region,
                 Hostname           = hostname,
-                ProvisioningStatus = SagaStatus.TfPlanning,
+                ProvisioningStatus = initialStatus,
                 CreatedAt          = now,
                 UpdatedAt          = now,
             };
@@ -73,7 +84,7 @@ public static class CreateCloudEndpoints
                 CloudId         = cloud.Id,
                 UserId          = userId,
                 Kind            = SagaKinds.Create,
-                Status          = SagaStatus.TfPlanning,
+                Status          = initialStatus,
                 EnrollmentToken = enrollmentToken,
                 NextVisibleAt   = now,
                 Payload         = JsonDocument.Parse("""{"reason":"user_initiated"}"""),

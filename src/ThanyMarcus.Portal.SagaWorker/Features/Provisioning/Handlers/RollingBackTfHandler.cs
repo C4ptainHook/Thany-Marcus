@@ -22,6 +22,7 @@ public sealed partial class RollingBackTfHandler(
     IInfraOpUnlockCache unlockCache,
     IProviderTokenVault providerVault,
     ICloudSecretBundle secrets,
+    IDigitalOceanOAuthConnections connections,
     IDigitalOceanOAuthClient doClient,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
@@ -41,7 +42,10 @@ public sealed partial class RollingBackTfHandler(
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
 
         var workdir = workspaceLayout.GetJobDir(job.Id);
-        var hasState = Directory.Exists(workdir);
+        if (!Directory.Exists(workdir))
+        {
+            workdir = await workspaceLayout.RenderAsync(job, cloud, ct);
+        }
 
         var dek = new byte[32];
         byte[]? providerToken = null;
@@ -56,32 +60,35 @@ public sealed partial class RollingBackTfHandler(
                 providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
             }
 
-            if (hasState)
+            var connStr = config.GetConnectionString("Portal")
+                ?? throw new InvalidOperationException("ConnectionStrings:Portal not configured");
+            var pgUrl = TfPlanningHandler.ToPostgresUrl(connStr);
+            var initResult = await tf.InitAsync(workdir, new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                var connStr = config.GetConnectionString("Portal")
-                    ?? throw new InvalidOperationException("ConnectionStrings:Portal not configured");
-                var initResult = await tf.InitAsync(workdir, new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["conn_str"] = connStr,
-                }, ct);
-                EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", initResult.Stdout);
+                ["conn_str"] = pgUrl,
+            }, ct);
+            EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", initResult.Stdout);
 
-                if (initResult.Success)
-                {
-                    var destroyEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
-                    var destroyResult = await tf.DestroyAsync(workdir, destroyEnv, ct);
-                    EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", destroyResult.Stdout);
-                    EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", destroyResult.Stderr);
+            if (!initResult.Success)
+            {
+                EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["error"] = "rollback_init_failed" });
+                await HandleDestroyFailureAsync(job, cloud, ct);
+                return;
+            }
 
-                    if (!destroyResult.Success)
-                    {
-                        await HandleDestroyFailureAsync(job, cloud, ct);
-                        return;
-                    }
-                }
-                else
+            var wsResult = await tf.SelectWorkspaceAsync(workdir, cloud.Id.ToString(), ct);
+            EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", wsResult.Stdout);
+            EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", wsResult.Stderr);
+
+            if (wsResult.Success)
+            {
+                var destroyEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
+                var destroyResult = await tf.DestroyAsync(workdir, destroyEnv, ct);
+                EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", destroyResult.Stdout);
+                EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", destroyResult.Stderr);
+
+                if (!destroyResult.Success)
                 {
-                    EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["error"] = "rollback_init_failed" });
                     await HandleDestroyFailureAsync(job, cloud, ct);
                     return;
                 }
@@ -90,7 +97,7 @@ public sealed partial class RollingBackTfHandler(
             {
                 EventsLogAppender.Append(job, clock, Phase, new JsonObject
                 {
-                    ["event"] = "no_workdir_to_destroy",
+                    ["event"] = "no_workspace_to_destroy",
                 });
             }
 
@@ -102,6 +109,11 @@ public sealed partial class RollingBackTfHandler(
             {
                 var reason = ReadRollbackReason(job);
                 var terminal = MapTerminal(reason);
+
+                cloud.DestroyedAt = clock.GetCurrentInstant();
+                cloud.VmIp = null;
+                cloud.EncryptedCloudAdminToken = null;
+                cloud.TerraformWorkspace = null;
 
                 EventsLogAppender.Append(job, clock, Phase, new JsonObject
                 {
@@ -155,7 +167,7 @@ public sealed partial class RollingBackTfHandler(
 
         if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
         {
-            await BestEffortRevokeDoCredentialsAsync(cloud.Id, dek, ct);
+            await BestEffortRevokeDoCredentialsAsync(cloud.UserId, cloud.Id, dek, ct);
         }
 
         cloud.DestroyedAt        = now;
@@ -213,13 +225,13 @@ public sealed partial class RollingBackTfHandler(
         _ => SagaStatus.FailedTf,
     };
 
-    private async Task BestEffortRevokeDoCredentialsAsync(Guid cloudId, byte[] dek, CancellationToken ct)
+    private async Task BestEffortRevokeDoCredentialsAsync(Guid userId, Guid cloudId, byte[] dek, CancellationToken ct)
     {
         string? accessToken = null;
         string? spacesId    = null;
         try
         {
-            accessToken = await secrets.TryGetAsync(cloudId, CloudSecretKind.DoOAuthAccess,    dek, ct);
+            accessToken = await connections.GetAccessTokenAsync(userId, dek, ct);
             spacesId    = await secrets.TryGetAsync(cloudId, CloudSecretKind.DoSpacesAccessId, dek, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -236,15 +248,8 @@ public sealed partial class RollingBackTfHandler(
                 LogDoSpacesKeyDeleteFailed(log, ex, cloudId);
             }
         }
-        if (accessToken is not null)
-        {
-            try { await doClient.RevokeOAuthTokenAsync(accessToken, ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                LogDoOAuthRevokeFailed(log, ex, cloudId);
-            }
-        }
-
+        // NOTE: user-level OAuth token is intentionally NOT revoked here.
+        // Other clouds for the same user still need it; revoke happens only on explicit disconnect.
         await secrets.DeleteAllForCloudAsync(cloudId, ct);
     }
 
@@ -260,7 +265,7 @@ public sealed partial class RollingBackTfHandler(
         };
         if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
         {
-            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.Id, dek, secrets, ct);
+            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.UserId, cloud.Id, dek, connections, secrets, ct);
         }
         else if (providerToken is not null)
         {
@@ -284,8 +289,4 @@ public sealed partial class RollingBackTfHandler(
     [LoggerMessage(EventId = 4, Level = LogLevel.Warning,
         Message = "RollingBackTfHandler: DELETE /v2/spaces/keys failed for cloud {CloudId}; continuing")]
     private static partial void LogDoSpacesKeyDeleteFailed(ILogger logger, Exception ex, Guid cloudId);
-
-    [LoggerMessage(EventId = 5, Level = LogLevel.Warning,
-        Message = "RollingBackTfHandler: DO OAuth revoke failed for cloud {CloudId}; continuing")]
-    private static partial void LogDoOAuthRevokeFailed(ILogger logger, Exception ex, Guid cloudId);
 }

@@ -17,7 +17,6 @@ public sealed class CloudConfiguration : IEntityTypeConfiguration<Cloud>
         builder.Property(c => c.Hostname).IsRequired();
         builder.Property(c => c.EncryptedCloudAdminToken).IsRequired(false);
         builder.Property(c => c.ProvisioningStatus).IsRequired();
-        builder.Property(c => c.ConnectionStatus).IsRequired().HasDefaultValue("connected");
         builder.Property(c => c.CreatedAt).IsRequired();
         builder.Property(c => c.UpdatedAt).IsRequired();
 

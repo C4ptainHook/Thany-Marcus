@@ -81,7 +81,7 @@
       </div>
       <p class="desc">
         {#if passphraseSet}
-          Pick a region and connect DigitalOcean — one click, no token paste.
+          Pick a provider and region. Authorization happens inline if needed.
         {:else}
           Needs passphrase set first.
         {/if}

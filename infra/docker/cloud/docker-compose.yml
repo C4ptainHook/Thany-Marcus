@@ -51,7 +51,9 @@ services:
       retries: 10
 
   ollama:
-    image: ollama/ollama:0.24.0
+    # OpenBMB's MiniCPM-V fork — upstream Ollama 0.24.0 lacks 4.6 support
+    # (PR #12078 closed unmerged). Built CPU-only via ollama-fork-ci.yml.
+    image: ghcr.io/c4ptainhook/thany-ollama-minicpm:${OLLAMA_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
@@ -70,7 +72,7 @@ services:
       start_period: 30s
 
   ollama-puller:
-    image: ollama/ollama:0.24.0
+    image: ghcr.io/c4ptainhook/thany-ollama-minicpm:${OLLAMA_IMAGE_TAG:-latest}
     profiles: ["init"]
     restart: "no"
     entrypoint: ["/bin/sh", "-c"]

@@ -20,6 +20,25 @@ public sealed partial class TerraformRunner(IConfiguration config, ILogger<Terra
         return RunAsync(workdir, args, ImmutableDictionary<string, string>.Empty, ct);
     }
 
+    public async Task<TerraformResult> SelectOrCreateWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct)
+    {
+        var select = await RunAsync(workdir,
+            ["workspace", "select", "-no-color", workspaceName],
+            ImmutableDictionary<string, string>.Empty, ct);
+        if (select.Success)
+        {
+            return select;
+        }
+        return await RunAsync(workdir,
+            ["workspace", "new", "-no-color", workspaceName],
+            ImmutableDictionary<string, string>.Empty, ct);
+    }
+
+    public Task<TerraformResult> SelectWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct) =>
+        RunAsync(workdir,
+            ["workspace", "select", "-no-color", workspaceName],
+            ImmutableDictionary<string, string>.Empty, ct);
+
     public Task<TerraformResult> PlanAsync(string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct) =>
         RunAsync(workdir, ["plan", "-input=false", "-no-color", "-out=plan.tfplan", "-json"], envVars, ct);
 

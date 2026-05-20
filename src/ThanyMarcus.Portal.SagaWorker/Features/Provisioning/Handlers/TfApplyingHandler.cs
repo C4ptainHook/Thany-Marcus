@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
@@ -22,6 +23,7 @@ public sealed partial class TfApplyingHandler(
     IInfraOpUnlockCache unlockCache,
     IProviderTokenVault providerVault,
     ICloudSecretBundle secrets,
+    IDigitalOceanOAuthConnections connections,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
     IConfiguration config,
@@ -93,6 +95,18 @@ public sealed partial class TfApplyingHandler(
                 {
                     EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["error"] = "re_init_failed" });
                     job.LastError = "terraform init (recovery) failed";
+                    await SagaTransitions.TransitionToTerminalAsync(
+                        db, clock, job, cloud, SagaStatus.FailedTf, ct);
+                    return;
+                }
+
+                var wsResult = await tf.SelectOrCreateWorkspaceAsync(workdir, cloud.Id.ToString(), ct);
+                EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", wsResult.Stdout);
+                EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", wsResult.Stderr);
+                if (!wsResult.Success)
+                {
+                    EventsLogAppender.Append(job, clock, Phase, new JsonObject { ["error"] = "re_workspace_select_failed" });
+                    job.LastError = "terraform workspace select/new (recovery) failed";
                     await SagaTransitions.TransitionToTerminalAsync(
                         db, clock, job, cloud, SagaStatus.FailedTf, ct);
                     return;
@@ -191,7 +205,7 @@ public sealed partial class TfApplyingHandler(
         };
         if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
         {
-            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.Id, dek, secrets, ct);
+            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.UserId, cloud.Id, dek, connections, secrets, ct);
         }
         else if (providerToken is not null)
         {

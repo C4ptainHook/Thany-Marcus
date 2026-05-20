@@ -19,6 +19,7 @@ public static class DestroyCloudEndpoints
             SagaStatus.AwaitingCert,
             SagaStatus.FailedCert,
             SagaStatus.FailedPluginToken,
+            SagaStatus.FailedDestroy,
         };
 
     public static void MapDestroyCloudEndpoints(this IEndpointRouteBuilder app)
@@ -74,6 +75,9 @@ public static class DestroyCloudEndpoints
                 UpdatedAt     = now,
             };
             db.ProvisioningJobs.Add(job);
+
+            cloud.ProvisioningStatus = SagaStatus.Destroying;
+            cloud.UpdatedAt = now;
 
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);

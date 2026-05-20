@@ -54,12 +54,12 @@ public sealed class CloudSecretBundleTests(PostgresFixture postgres) : DbIntegra
         var dek = RandomDek();
         var expires = Clock.GetCurrentInstant().Plus(Duration.FromDays(30));
 
-        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoOAuthAccess, "access-xyz", dek, expires, ct);
+        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoSpacesAccessId, "access-xyz", dek, expires, ct);
 
-        var got = await bundle.GetAsync(cloud.Id, CloudSecretKind.DoOAuthAccess, dek, ct);
+        var got = await bundle.GetAsync(cloud.Id, CloudSecretKind.DoSpacesAccessId, dek, ct);
         got.ShouldBe("access-xyz");
 
-        var storedExpires = await bundle.GetExpiresAtAsync(cloud.Id, CloudSecretKind.DoOAuthAccess, ct);
+        var storedExpires = await bundle.GetExpiresAtAsync(cloud.Id, CloudSecretKind.DoSpacesAccessId, ct);
         storedExpires.ShouldBe(expires);
     }
 
@@ -70,7 +70,7 @@ public sealed class CloudSecretBundleTests(PostgresFixture postgres) : DbIntegra
         var cloud = await InsertCloudAsync();
         var bundle = new CloudSecretBundle(Db, Clock);
 
-        (await bundle.TryGetAsync(cloud.Id, CloudSecretKind.DoOAuthRefresh, RandomDek(), ct)).ShouldBeNull();
+        (await bundle.TryGetAsync(cloud.Id, CloudSecretKind.DoSpacesSecret, RandomDek(), ct)).ShouldBeNull();
     }
 
     [Fact]
@@ -82,10 +82,10 @@ public sealed class CloudSecretBundleTests(PostgresFixture postgres) : DbIntegra
         var realDek  = RandomDek();
         var wrongDek = RandomDek();
 
-        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoOAuthAccess, "secret", realDek, null, ct);
+        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoSpacesAccessId, "secret", realDek, null, ct);
 
         await Should.ThrowAsync<AuthenticationTagMismatchException>(
-            async () => await bundle.GetAsync(cloud.Id, CloudSecretKind.DoOAuthAccess, wrongDek, ct));
+            async () => await bundle.GetAsync(cloud.Id, CloudSecretKind.DoSpacesAccessId, wrongDek, ct));
     }
 
     [Fact]
@@ -96,15 +96,15 @@ public sealed class CloudSecretBundleTests(PostgresFixture postgres) : DbIntegra
         var bundle = new CloudSecretBundle(Db, Clock);
         var dek = RandomDek();
 
-        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoOAuthAccess, "first",  dek, null, ct);
+        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoSpacesAccessId, "first",  dek, null, ct);
         Db.ChangeTracker.Clear();
-        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoOAuthAccess, "second", dek, null, ct);
+        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoSpacesAccessId, "second", dek, null, ct);
         Db.ChangeTracker.Clear();
 
         var count = await Db.CloudSecrets
-            .CountAsync(s => s.CloudId == cloud.Id && s.Kind == CloudSecretKind.DoOAuthAccess, ct);
+            .CountAsync(s => s.CloudId == cloud.Id && s.Kind == CloudSecretKind.DoSpacesAccessId, ct);
         count.ShouldBe(1);
-        (await bundle.GetAsync(cloud.Id, CloudSecretKind.DoOAuthAccess, dek, ct)).ShouldBe("second");
+        (await bundle.GetAsync(cloud.Id, CloudSecretKind.DoSpacesAccessId, dek, ct)).ShouldBe("second");
     }
 
     [Fact]
@@ -115,8 +115,6 @@ public sealed class CloudSecretBundleTests(PostgresFixture postgres) : DbIntegra
         var bundle = new CloudSecretBundle(Db, Clock);
         var dek = RandomDek();
 
-        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoOAuthAccess,    "a", dek, null, ct);
-        await bundle.PutAsync(cloud.Id, CloudSecretKind.DoOAuthRefresh,   "r", dek, null, ct);
         await bundle.PutAsync(cloud.Id, CloudSecretKind.DoSpacesAccessId, "k", dek, null, ct);
         await bundle.PutAsync(cloud.Id, CloudSecretKind.DoSpacesSecret,   "s", dek, null, ct);
 

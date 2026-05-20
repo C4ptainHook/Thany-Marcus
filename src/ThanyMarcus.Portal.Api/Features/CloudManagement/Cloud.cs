@@ -28,8 +28,6 @@ public sealed class Cloud : IHasUpdatedAt
     public Instant? ProvisioningCompletedAt { get; set; }
     public string? ProvisioningError { get; set; }
 
-    public string ConnectionStatus { get; set; } = "connected";
-
     public Instant CreatedAt { get; init; }
     public Instant UpdatedAt { get; set; }
     public Instant? DestroyedAt { get; set; }

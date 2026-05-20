@@ -8,6 +8,7 @@ using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
+using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
@@ -242,10 +243,11 @@ public sealed class CancelHandlerTests(PostgresFixture postgres) : DbIntegration
         var unlockCache = new PostgresInfraOpUnlockCache(Db, dp, Clock);
         var providerVault = new ProviderTokenVault(Db, Clock);
         var secrets = new CloudSecretBundle(Db, Clock);
+        var connections = new DigitalOceanOAuthConnections(Db, Clock);
         var layout = new WorkspaceLayout(config, NullLogger<WorkspaceLayout>.Instance);
 
         return new CancelHandler(
-            Db, Clock, unlockCache, providerVault, secrets, tf,
+            Db, Clock, unlockCache, providerVault, secrets, connections, tf,
             layout, config, NullLogger<CancelHandler>.Instance);
     }
 
@@ -257,6 +259,14 @@ public sealed class CancelHandlerTests(PostgresFixture postgres) : DbIntegration
         public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> InitAsync(
             string workdir, IReadOnlyDictionary<string, string> backendConfig, CancellationToken ct) =>
             throw new InvalidOperationException("boom: provider unreachable");
+
+        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> SelectOrCreateWorkspaceAsync(
+            string workdir, string workspaceName, CancellationToken ct) =>
+            throw new NotImplementedException();
+
+        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> SelectWorkspaceAsync(
+            string workdir, string workspaceName, CancellationToken ct) =>
+            throw new NotImplementedException();
 
         public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> PlanAsync(
             string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct) =>
