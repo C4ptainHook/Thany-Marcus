@@ -18,7 +18,14 @@ RUN dotnet publish "src/ThanyMarcus.Portal.Api/ThanyMarcus.Portal.Api.csproj" -c
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget \
+    wget ca-certificates curl \
+    && curl -fsSL https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x1.pem \
+        -o /usr/local/share/ca-certificates/letsencrypt-stg-root-x1.crt \
+    && curl -fsSL https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x2.pem \
+        -o /usr/local/share/ca-certificates/letsencrypt-stg-root-x2.crt \
+    && update-ca-certificates \
+    && apt-get purge -y curl \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app .

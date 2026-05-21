@@ -14,8 +14,10 @@ services:
       Bootstrap__CloudAdminToken: ${CLOUD_ADMIN_TOKEN}
       Bootstrap__PortalCallbackUrl: ${PORTAL_CALLBACK_URL}
       Cert__LiveDir: /etc/letsencrypt/live/${DOMAIN}
-      IngestSaga__Sidecars__Ollama__BaseUrl: http://ollama:11434
-      IngestSaga__Sidecars__Ollama__HealthPath: /api/version
+      IngestSaga__Sidecars__OllamaVision__BaseUrl: http://ollama-vision:11434
+      IngestSaga__Sidecars__OllamaVision__HealthPath: /api/version
+      IngestSaga__Sidecars__OllamaText__BaseUrl: http://ollama-text:11434
+      IngestSaga__Sidecars__OllamaText__HealthPath: /api/version
       IngestSaga__Sidecars__Docling__BaseUrl: http://docling:5001
       IngestSaga__Sidecars__Docling__HealthPath: /health
       IngestSaga__Sidecars__Parakeet__BaseUrl: http://parakeet:5092
@@ -23,10 +25,11 @@ services:
     volumes:
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
-      postgres:  { condition: service_healthy }
-      ollama:    { condition: service_healthy }
-      docling:   { condition: service_healthy }
-      parakeet:  { condition: service_healthy }
+      postgres:      { condition: service_healthy }
+      ollama-vision: { condition: service_healthy }
+      ollama-text:   { condition: service_healthy }
+      docling:       { condition: service_healthy }
+      parakeet:      { condition: service_healthy }
     networks: [cloud]
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health/live || exit 1"]
@@ -50,18 +53,18 @@ services:
       timeout: 5s
       retries: 10
 
-  ollama:
-    # OpenBMB's MiniCPM-V fork — upstream Ollama 0.24.0 lacks 4.6 support
+  ollama-vision:
+    # OpenBMB's MiniCPM-V fork — upstream Ollama lacks 4.6 support
     # (PR #12078 closed unmerged). Built CPU-only via ollama-fork-ci.yml.
     image: ghcr.io/c4ptainhook/thany-ollama-minicpm:${OLLAMA_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
-      OLLAMA_KEEP_ALIVE: "30m"
+      OLLAMA_KEEP_ALIVE: "30s"
       OLLAMA_NUM_PARALLEL: "1"
       OLLAMA_MAX_LOADED_MODELS: "1"
     volumes:
-      - ollama-models:/root/.ollama
+      - ollama-vision-models:/root/.ollama
     networks: [cloud]
     mem_limit: 3g
     healthcheck:
@@ -71,7 +74,28 @@ services:
       retries: 10
       start_period: 30s
 
-  ollama-puller:
+  ollama-text:
+    # Vanilla upstream Ollama; runs the text/structured-output model (qwen3).
+    # The MiniCPM-V fork pins to a pre-qwen3 base, so we run a separate container.
+    image: ollama/ollama:${OLLAMA_TEXT_IMAGE_TAG:-0.24.0}
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "30s"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes:
+      - ollama-text-models:/root/.ollama
+    networks: [cloud]
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:11434/api/version | grep -q version || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  ollama-vision-puller:
     image: ghcr.io/c4ptainhook/thany-ollama-minicpm:${OLLAMA_IMAGE_TAG:-latest}
     profiles: ["init"]
     restart: "no"
@@ -81,14 +105,34 @@ services:
       ollama serve &
       SERVE_PID=$$!
       until wget -q -O- http://127.0.0.1:11434/api/version >/dev/null 2>&1; do sleep 1; done
-      ollama pull "${OLLAMA_PULL_TAG}"
+      ollama pull "${OLLAMA_VISION_PULL_TAG}"
       kill -TERM $$SERVE_PID
       wait $$SERVE_PID || true
     environment:
       OLLAMA_HOST: "127.0.0.1:11434"
-      OLLAMA_PULL_TAG: ${OLLAMA_PULL_TAG:-openbmb/minicpm-v4.6:q4_K_M}
+      OLLAMA_VISION_PULL_TAG: ${OLLAMA_VISION_PULL_TAG:-openbmb/minicpm-v4.6:q4_K_M}
     volumes:
-      - ollama-models:/root/.ollama
+      - ollama-vision-models:/root/.ollama
+    networks: [cloud]
+
+  ollama-text-puller:
+    image: ollama/ollama:${OLLAMA_TEXT_IMAGE_TAG:-0.24.0}
+    profiles: ["init"]
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      set -e
+      ollama serve &
+      SERVE_PID=$$!
+      until wget -q -O- http://127.0.0.1:11434/api/version >/dev/null 2>&1; do sleep 1; done
+      ollama pull "${OLLAMA_TEXT_PULL_TAG}"
+      kill -TERM $$SERVE_PID
+      wait $$SERVE_PID || true
+    environment:
+      OLLAMA_HOST: "127.0.0.1:11434"
+      OLLAMA_TEXT_PULL_TAG: ${OLLAMA_TEXT_PULL_TAG:-qwen3:1.7b-instruct-q4_K_M}
+    volumes:
+      - ollama-text-models:/root/.ollama
     networks: [cloud]
 
   docling:
@@ -126,7 +170,8 @@ services:
 
 volumes:
   pg-data:
-  ollama-models:
+  ollama-vision-models:
+  ollama-text-models:
   docling-models:
 
 networks:

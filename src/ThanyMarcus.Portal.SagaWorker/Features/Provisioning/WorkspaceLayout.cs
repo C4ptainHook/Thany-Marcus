@@ -48,6 +48,7 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
             var portalUrl = config["Provisioning:PortalUrl"]
                 ?? throw new InvalidOperationException("Provisioning:PortalUrl is not configured");
             var cloudInit = ReadCloudInitConfig();
+            var ollamaOverrides = RenderOllamaTfvarOverrides(cloudInit);
             tfvars = string.Create(CultureInfo.InvariantCulture, $"""
                 cloud_id       = "{cloud.Id}"
                 region         = "{cloud.Region}"
@@ -60,6 +61,7 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                 admin_user     = "{cloudInit.AdminUser}"
                 ssh_public_key = "{cloudInit.SshPublicKey}"
                 timezone       = "{cloudInit.Timezone}"
+                {ollamaOverrides}
                 """);
         }
         await File.WriteAllTextAsync(Path.Combine(dir, "variables.auto.tfvars"), tfvars, ct);
@@ -74,12 +76,30 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
         string Require(string key) => section[key]
             ?? throw new InvalidOperationException($"Provisioning:CloudInit:{key} is not configured");
         return new CloudInitConfig(
-            LeEmail:       Require("LeEmail"),
-            LeAcmeCa:      section["LeAcmeCa"] ?? "",
-            ImageTag:      Require("ImageTag"),
-            AdminUser:     section["AdminUser"] ?? "thanyadmin",
-            SshPublicKey:  EscapeTfString(section["SshPublicKey"] ?? ""),
-            Timezone:      section["Timezone"] ?? "Etc/UTC");
+            LeEmail:              Require("LeEmail"),
+            LeAcmeCa:             section["LeAcmeCa"] ?? "",
+            ImageTag:             Require("ImageTag"),
+            AdminUser:            section["AdminUser"] ?? "thanyadmin",
+            SshPublicKey:         EscapeTfString(section["SshPublicKey"] ?? ""),
+            Timezone:             section["Timezone"] ?? "Etc/UTC",
+            OllamaVisionPullTag:  section["OllamaVisionPullTag"] ?? "",
+            OllamaTextPullTag:    section["OllamaTextPullTag"] ?? "",
+            OllamaImageTag:       section["OllamaImageTag"] ?? "",
+            OllamaTextImageTag:   section["OllamaTextImageTag"] ?? "");
+    }
+
+    private static string RenderOllamaTfvarOverrides(CloudInitConfig cloudInit)
+    {
+        var sb = new System.Text.StringBuilder();
+        if (!string.IsNullOrWhiteSpace(cloudInit.OllamaVisionPullTag))
+            sb.AppendLine(CultureInfo.InvariantCulture, $"ollama_vision_pull_tag = \"{cloudInit.OllamaVisionPullTag}\"");
+        if (!string.IsNullOrWhiteSpace(cloudInit.OllamaTextPullTag))
+            sb.AppendLine(CultureInfo.InvariantCulture, $"ollama_text_pull_tag   = \"{cloudInit.OllamaTextPullTag}\"");
+        if (!string.IsNullOrWhiteSpace(cloudInit.OllamaImageTag))
+            sb.AppendLine(CultureInfo.InvariantCulture, $"ollama_image_tag       = \"{cloudInit.OllamaImageTag}\"");
+        if (!string.IsNullOrWhiteSpace(cloudInit.OllamaTextImageTag))
+            sb.AppendLine(CultureInfo.InvariantCulture, $"ollama_text_image_tag  = \"{cloudInit.OllamaTextImageTag}\"");
+        return sb.ToString().TrimEnd();
     }
 
     private static string EscapeTfString(string value) =>
@@ -92,7 +112,11 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
         string ImageTag,
         string AdminUser,
         string SshPublicKey,
-        string Timezone);
+        string Timezone,
+        string OllamaVisionPullTag,
+        string OllamaTextPullTag,
+        string OllamaImageTag,
+        string OllamaTextImageTag);
 
     public void SweepTerminal(Instant now, Duration retention)
     {
@@ -151,15 +175,19 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                 """,
                 """
 
-                  enrollment_token = var.enrollment_token
-                  ghcr_pat         = var.ghcr_pat
-                  portal_url       = var.portal_url
-                  le_email         = var.le_email
-                  le_acme_ca       = var.le_acme_ca
-                  image_tag        = var.image_tag
-                  admin_user       = var.admin_user
-                  ssh_public_key   = var.ssh_public_key
-                  timezone         = var.timezone
+                  enrollment_token       = var.enrollment_token
+                  ghcr_pat               = var.ghcr_pat
+                  portal_url             = var.portal_url
+                  le_email               = var.le_email
+                  le_acme_ca             = var.le_acme_ca
+                  image_tag              = var.image_tag
+                  admin_user             = var.admin_user
+                  ssh_public_key         = var.ssh_public_key
+                  timezone               = var.timezone
+                  ollama_vision_pull_tag = var.ollama_vision_pull_tag
+                  ollama_text_pull_tag   = var.ollama_text_pull_tag
+                  ollama_image_tag       = var.ollama_image_tag
+                  ollama_text_image_tag  = var.ollama_text_image_tag
                 """,
                 """
 
@@ -196,6 +224,22 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                 variable "timezone" {
                   type    = string
                   default = "Etc/UTC"
+                }
+                variable "ollama_vision_pull_tag" {
+                  type    = string
+                  default = "openbmb/minicpm-v4.6:q4_K_M"
+                }
+                variable "ollama_text_pull_tag" {
+                  type    = string
+                  default = "qwen3:1.7b-instruct-q4_K_M"
+                }
+                variable "ollama_image_tag" {
+                  type    = string
+                  default = "latest"
+                }
+                variable "ollama_text_image_tag" {
+                  type    = string
+                  default = "0.24.0"
                 }
                 """),
             "azure" => throw new NotImplementedException("Azure provider lands in PORTAL-009"),

@@ -140,6 +140,159 @@ public sealed class RollingBackTfHandlerDestroyTests(PostgresFixture postgres) :
     }
 
     [Fact]
+    public async Task Destroy_workspace_select_fails_with_live_vm_reschedules()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (_, cloud, job) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.RollingBackTf,
+            kind: SagaKinds.Destroy,
+            ct: ct);
+
+        var trackedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        trackedCloud.VmIp = "203.0.113.1";
+        trackedCloud.TerraformWorkspace = "abc12345";
+        await Db.SaveChangesAsync(ct);
+        Db.ChangeTracker.Clear();
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", job.Id.ToString()));
+
+        var tf = new FakeTerraformRunner
+        {
+            WorkspaceSelectOnlyShouldFail = true,
+            WorkspaceSelectOnlyFailStderr = "Workspace \"abc\" doesn't exist.",
+        };
+        tf.QueueInitOk();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(job, ct);
+        Db.ChangeTracker.Clear();
+
+        var reloadedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
+        reloadedJob.Status.ShouldBe(SagaStatus.RollingBackTf);
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.DestroyedAt.ShouldBeNull();
+        reloadedCloud.VmIp.ShouldBe("203.0.113.1");
+
+        tf.Calls.ShouldNotContain(c => c.Command == "destroy");
+        tf.DeleteWorkspaceCalls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Destroy_workspace_select_fails_with_live_vm_at_max_attempts_lands_in_failed_destroy()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (_, cloud, job) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.RollingBackTf,
+            kind: SagaKinds.Destroy,
+            ct: ct);
+
+        var trackedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
+        trackedJob.AttemptCount = 5;
+        var trackedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        trackedCloud.VmIp = "203.0.113.1";
+        await Db.SaveChangesAsync(ct);
+        Db.ChangeTracker.Clear();
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", job.Id.ToString()));
+
+        var tf = new FakeTerraformRunner
+        {
+            WorkspaceSelectOnlyShouldFail = true,
+            WorkspaceSelectOnlyFailStderr = "Workspace \"abc\" doesn't exist.",
+        };
+        tf.QueueInitOk();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(job, ct);
+        Db.ChangeTracker.Clear();
+
+        var reloadedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
+        reloadedJob.Status.ShouldBe(SagaStatus.FailedDestroy);
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.DestroyedAt.ShouldBeNull();
+        reloadedCloud.VmIp.ShouldBe("203.0.113.1");
+
+        tf.Calls.ShouldNotContain(c => c.Command == "destroy");
+    }
+
+    [Fact]
+    public async Task Destroy_workspace_missing_with_no_live_vm_completes_cleanly()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (_, cloud, job) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.RollingBackTf,
+            kind: SagaKinds.Destroy,
+            ct: ct);
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", job.Id.ToString()));
+
+        var tf = new FakeTerraformRunner
+        {
+            WorkspaceSelectOnlyShouldFail = true,
+            WorkspaceSelectOnlyFailStderr = "Workspace \"abc\" does not exist.",
+        };
+        tf.QueueInitOk();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(job, ct);
+        Db.ChangeTracker.Clear();
+
+        var reloadedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
+        reloadedJob.Status.ShouldBe(SagaStatus.RolledBack);
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.DestroyedAt.ShouldNotBeNull();
+        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.RolledBack);
+
+        tf.Calls.ShouldNotContain(c => c.Command == "destroy");
+    }
+
+    [Fact]
+    public async Task Destroy_workspace_select_fails_with_unknown_stderr_reschedules()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (_, cloud, job) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.RollingBackTf,
+            kind: SagaKinds.Destroy,
+            ct: ct);
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", job.Id.ToString()));
+
+        var tf = new FakeTerraformRunner
+        {
+            WorkspaceSelectOnlyShouldFail = true,
+            WorkspaceSelectOnlyFailStderr = "Error: connection to pg backend reset by peer",
+        };
+        tf.QueueInitOk();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(job, ct);
+        Db.ChangeTracker.Clear();
+
+        var reloadedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
+        reloadedJob.Status.ShouldBe(SagaStatus.RollingBackTf);
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.DestroyedAt.ShouldBeNull();
+
+        tf.Calls.ShouldNotContain(c => c.Command == "destroy");
+    }
+
+    [Fact]
     public async Task Create_side_rollback_still_lands_in_failed_tf()
     {
         // Regression guard — confirm the create-side rollback path is unchanged.

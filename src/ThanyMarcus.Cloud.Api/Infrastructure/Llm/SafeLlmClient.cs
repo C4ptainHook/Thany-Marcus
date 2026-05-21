@@ -13,23 +13,39 @@ public sealed partial class SafeLlmClient : ILlmClient
         PropertyNameCaseInsensitive = false,
     };
 
-    private readonly HttpClient httpClient;
+    private readonly IHttpClientFactory clientFactory;
+    private readonly IConfiguration config;
     private readonly IOptionsMonitor<LlmIntelligenceOptions> options;
     private readonly ILogger<SafeLlmClient> log;
 
+    private readonly AsyncLocal<string?> currentModelTag = new();
+
     public SafeLlmClient(
-        HttpClient httpClient,
+        IHttpClientFactory clientFactory,
+        IConfiguration config,
         IOptionsMonitor<LlmIntelligenceOptions> options,
         ILogger<SafeLlmClient> log)
     {
-        this.httpClient = httpClient;
+        this.clientFactory = clientFactory;
+        this.config = config;
         this.options = options;
         this.log = log;
     }
 
     public string Mode => LlmModes.Safe;
-    public string ModelName => "minicpm-v";
-    public string ModelVersion => options.CurrentValue.OllamaTag;
+
+    public string ModelName
+    {
+        get
+        {
+            var tag = currentModelTag.Value;
+            if (string.IsNullOrEmpty(tag)) return "";
+            var colon = tag.IndexOf(':', StringComparison.Ordinal);
+            return colon < 0 ? tag : tag[..colon];
+        }
+    }
+
+    public string ModelVersion => currentModelTag.Value ?? "";
 
     public async Task<T> CompleteAsync<T>(PromptId promptId, object inputContext, CancellationToken ct)
         where T : class
@@ -38,16 +54,20 @@ public sealed partial class SafeLlmClient : ILlmClient
         ArgumentNullException.ThrowIfNull(inputContext);
         var opts = options.CurrentValue;
         var promptText = ExtractPromptText(promptId, inputContext);
+        var modelTag = ResolveModelTag(promptId);
+        currentModelTag.Value = modelTag;
         var maxAttempts = Math.Max(1, opts.Retry.MaxAttempts);
         var suffix = "";
         Exception? lastError = null;
 
+        using var http = clientFactory.CreateClient(OllamaClientNames.Text);
+
         for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
-            var requestBody = BuildRequestBody<T>(opts.OllamaTag, promptText + suffix);
+            var requestBody = BuildRequestBody<T>(modelTag, promptText + suffix);
             try
             {
-                using var resp = await httpClient.PostAsJsonAsync("/api/generate", requestBody, ct);
+                using var resp = await http.PostAsJsonAsync("/api/generate", requestBody, ct);
                 if (!resp.IsSuccessStatusCode)
                 {
                     var err = await resp.Content.ReadAsStringAsync(ct);
@@ -58,14 +78,25 @@ public sealed partial class SafeLlmClient : ILlmClient
                 {
                     throw new JsonException("Ollama returned empty response field");
                 }
-                // FORK: special-case T==string for hub-generate-v1 which returns free-form Markdown.
                 if (typeof(T) == typeof(string))
                 {
                     return (T)(object)ollamaResp.Response.Trim();
                 }
-                var parsed = JsonSerializer.Deserialize<T>(ollamaResp.Response, JsonOpts)
-                             ?? throw new JsonException("null deserialization");
-                return parsed;
+                try
+                {
+                    var parsed = JsonSerializer.Deserialize<T>(ollamaResp.Response, JsonOpts)
+                                 ?? throw new JsonException("null deserialization");
+                    return parsed;
+                }
+                catch (JsonException)
+                {
+                    if (RouteV1Salvage.TryRecover<T>(promptId, ollamaResp.Response, out var salvaged) && salvaged is not null)
+                    {
+                        LogSalvagedRoute(log, promptId.Name, promptId.Version);
+                        return salvaged;
+                    }
+                    throw;
+                }
             }
             catch (JsonException ex)
             {
@@ -79,6 +110,25 @@ public sealed partial class SafeLlmClient : ILlmClient
             }
         }
         throw new LlmStructuredOutputException(promptId, maxAttempts, lastError);
+    }
+
+    private string ResolveModelTag(PromptId promptId)
+    {
+        var key = promptId.Name switch
+        {
+            "route"        => "IngestSaga:Models:Route:OllamaTag",
+            "extract"      => "IngestSaga:Models:Entity:OllamaTag",
+            "dedup"        => "IngestSaga:Models:Entity:OllamaTag",
+            "hub-generate" => "IngestSaga:Models:Entity:OllamaTag",
+            _              => "IngestSaga:Models:Entity:OllamaTag",
+        };
+        var tag = config[key];
+        if (string.IsNullOrWhiteSpace(tag))
+        {
+            throw new InvalidOperationException(
+                $"{key} is not configured (required for promptId={promptId})");
+        }
+        return tag;
     }
 
     private static object BuildRequestBody<T>(string model, string prompt)
@@ -105,8 +155,6 @@ public sealed partial class SafeLlmClient : ILlmClient
 
     private static string ExtractPromptText(PromptId promptId, object inputContext)
     {
-        // Handlers build the prompt via PromptBuilder.Build*(...) and pass the resulting
-        // string here. We also accept a wrapper record so the call site has a typed shape.
         if (inputContext is string s) return s;
         if (inputContext is LlmPromptRequest req) return req.PromptText;
         throw new InvalidOperationException(
@@ -116,6 +164,10 @@ public sealed partial class SafeLlmClient : ILlmClient
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,
         Message = "LLM JSON parse failed on attempt {Attempt} for {PromptId}")]
     private static partial void LogJsonParseFailed(ILogger logger, int attempt, string promptId, Exception ex);
+
+    [LoggerMessage(EventId = 2, Level = LogLevel.Information,
+        Message = "Salvaged route-v1 decision from non-JSON model output for {PromptName}-{PromptVersion}")]
+    private static partial void LogSalvagedRoute(ILogger logger, string promptName, string promptVersion);
 }
 
 public sealed record LlmPromptRequest(string PromptText);

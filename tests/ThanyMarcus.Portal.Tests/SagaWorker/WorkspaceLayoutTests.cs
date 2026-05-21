@@ -66,13 +66,19 @@ public sealed class WorkspaceLayoutTests
         mainTf.ShouldContain("source  = \"digitalocean/digitalocean\"");
         mainTf.ShouldContain("provider \"digitalocean\"");
         mainTf.ShouldContain("token = var.provider_token");
-        mainTf.ShouldContain("enrollment_token = var.enrollment_token");
-        mainTf.ShouldContain("ghcr_pat         = var.ghcr_pat");
-        mainTf.ShouldContain("portal_url       = var.portal_url");
+        mainTf.ShouldContain("enrollment_token       = var.enrollment_token");
+        mainTf.ShouldContain("ghcr_pat               = var.ghcr_pat");
+        mainTf.ShouldContain("portal_url             = var.portal_url");
+        mainTf.ShouldContain("ollama_vision_pull_tag = var.ollama_vision_pull_tag");
+        mainTf.ShouldContain("ollama_text_pull_tag   = var.ollama_text_pull_tag");
+        mainTf.ShouldContain("ollama_text_image_tag  = var.ollama_text_image_tag");
         mainTf.ShouldContain("variable \"provider_token\"");
         mainTf.ShouldContain("variable \"enrollment_token\"");
         mainTf.ShouldContain("variable \"ghcr_pat\"");
         mainTf.ShouldContain("variable \"portal_url\"");
+        mainTf.ShouldContain("variable \"ollama_vision_pull_tag\"");
+        mainTf.ShouldContain("variable \"ollama_text_pull_tag\"");
+        mainTf.ShouldContain("variable \"ollama_text_image_tag\"");
         mainTf.ShouldContain("output \"ip\" { value = module.cloud.ip }");
 
         var tfvars = await File.ReadAllTextAsync(Path.Combine(dir, "variables.auto.tfvars"), ct);

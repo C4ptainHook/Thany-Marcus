@@ -128,10 +128,18 @@ builder.Services.AddHttpClient(RealUrlFetcherClient.HttpClientName, c =>
 builder.Services.AddHttpClient(OllamaClientNames.Vlm, c =>
 {
     c.BaseAddress = new Uri(
-        builder.Configuration["IngestSaga:Sidecars:Ollama:BaseUrl"]
+        builder.Configuration["IngestSaga:Sidecars:OllamaVision:BaseUrl"]
             ?? "http://localhost:11434");
     c.Timeout = TimeSpan.FromSeconds(
-        builder.Configuration.GetValue("IngestSaga:Sidecars:Ollama:RequestTimeoutSeconds", 90));
+        builder.Configuration.GetValue("IngestSaga:Sidecars:OllamaVision:RequestTimeoutSeconds", 180));
+});
+builder.Services.AddHttpClient(OllamaClientNames.Text, c =>
+{
+    c.BaseAddress = new Uri(
+        builder.Configuration["IngestSaga:Sidecars:OllamaText:BaseUrl"]
+            ?? "http://localhost:11434");
+    c.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("IngestSaga:Sidecars:OllamaText:RequestTimeoutSeconds", 60));
 });
 
 builder.Services.AddSingleton(_ => new DoclingOptions
@@ -201,14 +209,7 @@ builder.Services.AddSingleton<IVoiceExtractor, NotImplementedVoiceExtractor>();
 builder.Services.AddSingleton<IFileExtractor, NotImplementedFileExtractor>();
 
 builder.Services.Configure<LlmIntelligenceOptions>(builder.Configuration.GetSection("LlmIntelligence"));
-builder.Services.PostConfigure<LlmIntelligenceOptions>(o =>
-    o.OllamaTag = builder.Configuration["IngestSaga:Models:Vlm:OllamaTag"] ?? o.OllamaTag);
-builder.Services.AddHttpClient<SafeLlmClient>((sp, client) =>
-{
-    client.BaseAddress = new Uri(
-        builder.Configuration["IngestSaga:Sidecars:Ollama:BaseUrl"] ?? "http://localhost:11434");
-    client.Timeout = TimeSpan.FromMinutes(2);
-});
+builder.Services.AddSingleton<SafeLlmClient>();
 builder.Services.AddSingleton<ILlmClient>(sp => sp.GetRequiredService<SafeLlmClient>());
 builder.Services.AddSingleton<ILlmClientFactory, LlmClientFactory>();
 builder.Services.AddScoped<LlmEventAppender>();

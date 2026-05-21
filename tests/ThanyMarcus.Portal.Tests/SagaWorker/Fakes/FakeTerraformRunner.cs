@@ -43,13 +43,14 @@ public sealed class FakeTerraformRunner : ITerraformRunner
 
     public List<string> WorkspaceSelectOnlyCalls { get; } = [];
     public bool WorkspaceSelectOnlyShouldFail { get; set; }
+    public string WorkspaceSelectOnlyFailStderr { get; set; } = "workspace select boom (fake)";
 
     public Task<TerraformResult> SelectWorkspaceAsync(string workdir, string workspaceName, CancellationToken ct)
     {
         Calls.Add(("workspace-select-only", workdir));
         WorkspaceSelectOnlyCalls.Add(workspaceName);
         return Task.FromResult(WorkspaceSelectOnlyShouldFail
-            ? new TerraformResult(1, "", "workspace select boom (fake)")
+            ? new TerraformResult(1, "", WorkspaceSelectOnlyFailStderr)
             : new TerraformResult(0, "", ""));
     }
 
