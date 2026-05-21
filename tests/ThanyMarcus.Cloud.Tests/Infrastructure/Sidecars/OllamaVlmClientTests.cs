@@ -187,7 +187,7 @@ public sealed class OllamaVlmClientTests : IDisposable
         var store = new FakeStoreReturningWireMockUrl(wm.Url!);
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["IngestSaga:Sidecars:Ollama:BaseUrl"] = wm.Url,
+            ["IngestSaga:Sidecars:OllamaVision:BaseUrl"] = wm.Url,
             ["IngestSaga:Models:Vlm:OllamaTag"] = "openbmb/minicpm-v4.6:q4_K_M",
             ["IngestSaga:Filters:Image:MinDimension"] = "100",
             ["IngestSaga:Filters:Image:MaxDimension"] = "16384",

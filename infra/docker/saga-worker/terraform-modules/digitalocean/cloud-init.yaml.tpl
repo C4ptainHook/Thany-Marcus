@@ -1,6 +1,6 @@
 #cloud-config
 bootcmd:
-  - mkdir -p /opt/thany-cloud /etc/thany-cloud /var/log/thany-cloud /run/cloud-secrets
+  - mkdir -p /opt/thany-cloud /opt/thany-cloud/puller /etc/thany-cloud /var/log/thany-cloud /run/cloud-secrets
   - chmod 0700 /run/cloud-secrets
 
 users:
@@ -64,8 +64,10 @@ write_files:
       CLOUD_ADMIN_TOKEN=$${CLOUD_ADMIN_TOKEN}
       JWT_SIGNING_KEY=$${JWT_SIGNING_KEY}
       POSTGRES_PASSWORD=$${POSTGRES_PASSWORD}
-      OLLAMA_PULL_TAG=${ollama_pull_tag}
+      OLLAMA_VISION_PULL_TAG=${ollama_vision_pull_tag}
+      OLLAMA_TEXT_PULL_TAG=${ollama_text_pull_tag}
       OLLAMA_IMAGE_TAG=${ollama_image_tag}
+      OLLAMA_TEXT_IMAGE_TAG=${ollama_text_image_tag}
 
   - path: /etc/thany-cloud/nginx-site.tpl
     owner: root:root
@@ -122,6 +124,36 @@ write_files:
       description=nginx + LE
       ports=80,443/tcp
 
+  - path: /opt/thany-cloud/puller/run.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      : "$${OLLAMA_PULL_TAG:?puller: OLLAMA_PULL_TAG must be set}"
+      echo "[puller] starting ollama serve"
+      ollama serve &
+      SERVE_PID=$!
+      trap 'kill -TERM $SERVE_PID 2>/dev/null || true; wait $SERVE_PID 2>/dev/null || true' EXIT
+      echo "[puller] waiting for ollama to accept connections (max 60s)"
+      ready=0
+      i=0
+      while [ "$i" -lt 60 ]; do
+        if ollama list >/dev/null 2>&1; then ready=1; break; fi
+        sleep 1
+        i=$((i+1))
+      done
+      if [ "$ready" != "1" ]; then
+        echo "[puller] FATAL: ollama serve never came up" >&2
+        exit 1
+      fi
+      echo "[puller] pulling $OLLAMA_PULL_TAG"
+      ollama pull "$OLLAMA_PULL_TAG" || { echo "[puller] FATAL: ollama pull failed" >&2; exit 1; }
+      echo "[puller] verifying model is present after pull"
+      MODEL_NAME=$${OLLAMA_PULL_TAG%:*}
+      ollama list | grep -q "$MODEL_NAME" || { echo "[puller] FATAL: model missing from ollama list after pull" >&2; exit 1; }
+      echo "[puller] done"
+
   - path: /etc/apt/apt.conf.d/50unattended-upgrades
     owner: root:root
     permissions: "0644"
@@ -160,8 +192,10 @@ write_files:
             Storage__AccessKeyId: $${STORAGE_ACCESS_KEY_ID}
             Storage__AccessKeySecret: $${STORAGE_ACCESS_KEY_SECRET}
             Cert__LiveDir: /etc/letsencrypt/live/$${DOMAIN}
-            IngestSaga__Sidecars__Ollama__BaseUrl: http://ollama:11434
-            IngestSaga__Sidecars__Ollama__HealthPath: /api/version
+            IngestSaga__Sidecars__OllamaVision__BaseUrl: http://ollama-vision:11434
+            IngestSaga__Sidecars__OllamaVision__HealthPath: /api/version
+            IngestSaga__Sidecars__OllamaText__BaseUrl: http://ollama-text:11434
+            IngestSaga__Sidecars__OllamaText__HealthPath: /api/version
             IngestSaga__Sidecars__Docling__BaseUrl: http://docling:5001
             IngestSaga__Sidecars__Docling__HealthPath: /health
             IngestSaga__Sidecars__Parakeet__BaseUrl: http://parakeet:5092
@@ -169,10 +203,11 @@ write_files:
           volumes:
             - /etc/letsencrypt:/etc/letsencrypt:ro
           depends_on:
-            postgres: { condition: service_healthy }
-            ollama:   { condition: service_started }
-            docling:  { condition: service_started }
-            parakeet: { condition: service_started }
+            postgres:      { condition: service_healthy }
+            ollama-vision: { condition: service_started }
+            ollama-text:   { condition: service_started }
+            docling:       { condition: service_started }
+            parakeet:      { condition: service_started }
           networks: [cloud]
           healthcheck:
             test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health/live || exit 1"]
@@ -196,7 +231,7 @@ write_files:
             timeout: 5s
             retries: 10
 
-        ollama:
+        ollama-vision:
           image: ghcr.io/c4ptainhook/thany-ollama-minicpm:$${OLLAMA_IMAGE_TAG:-latest}
           restart: unless-stopped
           environment:
@@ -205,7 +240,7 @@ write_files:
             OLLAMA_NUM_PARALLEL: "1"
             OLLAMA_MAX_LOADED_MODELS: "1"
           volumes:
-            - ollama-models:/root/.ollama
+            - ollama-vision-models:/root/.ollama
           networks: [cloud]
           mem_limit: 3g
           healthcheck:
@@ -215,37 +250,49 @@ write_files:
             retries: 10
             start_period: 30s
 
-        ollama-puller:
+        ollama-text:
+          image: ollama/ollama:$${OLLAMA_TEXT_IMAGE_TAG:-0.24.0}
+          restart: unless-stopped
+          environment:
+            OLLAMA_HOST: "0.0.0.0:11434"
+            OLLAMA_KEEP_ALIVE: "30s"
+            OLLAMA_NUM_PARALLEL: "1"
+            OLLAMA_MAX_LOADED_MODELS: "1"
+          volumes:
+            - ollama-text-models:/root/.ollama
+          networks: [cloud]
+          mem_limit: 2g
+          healthcheck:
+            test: ["CMD", "/bin/ollama", "list"]
+            interval: 15s
+            timeout: 5s
+            retries: 10
+            start_period: 30s
+
+        ollama-vision-puller:
           image: ghcr.io/c4ptainhook/thany-ollama-minicpm:$${OLLAMA_IMAGE_TAG:-latest}
           profiles: ["init"]
           restart: "no"
-          entrypoint: ["/bin/sh", "-c"]
-          command: |
-            set -eu -o pipefail
-            echo "[puller] starting ollama serve"
-            ollama serve &
-            SERVE_PID=$$!
-            trap 'kill -TERM $$SERVE_PID 2>/dev/null || true; wait $$SERVE_PID 2>/dev/null || true' EXIT
-            echo "[puller] waiting for ollama to accept connections (max 60s)"
-            ready=0
-            for _ in $$(seq 1 60); do
-              if ollama list >/dev/null 2>&1; then ready=1; break; fi
-              sleep 1
-            done
-            if [ "$$ready" != "1" ]; then
-              echo "[puller] FATAL: ollama serve never came up" >&2
-              exit 1
-            fi
-            echo "[puller] pulling $${OLLAMA_PULL_TAG}"
-            ollama pull "$${OLLAMA_PULL_TAG}" || { echo "[puller] FATAL: ollama pull failed" >&2; exit 1; }
-            echo "[puller] verifying model is present after pull"
-            ollama list | grep -q "$${OLLAMA_PULL_TAG%:*}" || { echo "[puller] FATAL: model missing from ollama list after pull" >&2; exit 1; }
-            echo "[puller] done"
+          entrypoint: ["/bin/sh", "/opt/puller/run.sh"]
           environment:
             OLLAMA_HOST: "127.0.0.1:11434"
-            OLLAMA_PULL_TAG: $${OLLAMA_PULL_TAG:-openbmb/minicpm-v4.6:q4_K_M}
+            OLLAMA_PULL_TAG: $${OLLAMA_VISION_PULL_TAG:-openbmb/minicpm-v4.6:q4_K_M}
           volumes:
-            - ollama-models:/root/.ollama
+            - ollama-vision-models:/root/.ollama
+            - /opt/thany-cloud/puller:/opt/puller:ro
+          networks: [cloud]
+
+        ollama-text-puller:
+          image: ollama/ollama:$${OLLAMA_TEXT_IMAGE_TAG:-0.24.0}
+          profiles: ["init"]
+          restart: "no"
+          entrypoint: ["/bin/sh", "/opt/puller/run.sh"]
+          environment:
+            OLLAMA_HOST: "127.0.0.1:11434"
+            OLLAMA_PULL_TAG: $${OLLAMA_TEXT_PULL_TAG:-qwen3:1.7b-instruct-q4_K_M}
+          volumes:
+            - ollama-text-models:/root/.ollama
+            - /opt/thany-cloud/puller:/opt/puller:ro
           networks: [cloud]
 
         docling:
@@ -277,7 +324,8 @@ write_files:
 
       volumes:
         pg-data:
-        ollama-models:
+        ollama-vision-models:
+        ollama-text-models:
         docling-models:
 
       networks:
@@ -331,27 +379,37 @@ runcmd:
 
   - |
     cd /opt/thany-cloud
-    sudo -u ${admin_user} docker compose pull ollama docling parakeet
-    sudo -u ${admin_user} docker compose --profile init pull ollama-puller
+    sudo -u ${admin_user} docker compose pull ollama-vision ollama-text docling parakeet
+    sudo -u ${admin_user} docker compose --profile init pull ollama-vision-puller ollama-text-puller
 
   - |
-    set -o pipefail
     cd /opt/thany-cloud
-    rm -f /opt/thany-cloud/.ollama-puller-ok
-    if sudo -u ${admin_user} docker compose --profile init run \
-         --name thany-cloud-ollama-puller-run \
-         ollama-puller 2>&1 | tee /var/log/thany-cloud/ollama-puller.log; then
-      touch /opt/thany-cloud/.ollama-puller-ok
+    rm -f /opt/thany-cloud/.ollama-vision-puller-ok /opt/thany-cloud/.ollama-text-puller-ok
+    sudo -u ${admin_user} docker compose --profile init run \
+         --name thany-cloud-ollama-vision-puller-run \
+         ollama-vision-puller > /var/log/thany-cloud/ollama-vision-puller.log 2>&1
+    RC=$?
+    if [ "$RC" = "0" ]; then
+      touch /opt/thany-cloud/.ollama-vision-puller-ok
     else
-      echo "[cloud-init] ollama-puller FAILED — log at /var/log/thany-cloud/ollama-puller.log; container retained as thany-cloud-ollama-puller-run for 'docker logs'" >&2
+      echo "[cloud-init] ollama-vision-puller FAILED rc=$RC; log at /var/log/thany-cloud/ollama-vision-puller.log; container retained as thany-cloud-ollama-vision-puller-run for 'docker logs'" >&2
+    fi
+    sudo -u ${admin_user} docker compose --profile init run \
+         --name thany-cloud-ollama-text-puller-run \
+         ollama-text-puller > /var/log/thany-cloud/ollama-text-puller.log 2>&1
+    RC=$?
+    if [ "$RC" = "0" ]; then
+      touch /opt/thany-cloud/.ollama-text-puller-ok
+    else
+      echo "[cloud-init] ollama-text-puller FAILED rc=$RC; log at /var/log/thany-cloud/ollama-text-puller.log; container retained as thany-cloud-ollama-text-puller-run for 'docker logs'" >&2
     fi
 
   - systemctl daemon-reload
   - systemctl enable --now thany-cloud.service
 
   - |
-    if [ ! -f /opt/thany-cloud/.ollama-puller-ok ]; then
-      echo "[cloud-init] skipping certbot + registration callback — ollama-puller did not complete; cloud will not register so portal sees failed provisioning" >&2
+    if [ ! -f /opt/thany-cloud/.ollama-vision-puller-ok ] || [ ! -f /opt/thany-cloud/.ollama-text-puller-ok ]; then
+      echo "[cloud-init] skipping certbot + registration callback - one or both ollama pullers did not complete; cloud will not register so portal sees failed provisioning" >&2
       exit 0
     fi
     set -a

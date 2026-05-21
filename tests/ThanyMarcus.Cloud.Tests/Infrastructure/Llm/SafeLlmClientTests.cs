@@ -1,11 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm.Prompts;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 
 namespace ThanyMarcus.Cloud.Tests.Infrastructure.Llm;
 
@@ -15,11 +18,20 @@ public sealed class SafeLlmClientTests
     {
         var options = new LlmIntelligenceOptions
         {
-            OllamaTag = "stub-tag",
             Retry = new RetryOptions { MaxAttempts = maxAttempts },
         };
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://stub.ollama.test") };
-        return new SafeLlmClient(http, new TestOptionsMonitor<LlmIntelligenceOptions>(options), NullLogger<SafeLlmClient>.Instance);
+        var services = new ServiceCollection();
+        services.AddHttpClient(OllamaClientNames.Text)
+            .ConfigurePrimaryHttpMessageHandler(() => handler)
+            .ConfigureHttpClient(c => c.BaseAddress = new Uri("http://stub.ollama.test"));
+        var sp = services.BuildServiceProvider();
+        var factory = sp.GetRequiredService<IHttpClientFactory>();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["IngestSaga:Models:Route:OllamaTag"] = "stub-tag",
+            ["IngestSaga:Models:Entity:OllamaTag"] = "stub-tag",
+        }).Build();
+        return new SafeLlmClient(factory, config, new TestOptionsMonitor<LlmIntelligenceOptions>(options), NullLogger<SafeLlmClient>.Instance);
     }
 
     [Fact]
@@ -76,6 +88,32 @@ public sealed class SafeLlmClientTests
         await Should.ThrowAsync<LlmStructuredOutputException>(async () =>
             await client.CompleteAsync<RouteDecisionDto>(
                 new PromptId("route", "v1"), new LlmPromptRequest("prompt"), ct));
+    }
+
+    [Fact]
+    public async Task Route_v1_salvages_decision_from_unterminated_json()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var truncated = """{"project_entity_id": null, "confidence": 0.83, "rationale": "matches scope""";
+        var handler = new StubHandler(_ => OllamaOk(truncated));
+        var client = NewClient(handler);
+        var dto = await client.CompleteAsync<RouteDecisionDto>(
+            new PromptId("route", "v1"), new LlmPromptRequest("prompt"), ct);
+        dto.ProjectEntityId.ShouldBeNull();
+        dto.Confidence.ShouldBe(0.83);
+        dto.Rationale.ShouldBe("matches scope");
+        handler.Attempts.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Route_v1_salvage_does_not_apply_to_other_prompts()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var handler = new StubHandler(_ => OllamaOk("not json"));
+        var client = NewClient(handler, maxAttempts: 1);
+        await Should.ThrowAsync<LlmStructuredOutputException>(async () =>
+            await client.CompleteAsync<EntityExtractionDto>(
+                new PromptId("extract", "v1"), new LlmPromptRequest("prompt"), ct));
     }
 
     [Fact]

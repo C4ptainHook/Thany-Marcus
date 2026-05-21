@@ -81,14 +81,26 @@ variable "timezone" {
   default     = "Etc/UTC"
 }
 
-variable "ollama_pull_tag" {
-  description = "Ollama model tag to pre-pull at cloud-init time. Must match the tag the VlmWorker requests at runtime. Default targets MiniCPM-V 4.6 Q4_K_M from the openbmb community namespace (4.6 has not landed in library/minicpm-v yet)."
+variable "ollama_vision_pull_tag" {
+  description = "Ollama model tag to pre-pull on the vision server. Must match the tag the VlmWorker requests at runtime. Default targets MiniCPM-V 4.6 Q4_K_M from the openbmb community namespace (4.6 has not landed in library/minicpm-v yet)."
   type        = string
   default     = "openbmb/minicpm-v4.6:q4_K_M"
 }
 
+variable "ollama_text_pull_tag" {
+  description = "Ollama model tag to pre-pull on the text server. Drives routing + entity extraction. Default targets Qwen3 1.7B instruct Q4_K_M — small enough to coexist with MiniCPM-V on s-4vcpu-8gb, instruction-tuned for structured/JSON output."
+  type        = string
+  default     = "qwen3:1.7b-instruct-q4_K_M"
+}
+
 variable "ollama_image_tag" {
-  description = "Tag for ghcr.io/c4ptainhook/thany-ollama-minicpm — the tc-mb/ollama MiniCPM-V fork built by ollama-fork-ci.yml. Upstream Ollama lacks 4.6 model support."
+  description = "Tag for ghcr.io/c4ptainhook/thany-ollama-minicpm — the tc-mb/ollama MiniCPM-V fork built by ollama-fork-ci.yml. Upstream Ollama lacks 4.6 model support; this server stays scoped to vision."
   type        = string
   default     = "latest"
+}
+
+variable "ollama_text_image_tag" {
+  description = "Tag for the upstream ollama/ollama image used by the text server (handles routing + entity extraction with Qwen3). The vision fork is pinned to an older base that predates Qwen3 architecture support, so a separate container runs vanilla upstream."
+  type        = string
+  default     = "0.24.0"
 }

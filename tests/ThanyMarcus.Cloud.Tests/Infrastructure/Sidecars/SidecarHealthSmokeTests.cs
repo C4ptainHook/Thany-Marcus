@@ -10,7 +10,8 @@ public sealed class SidecarHealthSmokeTests : IAsyncLifetime
     private static readonly string[] InstallCurl = ["apk", "add", "--no-cache", "curl"];
 
     private INetwork _network = null!;
-    private IContainer _ollama = null!;
+    private IContainer _ollamaVision = null!;
+    private IContainer _ollamaText = null!;
     private IContainer _docling = null!;
     private IContainer _parakeet = null!;
     private IContainer _cloudApi = null!;
@@ -22,11 +23,16 @@ public sealed class SidecarHealthSmokeTests : IAsyncLifetime
             .Build();
         await _network.CreateAsync();
 
-        _ollama   = BuildMock("ollama",   "11434", "{\"version\":\"mock\"}");
-        _docling  = BuildMock("docling",  "5001",  "ok");
-        _parakeet = BuildMock("parakeet", "5092",  "{\"status\":\"ok\"}");
+        _ollamaVision = BuildMock("ollama-vision", "11434", "{\"version\":\"mock\"}");
+        _ollamaText   = BuildMock("ollama-text",   "11434", "{\"version\":\"mock\"}");
+        _docling      = BuildMock("docling",       "5001",  "ok");
+        _parakeet     = BuildMock("parakeet",      "5092",  "{\"status\":\"ok\"}");
 
-        await Task.WhenAll(_ollama.StartAsync(), _docling.StartAsync(), _parakeet.StartAsync());
+        await Task.WhenAll(
+            _ollamaVision.StartAsync(),
+            _ollamaText.StartAsync(),
+            _docling.StartAsync(),
+            _parakeet.StartAsync());
 
         _cloudApi = new ContainerBuilder("alpine:3.20")
             .WithNetwork(_network)
@@ -41,11 +47,12 @@ public sealed class SidecarHealthSmokeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task All_three_sidecars_are_reachable_by_service_name()
+    public async Task All_sidecars_are_reachable_by_service_name()
     {
-        await AssertCurl("http://ollama:11434/api/version",   "\"version\"");
-        await AssertCurl("http://docling:5001/health",        "ok");
-        await AssertCurl("http://parakeet:5092/health",       "\"status\":\"ok\"");
+        await AssertCurl("http://ollama-vision:11434/api/version", "\"version\"");
+        await AssertCurl("http://ollama-text:11434/api/version",   "\"version\"");
+        await AssertCurl("http://docling:5001/health",             "ok");
+        await AssertCurl("http://parakeet:5092/health",            "\"status\":\"ok\"");
     }
 
     private IContainer BuildMock(string serviceName, string port, string body) =>
@@ -67,7 +74,8 @@ public sealed class SidecarHealthSmokeTests : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         if (_cloudApi is not null) await _cloudApi.DisposeAsync();
-        if (_ollama is not null) await _ollama.DisposeAsync();
+        if (_ollamaVision is not null) await _ollamaVision.DisposeAsync();
+        if (_ollamaText is not null) await _ollamaText.DisposeAsync();
         if (_docling is not null) await _docling.DisposeAsync();
         if (_parakeet is not null) await _parakeet.DisposeAsync();
         if (_network is not null) await _network.DeleteAsync();

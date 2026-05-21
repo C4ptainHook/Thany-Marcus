@@ -53,7 +53,10 @@ public static class ProcessingTestHost
                     ["IngestSaga:ExtractionTasks:LeaseSeconds"] = "60",
                     ["IngestSaga:ExtractionTasks:IdlePollMs"] = "60000",
                     ["IngestSaga:Models:Vlm:OllamaTag"] = "minicpm-v:8b-2.6-q4_K_M",
-                    ["IngestSaga:Sidecars:Ollama:BaseUrl"] = "http://localhost:11434",
+                    ["IngestSaga:Models:Route:OllamaTag"] = "qwen3:1.7b-instruct-q4_K_M",
+                    ["IngestSaga:Models:Entity:OllamaTag"] = "qwen3:1.7b-instruct-q4_K_M",
+                    ["IngestSaga:Sidecars:OllamaVision:BaseUrl"] = "http://localhost:11434",
+                    ["IngestSaga:Sidecars:OllamaText:BaseUrl"] = "http://localhost:11434",
                 })
                 .Build());
 

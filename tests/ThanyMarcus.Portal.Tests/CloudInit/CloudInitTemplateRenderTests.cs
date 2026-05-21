@@ -297,32 +297,36 @@ public sealed class CloudInitTemplateRenderTests
     }
 
     [Fact]
-    public void Ollama_puller_hardened_with_pipefail_and_post_pull_verification()
+    public void Ollama_puller_hardened_with_strict_mode_and_post_pull_verification()
     {
-        var compose = ExtractWriteFile("/opt/thany-cloud/docker-compose.yml");
-        compose.ShouldContain("set -eu -o pipefail");
-        compose.ShouldContain("ollama pull");
-        compose.ShouldContain("ollama list | grep -q");
+        var runScript = ExtractWriteFile("/opt/thany-cloud/puller/run.sh");
+        runScript.ShouldContain("set -eu");
+        runScript.ShouldContain("ollama pull");
+        runScript.ShouldContain("ollama list | grep -q");
     }
 
     [Fact]
-    public void Runcmd_persists_puller_logs_and_writes_sentinel_only_on_success()
+    public void Runcmd_persists_puller_logs_and_writes_sentinels_only_on_success()
     {
         var runcmd = RuncmdText();
-        runcmd.ShouldContain("tee /var/log/thany-cloud/ollama-puller.log");
-        runcmd.ShouldContain("touch /opt/thany-cloud/.ollama-puller-ok");
-        runcmd.ShouldNotContain("--profile init run --rm ollama-puller");
+        runcmd.ShouldContain("/var/log/thany-cloud/ollama-vision-puller.log");
+        runcmd.ShouldContain("/var/log/thany-cloud/ollama-text-puller.log");
+        runcmd.ShouldContain("touch /opt/thany-cloud/.ollama-vision-puller-ok");
+        runcmd.ShouldContain("touch /opt/thany-cloud/.ollama-text-puller-ok");
     }
 
     [Fact]
-    public void Certbot_block_skips_when_puller_sentinel_missing()
+    public void Certbot_block_skips_when_either_puller_sentinel_missing()
     {
         var runcmd = RuncmdText();
-        var sentinelGateIdx = runcmd.IndexOf("/opt/thany-cloud/.ollama-puller-ok", StringComparison.Ordinal);
-        var certbotIdx = runcmd.IndexOf("certbot --nginx", StringComparison.Ordinal);
-        sentinelGateIdx.ShouldBeGreaterThanOrEqualTo(0);
-        certbotIdx.ShouldBeGreaterThan(sentinelGateIdx);
-        runcmd.ShouldMatch(@"\[\s*!\s*-f\s+/opt/thany-cloud/\.ollama-puller-ok\s*\]");
+        var visionGateIdx = runcmd.IndexOf("/opt/thany-cloud/.ollama-vision-puller-ok", StringComparison.Ordinal);
+        var textGateIdx   = runcmd.IndexOf("/opt/thany-cloud/.ollama-text-puller-ok",   StringComparison.Ordinal);
+        var certbotIdx    = runcmd.IndexOf("certbot --nginx", StringComparison.Ordinal);
+        visionGateIdx.ShouldBeGreaterThanOrEqualTo(0);
+        textGateIdx.ShouldBeGreaterThanOrEqualTo(0);
+        certbotIdx.ShouldBeGreaterThan(Math.Max(visionGateIdx, textGateIdx));
+        runcmd.ShouldMatch(@"\[\s*!\s*-f\s+/opt/thany-cloud/\.ollama-vision-puller-ok\s*\]");
+        runcmd.ShouldMatch(@"\[\s*!\s*-f\s+/opt/thany-cloud/\.ollama-text-puller-ok\s*\]");
     }
 
     [Fact]

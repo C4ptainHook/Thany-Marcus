@@ -95,10 +95,27 @@ public sealed partial class RollingBackTfHandler(
             }
             else
             {
-                EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                var workspaceMissing = LooksLikeMissingWorkspace(wsResult.Stderr);
+                var liveResources = cloud.VmIp is not null;
+                if (workspaceMissing && !liveResources)
                 {
-                    ["event"] = "no_workspace_to_destroy",
-                });
+                    EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                    {
+                        ["event"] = "no_workspace_to_destroy",
+                    });
+                }
+                else
+                {
+                    EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                    {
+                        ["event"] = "workspace_select_failed",
+                        ["workspace_missing_fingerprint"] = workspaceMissing,
+                        ["cloud_has_vm_ip"] = liveResources,
+                    });
+                    job.LastError = "terraform workspace select failed during rollback";
+                    await HandleDestroyFailureAsync(job, cloud, ct);
+                    return;
+                }
             }
 
             if (job.Kind == SagaKinds.Destroy)
@@ -215,6 +232,14 @@ public sealed partial class RollingBackTfHandler(
             }
         }
         return latest;
+    }
+
+    private static bool LooksLikeMissingWorkspace(string stderr)
+    {
+        if (string.IsNullOrEmpty(stderr)) return false;
+        if (!stderr.Contains("workspace", StringComparison.OrdinalIgnoreCase)) return false;
+        return stderr.Contains("does not exist", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("doesn't exist", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string MapTerminal(string? reason) => reason switch

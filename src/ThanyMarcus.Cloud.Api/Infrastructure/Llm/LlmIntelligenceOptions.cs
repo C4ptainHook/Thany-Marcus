@@ -2,7 +2,6 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 
 public sealed class LlmIntelligenceOptions
 {
-    public string OllamaTag { get; set; } = "minicpm-v:8b-2.6-q4_K_M";
     public ThresholdsOptions Thresholds { get; init; } = new();
     public PgvectorOptions Pgvector { get; init; } = new();
     public RetryOptions Retry { get; init; } = new();
