@@ -196,6 +196,9 @@ write_files:
             IngestSaga__Sidecars__OllamaVision__HealthPath: /api/version
             IngestSaga__Sidecars__OllamaText__BaseUrl: http://ollama-text:11434
             IngestSaga__Sidecars__OllamaText__HealthPath: /api/version
+            IngestSaga__Models__Vlm__OllamaTag:    $${OLLAMA_VISION_PULL_TAG}
+            IngestSaga__Models__Route__OllamaTag:  $${OLLAMA_TEXT_PULL_TAG}
+            IngestSaga__Models__Entity__OllamaTag: $${OLLAMA_TEXT_PULL_TAG}
             IngestSaga__Sidecars__Docling__BaseUrl: http://docling:5001
             IngestSaga__Sidecars__Docling__HealthPath: /health
             IngestSaga__Sidecars__Parakeet__BaseUrl: http://parakeet:5092
@@ -289,7 +292,7 @@ write_files:
           entrypoint: ["/bin/sh", "/opt/puller/run.sh"]
           environment:
             OLLAMA_HOST: "127.0.0.1:11434"
-            OLLAMA_PULL_TAG: $${OLLAMA_TEXT_PULL_TAG:-qwen3:1.7b-instruct-q4_K_M}
+            OLLAMA_PULL_TAG: $${OLLAMA_TEXT_PULL_TAG:-qwen3:1.7b-q4_K_M}
           volumes:
             - ollama-text-models:/root/.ollama
             - /opt/thany-cloud/puller:/opt/puller:ro
@@ -320,7 +323,7 @@ write_files:
           restart: unless-stopped
           command: ["-models", "/models", "-port", "5092", "-workers", "1"]
           networks: [cloud]
-          mem_limit: 2500m
+          mem_limit: 3500m
 
       volumes:
         pg-data:

@@ -90,7 +90,7 @@ variable "ollama_vision_pull_tag" {
 variable "ollama_text_pull_tag" {
   description = "Ollama model tag to pre-pull on the text server. Drives routing + entity extraction. Default targets Qwen3 1.7B instruct Q4_K_M — small enough to coexist with MiniCPM-V on s-4vcpu-8gb, instruction-tuned for structured/JSON output."
   type        = string
-  default     = "qwen3:1.7b-instruct-q4_K_M"
+  default     = "qwen3:1.7b-q4_K_M"
 }
 
 variable "ollama_image_tag" {

@@ -209,12 +209,14 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
     private async Task ReleaseLeaseAsync(IngestJob job, CancellationToken ct)
     {
         var now = clock.GetCurrentInstant();
+        var nextVisible = now + Duration.FromSeconds(2);
         var expectedVersion = job.TransitionVersion;
         var rows = await db.Database.ExecuteSqlInterpolatedAsync($"""
             UPDATE ingest_jobs SET
                 lease_owner         = NULL,
                 lease_expires_at    = NULL,
                 consecutive_crashes = 0,
+                scheduled_at        = {nextVisible},
                 transition_version  = transition_version + 1,
                 updated_at          = {now}
               WHERE id = {job.Id}
@@ -226,6 +228,7 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
             job.LeaseOwner = null;
             job.LeaseExpiresAt = null;
             job.ConsecutiveCrashes = 0;
+            job.ScheduledAt = nextVisible;
             job.TransitionVersion = expectedVersion + 1;
             job.UpdatedAt = now;
         }
