@@ -264,7 +264,7 @@ write_files:
           volumes:
             - ollama-text-models:/root/.ollama
           networks: [cloud]
-          mem_limit: 2g
+          mem_limit: 4g
           healthcheck:
             test: ["CMD", "/bin/ollama", "list"]
             interval: 15s

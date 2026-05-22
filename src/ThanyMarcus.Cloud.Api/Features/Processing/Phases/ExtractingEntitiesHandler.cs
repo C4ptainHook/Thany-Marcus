@@ -79,14 +79,16 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
                 ElapsedMs(extractStart), ex.Attempts - 1, "failed", null, null, ex.Message), ct);
             throw;
         }
+        var mentions = extraction.Mentions ?? new List<MentionCandidateDto>();
         await events.AppendAsync(job.Id, BuildEvent(LlmEventStages.Extract, extractPid, llm, fellBackToSafe,
             ElapsedMs(extractStart), 0,
-            decision: $"mentions:{extraction.Mentions.Count}", confidence: null, rationale: null, error: null), ct);
+            decision: $"mentions:{mentions.Count}", confidence: null, rationale: null, error: null), ct);
 
         var thresholds = o.Thresholds;
         var candidates = new List<MentionCandidateDto>();
-        foreach (var m in extraction.Mentions)
+        foreach (var m in mentions)
         {
+            if (m is null) continue;
             if (m.Confidence >= thresholds.MentionMin) candidates.Add(m);
         }
 
