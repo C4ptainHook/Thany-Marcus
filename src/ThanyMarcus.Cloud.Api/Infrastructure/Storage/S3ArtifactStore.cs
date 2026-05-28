@@ -32,9 +32,9 @@ public sealed class S3ArtifactStore : IArtifactStore
         var url = await client.GetPreSignedURLAsync(req).ConfigureAwait(false);
         var headers = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["Content-Type"]   = mimeType,
-            ["Content-Length"] = byteSize.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Content-Type"] = mimeType,
         };
+        _ = byteSize;
 
         return new PresignedUpload(
             new Uri(url),

@@ -20,7 +20,14 @@ public sealed record SyncPullItem(
     [property: JsonPropertyName("deleted")]           bool Deleted = false,
     [property: JsonPropertyName("provenance"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Provenance = null,
     [property: JsonPropertyName("status"),     JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Status = null,
-    [property: JsonPropertyName("deletedAt"),  JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? DeletedAt = null);
+    [property: JsonPropertyName("deletedAt"),  JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? DeletedAt = null,
+    [property: JsonPropertyName("extractionFailures"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SyncPullExtractionFailure>? ExtractionFailures = null);
+
+public sealed record SyncPullExtractionFailure(
+    [property: JsonPropertyName("kind")]         string Kind,
+    [property: JsonPropertyName("attachmentId")] Guid AttachmentId,
+    [property: JsonPropertyName("reason")]       string Reason,
+    [property: JsonPropertyName("soft")]         bool Soft);
 
 public sealed record SyncPullAttachment(
     [property: JsonPropertyName("attachmentId")]         Guid AttachmentId,

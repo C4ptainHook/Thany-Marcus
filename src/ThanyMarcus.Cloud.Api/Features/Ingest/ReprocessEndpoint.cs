@@ -37,6 +37,7 @@ public static class ReprocessEndpoint
             IngestJobStatus.FailedComposition,
             IngestJobStatus.FailedRoute,
             IngestJobStatus.FailedEntities,
+            IngestJobStatus.FailedSynthesis,
             IngestJobStatus.FailedEmbedding,
             IngestJobStatus.DeadLettered,
         };
@@ -68,6 +69,9 @@ public static class ReprocessEndpoint
             att.ExtractedText = null;
             att.ExtractionError = null;
         }
+        // Synthesis cache invalidates on user-triggered reprocess so the next pass produces fresh prose.
+        note.SynthesisCacheKey = null;
+        note.SynthesisCacheValue = null;
         note.Status = NoteStatus.Processing;
         note.TransitionVersion += 1;
 

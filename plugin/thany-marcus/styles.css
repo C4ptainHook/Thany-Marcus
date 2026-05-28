@@ -1,0 +1,303 @@
+/* Thany-Marcus Obsidian plugin — uses Obsidian CSS vars so it inherits the theme. */
+
+.tm-brow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.tm-brow__left,
+.tm-brow__right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tm-brow__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tm-brow__btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+
+.tm-brow__btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.tm-brow__btn--mic.is-recording {
+  background: var(--text-error);
+  color: var(--text-on-accent);
+  border-color: var(--text-error);
+}
+
+.tm-brow__btn--send {
+  font-weight: 600;
+}
+
+.tm-brow__btn--send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tm-brow__btn--discard {
+  color: var(--text-muted);
+}
+
+.tm-brow__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--background-primary-alt);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  max-width: 280px;
+}
+
+.tm-brow__chip--image {
+  background: var(--background-modifier-success);
+}
+
+.tm-brow__chip--voice {
+  background: var(--background-modifier-active-hover);
+}
+
+.tm-brow__chip--url {
+  background: var(--background-modifier-form-field);
+}
+
+.tm-brow__chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-brow__chip-x {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.tm-brow__chip-x:hover {
+  color: var(--text-error);
+}
+
+.tm-brow__popover {
+  position: absolute;
+  top: 48px;
+  left: 12px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 320px;
+}
+
+.tm-brow__popover-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 4px;
+}
+
+.tm-brow__popover-row {
+  text-align: left;
+  font-size: 12px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.tm-brow__popover-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.tm-brow__popover-close {
+  margin-top: 4px;
+  font-size: 11px;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+/* Queue sidebar */
+
+.tm-queue {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tm-queue__header {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+.tm-queue__empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 12px 0;
+}
+
+.tm-queue__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tm-queue__row {
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tm-queue__row--clickable {
+  cursor: pointer;
+}
+
+.tm-queue__row--clickable:hover {
+  background: var(--background-modifier-hover);
+}
+
+.tm-queue__row--ready {
+  border-left: 3px solid var(--interactive-success, var(--color-green));
+}
+
+.tm-queue__row--failed {
+  border-left: 3px solid var(--text-error);
+}
+
+.tm-queue__row--in-flight {
+  border-left: 3px solid var(--interactive-accent);
+}
+
+.tm-queue__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tm-queue__badge {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tm-queue__error {
+  font-size: 11px;
+  color: var(--text-error);
+}
+
+/* Toast */
+
+.tm-toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.tm-toast {
+  pointer-events: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  min-width: 260px;
+  max-width: 360px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  position: relative;
+}
+
+.tm-toast--in-flight {
+  border-left: 3px solid var(--interactive-accent);
+}
+
+.tm-toast--ready {
+  border-left: 3px solid var(--interactive-success, var(--color-green));
+}
+
+.tm-toast--failed {
+  border-left: 3px solid var(--text-error);
+}
+
+.tm-toast__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-normal);
+  margin-right: 16px;
+}
+
+.tm-toast__phase {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.tm-toast__error {
+  font-size: 11px;
+  color: var(--text-error);
+  margin-top: 4px;
+}
+
+.tm-toast__close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  background: transparent;
+  border: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tm-toast__close:hover {
+  color: var(--text-normal);
+}

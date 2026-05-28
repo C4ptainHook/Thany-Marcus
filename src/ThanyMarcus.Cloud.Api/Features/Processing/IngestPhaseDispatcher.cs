@@ -195,6 +195,7 @@ public sealed partial class IngestPhaseDispatcher
         IngestJobStatus.Composing             => 2,
         IngestJobStatus.Routing               => 3,
         IngestJobStatus.ExtractingEntities    => 3,
+        IngestJobStatus.Synthesizing          => 2,
         IngestJobStatus.Embedding             => 3,
         _ => 1,
     };

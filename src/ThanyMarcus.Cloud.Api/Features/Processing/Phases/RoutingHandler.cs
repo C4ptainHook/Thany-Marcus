@@ -46,11 +46,12 @@ public sealed class RoutingHandler : IPhaseHandler
         var note = await db.Notes.SingleAsync(n => n.Id == job.NoteId, ct);
 
         // FORK: hub-regen notes don't get routed to a project — they live under _Entities/.
+        // Hub flow skips synthesis entirely and goes straight to embedding.
         if (note.IsHub)
         {
             await transitions.TransitionAsync(
                 job,
-                nextStatus: IngestJobStatus.ExtractingEntities,
+                nextStatus: IngestJobStatus.Embedding,
                 lastError: null,
                 clearLease: true,
                 setFinishedAt: false,
@@ -69,7 +70,12 @@ public sealed class RoutingHandler : IPhaseHandler
             .Select(e => new ProjectListItem(e.Id, e.CanonicalName, e.Description))
             .ToListAsync(ct);
 
-        var bodyExcerpt = Truncate(note.BodyOutput ?? note.BodyInput, BodyExcerptMax);
+        var attachments = await db.Attachments
+            .Where(a => a.NoteId == note.Id)
+            .ToListAsync(ct);
+        var rawBody = RawExtractions.Concatenate(note, attachments);
+        if (string.IsNullOrEmpty(rawBody)) rawBody = note.BodyInput ?? string.Empty;
+        var bodyExcerpt = Truncate(rawBody, BodyExcerptMax);
         var prompt = PromptBuilder.BuildRoute(projects, bodyExcerpt);
 
         var pid = new PromptId("route", "v1");
@@ -132,7 +138,7 @@ public sealed class RoutingHandler : IPhaseHandler
 
         await transitions.TransitionAsync(
             job,
-            nextStatus: IngestJobStatus.ExtractingEntities,
+            nextStatus: IngestJobStatus.Synthesizing,
             lastError: null,
             clearLease: true,
             setFinishedAt: false,

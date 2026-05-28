@@ -99,6 +99,7 @@ public static class SyncPushEndpoint
             IngestJobStatus.FailedComposition,
             IngestJobStatus.FailedRoute,
             IngestJobStatus.FailedEntities,
+            IngestJobStatus.FailedSynthesis,
             IngestJobStatus.FailedEmbedding,
             IngestJobStatus.DeadLettered,
         };

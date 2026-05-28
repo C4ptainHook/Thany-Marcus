@@ -35,6 +35,17 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note>
         builder.Property(n => n.HubEntityId);
         builder.Property(n => n.TransitionVersion).IsRequired().HasDefaultValue(0L);
 
+        builder.Property(n => n.PrivacyMode).HasColumnType("text");
+        builder.Property(n => n.PublicModel).HasColumnType("text");
+        builder.Property(n => n.SynthesisPreset).HasColumnType("text");
+        builder.Property(n => n.SynthesisPromptBody).HasColumnType("text");
+        builder.Property(n => n.SynthesisCacheKey).HasColumnType("text");
+        builder.Property(n => n.SynthesisCacheValue).HasColumnType("text");
+
+        builder.HasIndex(n => n.SynthesisCacheKey)
+            .HasDatabaseName("ix_notes_synthesis_cache_key")
+            .HasFilter("synthesis_cache_key IS NOT NULL");
+
         builder.Property(n => n.CreatedAt).IsRequired();
         builder.Property(n => n.UpdatedAt).IsRequired();
 

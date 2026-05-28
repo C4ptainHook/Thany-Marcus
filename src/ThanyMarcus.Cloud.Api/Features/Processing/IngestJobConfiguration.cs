@@ -12,10 +12,10 @@ public sealed class IngestJobConfiguration : IEntityTypeConfiguration<IngestJob>
         {
             t.HasCheckConstraint("ck_ingest_jobs_status",
                 "status IN (" +
-                "'queued','extracting_attachments','composing','routing'," +
-                "'extracting_entities','embedding','succeeded'," +
-                "'failed_extraction','failed_composition','failed_route'," +
-                "'failed_entities','failed_embedding','dead_lettered')");
+                "'queued','extracting_attachments','composing','extracting_entities'," +
+                "'routing','synthesizing','embedding','succeeded'," +
+                "'failed_extraction','failed_composition','failed_entities','failed_route'," +
+                "'failed_synthesis','failed_embedding','dead_lettered')");
             t.HasCheckConstraint("ck_ingest_jobs_kind",
                 "kind IN ('capture','hub_regen','reprocess','user_edit_embed')");
         });
@@ -49,7 +49,7 @@ public sealed class IngestJobConfiguration : IEntityTypeConfiguration<IngestJob>
             .HasDatabaseName("ix_ingest_jobs_active_per_note")
             .IsUnique()
             .HasFilter("status NOT IN ('succeeded','failed_extraction','failed_composition'," +
-                       "'failed_route','failed_entities','failed_embedding','dead_lettered')");
+                       "'failed_entities','failed_route','failed_synthesis','failed_embedding','dead_lettered')");
 
         builder.HasOne<Note>().WithMany().HasForeignKey(j => j.NoteId)
             .OnDelete(DeleteBehavior.Cascade);

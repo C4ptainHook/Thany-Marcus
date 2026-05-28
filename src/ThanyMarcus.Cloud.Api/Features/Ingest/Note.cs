@@ -28,8 +28,18 @@ public sealed class Note : IHasUpdatedAt
     public Guid? HubEntityId { get; set; }
     public long TransitionVersion { get; set; }
 
+    public string? PrivacyMode { get; set; }
+    public string? PublicModel { get; set; }
+    public string? SynthesisPreset { get; set; }
+    public string? SynthesisPromptBody { get; set; }
+    public string? SynthesisCacheKey { get; set; }
+    public string? SynthesisCacheValue { get; set; }
+
     [NotMapped]
     public string? SuggestedProject { get; set; }
+
+    [NotMapped]
+    public string? LlmApiKey { get; set; }
 
     public Instant CreatedAt { get; init; }
     public Instant UpdatedAt { get; set; }

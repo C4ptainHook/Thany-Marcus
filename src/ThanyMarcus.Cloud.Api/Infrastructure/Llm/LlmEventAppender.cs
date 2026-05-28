@@ -108,6 +108,8 @@ public static class LlmEventStages
     public const string Extract = "llm_extract";
     public const string Dedup = "llm_dedup";
     public const string HubGenerate = "llm_hub_generate";
+    public const string Synthesis = "llm_synthesis";
+    public const string SynthesisCacheHit = "llm_synthesis_cache_hit";
 }
 
 public static class EmbeddingEventStages

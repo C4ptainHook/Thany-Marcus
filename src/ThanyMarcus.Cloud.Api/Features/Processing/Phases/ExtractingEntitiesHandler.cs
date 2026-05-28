@@ -62,7 +62,11 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         var llm = llmFactory.Resolve(settings, out var fellBackToSafe);
         var o = opts.CurrentValue;
 
-        var body = note.BodyOutput ?? note.BodyInput ?? string.Empty;
+        var attachments = await db.Attachments
+            .Where(a => a.NoteId == note.Id)
+            .ToListAsync(ct);
+        var body = RawExtractions.Concatenate(note, attachments);
+        if (string.IsNullOrEmpty(body)) body = note.BodyInput ?? string.Empty;
 
         var extractPid = new PromptId("extract", "v1");
         var extractStart = clock.GetCurrentInstant();
@@ -219,9 +223,12 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
             await eventBus.PublishHubMaterializedAsync(hubNoteId, entityId, ct);
         }
 
+        // Hub-regen jobs jump directly to embedding once entities/mentions are settled —
+        // they have no routing/synthesizing applicability.
+        var nextStatus = note.IsHub ? IngestJobStatus.Embedding : IngestJobStatus.Routing;
         await transitions.TransitionAsync(
             job,
-            nextStatus: IngestJobStatus.Embedding,
+            nextStatus: nextStatus,
             lastError: null,
             clearLease: true,
             setFinishedAt: false,

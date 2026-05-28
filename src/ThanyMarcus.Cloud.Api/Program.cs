@@ -25,6 +25,7 @@ using ThanyMarcus.Cloud.Api.Features.Sync;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Cloud.Api.Infrastructure.Extraction;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
+using ThanyMarcus.Cloud.Api.Infrastructure.Llm.Synthesis;
 using ThanyMarcus.Cloud.Api.Infrastructure.Ffmpeg;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Embedding;
@@ -238,10 +239,23 @@ builder.Services.AddSingleton<FailedHiddenRenderer>();
 builder.Services.AddSingleton<CompositeNoteComposer>();
 
 builder.Services.AddScoped<IPhaseHandler, ExtractingAttachmentsHandler>();
-builder.Services.AddScoped<IPhaseHandler, ComposingHandler>();
 builder.Services.AddScoped<IPhaseHandler, RoutingHandler>();
 builder.Services.AddScoped<IPhaseHandler, ExtractingEntitiesHandler>();
+builder.Services.AddScoped<IPhaseHandler, SynthesizingHandler>();
 builder.Services.AddScoped<IPhaseHandler, EmbeddingHandler>();
+
+builder.Services.AddHttpClient(GoogleGeminiClient.HttpClientName, c =>
+{
+    c.BaseAddress = new Uri(
+        builder.Configuration["IngestSaga:Synthesis:Google:BaseUrl"]
+            ?? "https://generativelanguage.googleapis.com");
+    c.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("IngestSaga:Synthesis:Google:RequestTimeoutSeconds", 120));
+});
+builder.Services.AddSingleton<OllamaSynthesisLlmClient>();
+builder.Services.AddSingleton<GoogleGeminiClient>();
+builder.Services.AddSingleton<ISynthesisLlmRouter, SynthesisLlmRouter>();
+builder.Services.AddSingleton<ISynthesisApiKeyStore, InMemorySynthesisApiKeyStore>();
 builder.Services.AddScoped<CancelHandler>();
 builder.Services.AddScoped<HubGenerationHandler>();
 builder.Services.AddScoped<IngestPhaseDispatcher>();
@@ -267,6 +281,16 @@ builder.Services.Configure<ForwardedHeadersOptions>(opts =>
     opts.KnownProxies.Clear();
 });
 
+const string PluginCorsPolicy = "PluginOrigin";
+builder.Services.AddCors(o =>
+{
+    o.AddPolicy(PluginCorsPolicy, p => p
+        .WithOrigins("app://obsidian.md", "capacitor://localhost")
+        .AllowAnyHeader()
+        .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+        .AllowCredentials());
+});
+
 builder.Services.AddHealthChecks()
     .AddCheck("self", () => HealthCheckResult.Healthy(), tags: ["live"])
     .AddDbContextCheck<CloudDbContext>(
@@ -279,6 +303,8 @@ var app = builder.Build();
 await ApplyMigrationsAsync(app);
 
 app.UseForwardedHeaders();
+
+app.UseCors(PluginCorsPolicy);
 
 app.MapOpenApi();
 app.MapScalarApiReference();

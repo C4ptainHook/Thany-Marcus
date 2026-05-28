@@ -58,9 +58,7 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                 le_email       = "{cloudInit.LeEmail}"
                 le_acme_ca     = "{cloudInit.LeAcmeCa}"
                 image_tag      = "{cloudInit.ImageTag}"
-                admin_user     = "{cloudInit.AdminUser}"
                 ssh_public_key = "{cloudInit.SshPublicKey}"
-                timezone       = "{cloudInit.Timezone}"
                 {ollamaOverrides}
                 """);
         }
@@ -79,9 +77,7 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
             LeEmail:              Require("LeEmail"),
             LeAcmeCa:             section["LeAcmeCa"] ?? "",
             ImageTag:             Require("ImageTag"),
-            AdminUser:            section["AdminUser"] ?? "thanyadmin",
             SshPublicKey:         EscapeTfString(section["SshPublicKey"] ?? ""),
-            Timezone:             section["Timezone"] ?? "Etc/UTC",
             OllamaVisionPullTag:  section["OllamaVisionPullTag"] ?? "",
             OllamaTextPullTag:    section["OllamaTextPullTag"] ?? "",
             OllamaImageTag:       section["OllamaImageTag"] ?? "",
@@ -110,9 +106,7 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
         string LeEmail,
         string LeAcmeCa,
         string ImageTag,
-        string AdminUser,
         string SshPublicKey,
-        string Timezone,
         string OllamaVisionPullTag,
         string OllamaTextPullTag,
         string OllamaImageTag,
