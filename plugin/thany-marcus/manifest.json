@@ -1,0 +1,10 @@
+{
+  "id": "thany-marcus",
+  "name": "Thany-Marcus",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Capture composite notes (body + image + URL + voice) and sync processed results from your Thany-Marcus cloud.",
+  "author": "Boiko (thesis)",
+  "authorUrl": "https://github.com/",
+  "isDesktopOnly": true
+}

@@ -166,7 +166,7 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
         {
             await transitions.TransitionAsync(
                 job,
-                nextStatus: IngestJobStatus.Composing,
+                nextStatus: IngestJobStatus.ExtractingEntities,
                 lastError: null,
                 clearLease: true,
                 setFinishedAt: false,

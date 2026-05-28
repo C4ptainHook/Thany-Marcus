@@ -352,6 +352,10 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("llm_mode");
 
+                    b.Property<string>("PrivacyMode")
+                        .HasColumnType("text")
+                        .HasColumnName("privacy_mode");
+
                     b.Property<Guid?>("ProjectId")
                         .HasColumnType("uuid")
                         .HasColumnName("project_id");
@@ -359,6 +363,10 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                     b.Property<JsonDocument>("Provenance")
                         .HasColumnType("jsonb")
                         .HasColumnName("provenance");
+
+                    b.Property<string>("PublicModel")
+                        .HasColumnType("text")
+                        .HasColumnName("public_model");
 
                     b.Property<string>("RelativePath")
                         .HasColumnType("text")
@@ -368,6 +376,22 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("status");
+
+                    b.Property<string>("SynthesisCacheKey")
+                        .HasColumnType("text")
+                        .HasColumnName("synthesis_cache_key");
+
+                    b.Property<string>("SynthesisCacheValue")
+                        .HasColumnType("text")
+                        .HasColumnName("synthesis_cache_value");
+
+                    b.Property<string>("SynthesisPreset")
+                        .HasColumnType("text")
+                        .HasColumnName("synthesis_preset");
+
+                    b.Property<string>("SynthesisPromptBody")
+                        .HasColumnType("text")
+                        .HasColumnName("synthesis_prompt_body");
 
                     b.PrimitiveCollection<string[]>("Tags")
                         .HasColumnType("text[]")
@@ -403,6 +427,10 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
 
                     b.HasIndex("ProjectId")
                         .HasDatabaseName("ix_notes_project");
+
+                    b.HasIndex("SynthesisCacheKey")
+                        .HasDatabaseName("ix_notes_synthesis_cache_key")
+                        .HasFilter("synthesis_cache_key IS NOT NULL");
 
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("ix_notes_updated_at")
@@ -639,7 +667,7 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                     b.HasIndex(new[] { "NoteId" }, "ix_ingest_jobs_active_per_note")
                         .IsUnique()
                         .HasDatabaseName("ix_ingest_jobs_active_per_note")
-                        .HasFilter("status NOT IN ('succeeded','failed_extraction','failed_composition','failed_route','failed_entities','failed_embedding','dead_lettered')");
+                        .HasFilter("status NOT IN ('succeeded','failed_extraction','failed_composition','failed_entities','failed_route','failed_synthesis','failed_embedding','dead_lettered')");
 
                     b.HasIndex(new[] { "NoteId" }, "ix_ingest_jobs_note_id")
                         .HasDatabaseName("ix_ingest_jobs_note_id");
@@ -648,7 +676,7 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         {
                             t.HasCheckConstraint("ck_ingest_jobs_kind", "kind IN ('capture','hub_regen','reprocess','user_edit_embed')");
 
-                            t.HasCheckConstraint("ck_ingest_jobs_status", "status IN ('queued','extracting_attachments','composing','routing','extracting_entities','embedding','succeeded','failed_extraction','failed_composition','failed_route','failed_entities','failed_embedding','dead_lettered')");
+                            t.HasCheckConstraint("ck_ingest_jobs_status", "status IN ('queued','extracting_attachments','composing','extracting_entities','routing','synthesizing','embedding','succeeded','failed_extraction','failed_composition','failed_entities','failed_route','failed_synthesis','failed_embedding','dead_lettered')");
                         });
                 });
 

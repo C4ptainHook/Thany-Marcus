@@ -44,7 +44,7 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
 
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var after = await probe.IngestJobs.SingleAsync(j => j.Id == jobId, ct);
-        after.Status.ShouldBe(IngestJobStatus.Embedding);
+        after.Status.ShouldBe(IngestJobStatus.Routing);
 
         var entities = await probe.Entities.ToListAsync(ct);
         entities.Count.ShouldBe(1);

@@ -5,6 +5,7 @@ using Npgsql;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
+using ThanyMarcus.Cloud.Api.Infrastructure.Llm.Synthesis;
 using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
 using ThanyMarcus.Shared.PluginApi;
 
@@ -42,6 +43,7 @@ public static class IngestEndpoints
         CloudDbContext db,
         IArtifactStore store,
         StorageOptions storage,
+        ISynthesisApiKeyStore apiKeyStore,
         IClock clock,
         CancellationToken ct)
     {
@@ -53,6 +55,23 @@ public static class IngestEndpoints
             return Results.Problem($"body exceeds {MaxBodyBytes} bytes", statusCode: StatusCodes.Status400BadRequest);
         if (req.Attachments.Count > MaxAttachments)
             return Results.Problem($"too many attachments (max {MaxAttachments})", statusCode: StatusCodes.Status400BadRequest);
+
+        var privacyMode = req.PrivacyMode ?? PrivacyModes.Private;
+        if (!PrivacyModes.IsValid(privacyMode))
+            return Results.Problem($"unknown privacyMode '{req.PrivacyMode}'", statusCode: StatusCodes.Status400BadRequest);
+        if (privacyMode == PrivacyModes.Public)
+        {
+            if (!PublicSynthesisModels.IsValid(req.PublicModel))
+                return Results.Problem("publicModel required for public mode", statusCode: StatusCodes.Status400BadRequest);
+            if (string.IsNullOrWhiteSpace(req.LlmApiKey))
+                return Results.Problem("llmApiKey required for public mode", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var preset = req.SynthesisPreset ?? Shared.PluginApi.SynthesisPresets.Zettelkasten;
+        if (!Shared.PluginApi.SynthesisPresets.IsValid(preset))
+            return Results.Problem($"unknown synthesisPreset '{req.SynthesisPreset}'", statusCode: StatusCodes.Status400BadRequest);
+        if (preset == Shared.PluginApi.SynthesisPresets.Custom && string.IsNullOrWhiteSpace(req.CustomPrompt))
+            return Results.Problem("customPrompt required when synthesisPreset = 'custom'", statusCode: StatusCodes.Status400BadRequest);
 
         long totalBinaryBytes = 0;
         foreach (var a in req.Attachments)
@@ -92,12 +111,16 @@ public static class IngestEndpoints
         {
             note = new Note
             {
-                ClientNoteId = req.ClientNoteId,
-                CapturedAt   = captured,
-                BodyInput    = req.Body,
-                Status       = NoteStatus.Pending,
-                CreatedAt    = now,
-                UpdatedAt    = now,
+                ClientNoteId       = req.ClientNoteId,
+                CapturedAt         = captured,
+                BodyInput          = req.Body,
+                Status             = NoteStatus.Pending,
+                PrivacyMode        = privacyMode,
+                PublicModel        = privacyMode == PrivacyModes.Public ? req.PublicModel : null,
+                SynthesisPreset    = preset,
+                SynthesisPromptBody = preset == Shared.PluginApi.SynthesisPresets.Custom ? req.CustomPrompt : null,
+                CreatedAt          = now,
+                UpdatedAt          = now,
             };
             db.Notes.Add(note);
             created = true;
@@ -170,6 +193,11 @@ public static class IngestEndpoints
         }
 
         await db.SaveChangesAsync(ct);
+
+        if (privacyMode == PrivacyModes.Public && !string.IsNullOrEmpty(req.LlmApiKey))
+        {
+            apiKeyStore.Put(note.Id, req.LlmApiKey);
+        }
 
         return Results.Ok(new IngestInitResponse(note.Id, uploads));
     }

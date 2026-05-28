@@ -41,7 +41,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
         note.RelativePath.ShouldBe($"Projects/Acme/{noteId}.md");
 
         var after = await probe.IngestJobs.SingleAsync(j => j.Id == jobId, ct);
-        after.Status.ShouldBe(IngestJobStatus.ExtractingEntities);
+        after.Status.ShouldBe(IngestJobStatus.Synthesizing);
         llm.Calls.ShouldContain(c => c.Name == "route" && c.Version == "v1");
     }
 
@@ -72,7 +72,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task Hub_note_short_circuits_to_extracting_entities_without_llm_call()
+    public async Task Hub_note_short_circuits_to_embedding_without_llm_call()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
@@ -87,7 +87,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
 
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var after = await probe.IngestJobs.SingleAsync(j => j.Id == jobId, ct);
-        after.Status.ShouldBe(IngestJobStatus.ExtractingEntities);
+        after.Status.ShouldBe(IngestJobStatus.Embedding);
         llm.Calls.ShouldBeEmpty();
     }
 

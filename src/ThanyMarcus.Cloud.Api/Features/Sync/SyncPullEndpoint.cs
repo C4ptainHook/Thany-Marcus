@@ -96,6 +96,14 @@ public static class SyncPullEndpoint
                 }
 
                 var noteAtts = attachments.Where(a => a.NoteId == note.Id).ToList();
+                var failures = noteAtts
+                    .Where(a => a.ExtractionStatus == AttachmentExtractionStatus.Failed)
+                    .Select(a => new SyncPullExtractionFailure(
+                        Kind: a.Kind,
+                        AttachmentId: a.Id,
+                        Reason: a.ExtractionError ?? "unknown",
+                        Soft: true))
+                    .ToList();
                 var dtoAtts = new List<SyncPullAttachment>(noteAtts.Count);
                 foreach (var att in noteAtts)
                 {
@@ -128,18 +136,19 @@ public static class SyncPullEndpoint
                 }
 
                 items.Add(new SyncPullItem(
-                    NoteId:           note.Id,
-                    RelativePath:     note.RelativePath ?? $"Inbox/{note.Id}.md",
-                    Body:             note.BodyOutput ?? string.Empty,
-                    SuggestedProject: note.SuggestedProject,
-                    Tags:             note.Tags ?? Array.Empty<string>(),
-                    LlmMode:          note.LlmMode,
-                    Attachments:      dtoAtts,
-                    UpdatedAt:        note.UpdatedAt.ToDateTimeOffset(),
-                    Deleted:          false,
-                    Provenance:       provenance,
-                    Status:           statusField,
-                    DeletedAt:        null));
+                    NoteId:             note.Id,
+                    RelativePath:       note.RelativePath ?? $"Inbox/{note.Id}.md",
+                    Body:               note.BodyOutput ?? string.Empty,
+                    SuggestedProject:   note.SuggestedProject,
+                    Tags:               note.Tags ?? Array.Empty<string>(),
+                    LlmMode:            note.LlmMode,
+                    Attachments:        dtoAtts,
+                    UpdatedAt:          note.UpdatedAt.ToDateTimeOffset(),
+                    Deleted:            false,
+                    Provenance:         provenance,
+                    Status:             statusField,
+                    DeletedAt:          null,
+                    ExtractionFailures: failures.Count == 0 ? null : failures));
             }
         }
 

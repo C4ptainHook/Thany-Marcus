@@ -36,7 +36,7 @@ public sealed class PhaseDispatcherTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task Extracting_attachments_with_no_attachments_advances_to_composing()
+    public async Task Extracting_attachments_with_no_attachments_advances_to_extracting_entities()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
@@ -48,7 +48,7 @@ public sealed class PhaseDispatcherTests(PostgresFixture postgres)
 
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var after = await probe.IngestJobs.SingleAsync(j => j.Id == jobId, ct);
-        after.Status.ShouldBe(IngestJobStatus.Composing);
+        after.Status.ShouldBe(IngestJobStatus.ExtractingEntities);
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class PhaseDispatcherTests(PostgresFixture postgres)
 
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var after = await probe.IngestJobs.SingleAsync(j => j.Id == jobId, ct);
-        after.Status.ShouldBe(IngestJobStatus.ExtractingEntities);
+        after.Status.ShouldBe(IngestJobStatus.Synthesizing);
 
         var note = await probe.Notes.SingleAsync(n => n.Id == noteId, ct);
         note.ProjectId.ShouldBeNull();
@@ -128,7 +128,7 @@ public sealed class PhaseDispatcherTests(PostgresFixture postgres)
 
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var after = await probe.IngestJobs.SingleAsync(j => j.Id == jobId, ct);
-        after.Status.ShouldBe(IngestJobStatus.Embedding);
+        after.Status.ShouldBe(IngestJobStatus.Routing);
 
         var mentionCount = await probe.Mentions.CountAsync(m => m.NoteId == noteId, ct);
         mentionCount.ShouldBe(0);

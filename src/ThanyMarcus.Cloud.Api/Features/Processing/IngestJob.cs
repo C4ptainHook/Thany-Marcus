@@ -32,25 +32,31 @@ public static class IngestJobStatus
 {
     public const string Queued = "queued";
     public const string ExtractingAttachments = "extracting_attachments";
-    public const string Composing = "composing";
-    public const string Routing = "routing";
     public const string ExtractingEntities = "extracting_entities";
+    public const string Routing = "routing";
+    public const string Synthesizing = "synthesizing";
     public const string Embedding = "embedding";
     public const string Succeeded = "succeeded";
     public const string FailedExtraction = "failed_extraction";
-    public const string FailedComposition = "failed_composition";
-    public const string FailedRoute = "failed_route";
     public const string FailedEntities = "failed_entities";
+    public const string FailedRoute = "failed_route";
+    public const string FailedSynthesis = "failed_synthesis";
     public const string FailedEmbedding = "failed_embedding";
     public const string DeadLettered = "dead_lettered";
+
+    // Hub-regen flow uses Composing as its initial in-flight phase. Synthesis rework leaves this
+    // for the hub pipeline only — user-ingest flow never enters Composing.
+    public const string Composing = "composing";
+    public const string FailedComposition = "failed_composition";
 
     public static readonly IReadOnlySet<string> Terminals = new HashSet<string>
     {
         Succeeded,
         FailedExtraction,
         FailedComposition,
-        FailedRoute,
         FailedEntities,
+        FailedRoute,
+        FailedSynthesis,
         FailedEmbedding,
         DeadLettered,
     };
@@ -58,9 +64,10 @@ public static class IngestJobStatus
     public static readonly IReadOnlySet<string> InFlightPhases = new HashSet<string>
     {
         ExtractingAttachments,
-        Composing,
-        Routing,
         ExtractingEntities,
+        Routing,
+        Synthesizing,
+        Composing,
         Embedding,
     };
 
@@ -69,9 +76,10 @@ public static class IngestJobStatus
     public static string FailureTerminalFor(string phase) => phase switch
     {
         ExtractingAttachments => FailedExtraction,
-        Composing             => FailedComposition,
-        Routing               => FailedRoute,
         ExtractingEntities    => FailedEntities,
+        Routing               => FailedRoute,
+        Synthesizing          => FailedSynthesis,
+        Composing             => FailedComposition,
         Embedding             => FailedEmbedding,
         _ => throw new ArgumentOutOfRangeException(nameof(phase), phase, "no failure terminal mapping"),
     };
