@@ -17,10 +17,6 @@ public sealed partial class OllamaVlmClient : IVlmClient
     {
         PropertyNameCaseInsensitive = false,
     };
-    private static readonly JsonSerializerOptions VlmOutputJson = new()
-    {
-        PropertyNameCaseInsensitive = false,
-    };
 
     private readonly IHttpClientFactory clientFactory;
     private readonly IArtifactStore store;
@@ -116,7 +112,6 @@ public sealed partial class OllamaVlmClient : IVlmClient
             model = modelTag,
             prompt = prompt,
             images = new[] { Convert.ToBase64String(imageBytes) },
-            format = "json",
             stream = false,
             options = new { num_ctx = numCtx, temperature = temperature },
         };
@@ -147,26 +142,8 @@ public sealed partial class OllamaVlmClient : IVlmClient
             return Skipped("vision_empty_response", srcWidth, srcHeight, exif, phashHex, blurScore);
         }
 
-        VlmOutput? parsed;
-        try
-        {
-            parsed = JsonSerializer.Deserialize<VlmOutput>(outer.Response, VlmOutputJson);
-        }
-        catch (JsonException ex)
-        {
-            throw new OllamaJsonParseException(outer.Response,
-                "Failed to parse model JSON output", ex);
-        }
-        if (parsed is null || string.IsNullOrWhiteSpace(parsed.Description))
-        {
-            return Skipped("vision_missing_description", srcWidth, srcHeight, exif, phashHex, blurScore);
-        }
-
-        var extractedText = $"Description:\n{parsed.Description.Trim()}";
-        if (!string.IsNullOrWhiteSpace(parsed.TextInImage))
-        {
-            extractedText += $"\n\nText:\n{parsed.TextInImage.Trim()}";
-        }
+        var description = outer.Response.Trim();
+        var extractedText = $"Description:\n{description}";
 
         var cacheKey = ExtractionCacheKeys.ForOllama(modelTag);
         var extra = BuildExtra(srcWidth, srcHeight, exif, phashHex, blurScore, outer);

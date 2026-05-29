@@ -34,11 +34,10 @@ public sealed class OllamaVlmClientTests : IDisposable
               .WithHeader("Content-Type", "image/jpeg")
               .WithBody(imageBytes));
 
-        var ollamaInner = JsonSerializer.Serialize(new { description = "A cat sitting on a mat", text_in_image = (string?)null });
         var ollamaOuter = JsonSerializer.Serialize(new
         {
             model = "openbmb/minicpm-v4.6:q4_K_M",
-            response = ollamaInner,
+            response = "A cat sitting on a mat",
             done = true,
             done_reason = "stop",
             eval_count = 100,
@@ -55,8 +54,7 @@ public sealed class OllamaVlmClientTests : IDisposable
         var outcome = await client.ExtractAsync(att, ct);
 
         outcome.Skipped.ShouldBeFalse();
-        outcome.ExtractedText.ShouldStartWith("Description:\nA cat sitting on a mat");
-        outcome.ExtractedText.ShouldNotContain("Text:");
+        outcome.ExtractedText.ShouldBe("Description:\nA cat sitting on a mat");
         outcome.ExtractionCacheKey.ShouldBe("sha256:ollama:openbmb-minicpm-v4.6-q4_K_M");
 
         using var extra = outcome.Extra;
@@ -65,7 +63,7 @@ public sealed class OllamaVlmClientTests : IDisposable
     }
 
     [Fact]
-    public async Task Generate_request_sends_base64_bytes_not_a_url()
+    public async Task Generate_request_sends_base64_bytes_not_a_url_and_no_format_json()
     {
         var ct = TestContext.Current.CancellationToken;
         var imageBytes = MakeJpeg(640, 480);
@@ -74,10 +72,9 @@ public sealed class OllamaVlmClientTests : IDisposable
               .WithHeader("Content-Type", "image/jpeg")
               .WithBody(imageBytes));
 
-        var inner = JsonSerializer.Serialize(new { description = "ok", text_in_image = (string?)null });
         wm.Given(Request.Create().WithPath("/api/generate").UsingPost())
           .RespondWith(Response.Create().WithStatusCode(200)
-              .WithBody(JsonSerializer.Serialize(new { model = "m", response = inner, done = true, eval_count = 1L, eval_duration = 1L })));
+              .WithBody(JsonSerializer.Serialize(new { model = "m", response = "ok", done = true, eval_count = 1L, eval_duration = 1L })));
 
         var client = BuildClient();
         await client.ExtractAsync(MakeAttachment(), ct);
@@ -91,10 +88,12 @@ public sealed class OllamaVlmClientTests : IDisposable
         var only = images[0].GetString()!;
         only.ShouldNotStartWith("http");
         only.ShouldBe(Convert.ToBase64String(imageBytes));
+
+        doc.RootElement.TryGetProperty("format", out _).ShouldBeFalse();
     }
 
     [Fact]
-    public async Task Description_with_text_in_image_is_appended()
+    public async Task Empty_response_soft_skips()
     {
         var ct = TestContext.Current.CancellationToken;
         wm.Given(Request.Create().WithPath("/img/test.jpg").UsingGet())
@@ -102,33 +101,16 @@ public sealed class OllamaVlmClientTests : IDisposable
               .WithHeader("Content-Type", "image/jpeg")
               .WithBody(MakeJpeg(640, 480)));
 
-        var inner = JsonSerializer.Serialize(new { description = "A poster", text_in_image = "SALE 50%" });
         wm.Given(Request.Create().WithPath("/api/generate").UsingPost())
           .RespondWith(Response.Create().WithStatusCode(200)
-              .WithBody(JsonSerializer.Serialize(new { model = "m", response = inner, done = true, eval_count = 1L, eval_duration = 1L })));
+              .WithBody(JsonSerializer.Serialize(new { model = "m", response = "", done = true, eval_count = 0L, eval_duration = 0L })));
 
         var client = BuildClient();
         var outcome = await client.ExtractAsync(MakeAttachment(), ct);
 
-        outcome.ExtractedText.ShouldBe("Description:\nA poster\n\nText:\nSALE 50%");
-    }
-
-    [Fact]
-    public async Task Non_json_inner_response_throws_parse_exception()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        wm.Given(Request.Create().WithPath("/img/test.jpg").UsingGet())
-          .RespondWith(Response.Create().WithStatusCode(200)
-              .WithHeader("Content-Type", "image/jpeg")
-              .WithBody(MakeJpeg(640, 480)));
-
-        wm.Given(Request.Create().WithPath("/api/generate").UsingPost())
-          .RespondWith(Response.Create().WithStatusCode(200)
-              .WithBody(JsonSerializer.Serialize(new { model = "m", response = "not-a-json-payload", done = true, eval_count = 0L, eval_duration = 0L })));
-
-        var client = BuildClient();
-        await Should.ThrowAsync<OllamaJsonParseException>(
-            async () => await client.ExtractAsync(MakeAttachment(), ct));
+        outcome.Skipped.ShouldBeTrue();
+        outcome.SkipReason.ShouldBe("vision_empty_response");
+        outcome.ExtractedText.ShouldBeNull();
     }
 
     [Fact]
@@ -151,7 +133,6 @@ public sealed class OllamaVlmClientTests : IDisposable
         outcome.ExtractedText.ShouldBeNull();
         outcome.ExtractionCacheKey.ShouldBeNull();
 
-        // Ollama should not have been hit.
         var generateCalls = wm.FindLogEntries(Request.Create().WithPath("/api/generate"));
         generateCalls.Count.ShouldBe(0);
     }
@@ -166,10 +147,9 @@ public sealed class OllamaVlmClientTests : IDisposable
               .WithHeader("Content-Type", "image/jpeg")
               .WithBody(originalBytes));
 
-        var inner = JsonSerializer.Serialize(new { description = "ok", text_in_image = (string?)null });
         wm.Given(Request.Create().WithPath("/api/generate").UsingPost())
           .RespondWith(Response.Create().WithStatusCode(200)
-              .WithBody(JsonSerializer.Serialize(new { model = "m", response = inner, done = true, eval_count = 1L, eval_duration = 1L })));
+              .WithBody(JsonSerializer.Serialize(new { model = "m", response = "ok", done = true, eval_count = 1L, eval_duration = 1L })));
 
         var client = BuildClient();
         var outcome = await client.ExtractAsync(MakeAttachment(), ct);
@@ -199,10 +179,9 @@ public sealed class OllamaVlmClientTests : IDisposable
               .WithHeader("Content-Type", "image/jpeg")
               .WithBody(MakeJpeg(640, 480)));
 
-        var inner = JsonSerializer.Serialize(new { description = "ok", text_in_image = (string?)null });
         wm.Given(Request.Create().WithPath("/api/generate").UsingPost())
           .RespondWith(Response.Create().WithStatusCode(200)
-              .WithBody(JsonSerializer.Serialize(new { model = "m", response = inner, done = true, eval_count = 1L, eval_duration = 1L })));
+              .WithBody(JsonSerializer.Serialize(new { model = "m", response = "ok", done = true, eval_count = 1L, eval_duration = 1L })));
 
         var client = BuildClient();
         await client.ExtractAsync(MakeAttachment(), ct);
