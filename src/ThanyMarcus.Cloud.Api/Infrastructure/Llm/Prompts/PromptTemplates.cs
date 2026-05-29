@@ -19,6 +19,7 @@ public static class PromptTemplates
 
         Respond with JSON ONLY in this exact shape:
         {{"project_entity_id": "<uuid or null>", "confidence": <0.0-1.0>, "rationale": "<one-sentence reasoning>"}}
+        /no_think
         """;
 
     public const string ExtractV1 = """
@@ -43,6 +44,7 @@ public static class PromptTemplates
               "candidate_kind": "<kind>", "candidate_canonical": "<name>",
               "aliases": ["<alias>", ...], "confidence": <0.0-1.0>}}
         ]}}
+        /no_think
         """;
 
     public const string DedupV1 = """
@@ -67,6 +69,7 @@ public static class PromptTemplates
           "candidates": ["<uuid>", ...],
           "confidence": <0.0-1.0>,
           "rationale": "<one-sentence reasoning>"}}
+        /no_think
         """;
 
     public const string HubGenerateV1 = """
@@ -84,6 +87,7 @@ public static class PromptTemplates
         {2}
 
         Respond with Markdown ONLY (no preamble, no code fences).
+        /no_think
         """;
 
     public static readonly CompositeFormat RouteV1Format = CompositeFormat.Parse(RouteV1);

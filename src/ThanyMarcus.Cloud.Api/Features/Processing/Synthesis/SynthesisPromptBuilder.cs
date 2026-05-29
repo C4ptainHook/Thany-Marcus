@@ -70,6 +70,7 @@ public static class SynthesisPromptBuilder
         }
 
         sb.AppendLine("Write the synthesized note now.");
+        sb.AppendLine("/no_think");
         return sb.ToString();
     }
 
