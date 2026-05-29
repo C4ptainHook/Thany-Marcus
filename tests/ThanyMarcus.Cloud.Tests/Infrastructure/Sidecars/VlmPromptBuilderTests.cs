@@ -9,10 +9,9 @@ public sealed class VlmPromptBuilderTests
     public void Build_returns_the_locked_prompt()
     {
         var prompt = VlmPromptBuilder.Build();
-        prompt.ShouldContain("\"description\"");
-        prompt.ShouldContain("\"text_in_image\"");
-        prompt.ShouldContain("Output ONLY the JSON object.");
-        prompt.ShouldContain("If no text is present, return null.");
+        prompt.ShouldContain("Describe what is shown in this image");
+        prompt.ShouldContain("Do not output JSON");
+        prompt.ShouldContain("Do not mention EXIF");
     }
 
     [Fact]
