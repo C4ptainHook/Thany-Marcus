@@ -4,7 +4,7 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Llm.Synthesis;
 
 public sealed class SynthesisLlmRouter : ISynthesisLlmRouter
 {
-    private const string LocalModelTag = "qwen3-1.7b-q4_k_m";
+    private const string LocalModelTag = "qwen3:1.7b-q4_K_M";
 
     private readonly OllamaSynthesisLlmClient ollama;
     private readonly GoogleGeminiClient google;

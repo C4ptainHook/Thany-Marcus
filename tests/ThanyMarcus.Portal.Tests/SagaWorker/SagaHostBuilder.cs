@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http;
 using System.Text;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -87,6 +86,7 @@ internal static class SagaHostBuilder
         builder.Services.AddSingleton(cloudflare);
         builder.Services.AddSingleton<WorkspaceLayout>();
 
+        builder.Services.AddSingleton<ISpacesKeyProbe, InstantSpacesKeyProbe>();
         builder.Services.AddScoped<ISagaPhaseHandler, MintingSpacesHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, TfPlanningHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, TfApplyingHandler>();

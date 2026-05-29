@@ -19,6 +19,7 @@ public sealed partial class MintingSpacesHandler(
     ICloudSecretBundle secrets,
     IDigitalOceanOAuthConnections connections,
     IDigitalOceanOAuthClient doClient,
+    ISpacesKeyProbe probe,
     ILogger<MintingSpacesHandler> log) : ISagaPhaseHandler
 {
     public string Phase => SagaStatus.MintingSpaces;
@@ -101,6 +102,33 @@ public sealed partial class MintingSpacesHandler(
                 ["event"]          = "spaces_key_minted",
                 ["access_key_id"]  = mint.AccessKeyId,
             });
+            await db.SaveChangesAsync(ct);
+
+            var probeStart = clock.GetCurrentInstant();
+            try
+            {
+                await probe.WaitForActiveAsync(cloud.Region, mint.AccessKeyId, mint.SecretKey, ct);
+            }
+            catch (TimeoutException ex)
+            {
+                EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                {
+                    ["error"]         = "spaces_key_activation_timeout",
+                    ["access_key_id"] = mint.AccessKeyId,
+                });
+                job.LastError = ex.Message;
+                LogActivationTimeout(log, job.Id, mint.AccessKeyId);
+                await SagaTransitions.TransitionToTerminalAsync(
+                    db, clock, job, cloud, SagaStatus.FailedMintingSpaces, ct);
+                return;
+            }
+            var elapsedMs = (long)(clock.GetCurrentInstant() - probeStart).TotalMilliseconds;
+            EventsLogAppender.Append(job, clock, Phase, new JsonObject
+            {
+                ["event"]            = "spaces_key_active",
+                ["access_key_id"]    = mint.AccessKeyId,
+                ["activation_ms"]    = elapsedMs,
+            });
 
             await SagaTransitions.TransitionAsync(
                 db, clock, job, SagaStatus.TfPlanning, Duration.Zero,
@@ -117,4 +145,8 @@ public sealed partial class MintingSpacesHandler(
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,
         Message = "MintingSpacesHandler: DO mint spaces key failed for job {JobId} with status {StatusCode}")]
     private static partial void LogMintFailed(ILogger logger, Guid jobId, int statusCode);
+
+    [LoggerMessage(EventId = 2, Level = LogLevel.Warning,
+        Message = "MintingSpacesHandler: Spaces key activation timeout for job {JobId} (access_key_id={AccessKeyId})")]
+    private static partial void LogActivationTimeout(ILogger logger, Guid jobId, string accessKeyId);
 }

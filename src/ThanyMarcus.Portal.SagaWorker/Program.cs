@@ -98,6 +98,7 @@ public static class Program
         else
             builder.Services.AddSingleton<ICloudflareDnsClient, CloudflareDnsClient>();
 
+        builder.Services.AddSingleton<ISpacesKeyProbe, AwsS3SpacesKeyProbe>();
         builder.Services.AddScoped<ISagaPhaseHandler, MintingSpacesHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, TfPlanningHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, TfApplyingHandler>();

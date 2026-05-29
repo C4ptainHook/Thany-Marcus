@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,6 +9,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.PixelFormats;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
+using ThanyMarcus.Cloud.Api.Infrastructure.Ffmpeg;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
 using WireMock.RequestBuilders;
@@ -21,6 +21,7 @@ namespace ThanyMarcus.Cloud.Tests.Infrastructure.Sidecars;
 public sealed class OllamaVlmClientTests : IDisposable
 {
     private readonly WireMockServer wm = WireMockServer.Start();
+    private readonly FakeFfmpegRunner fakeFfmpeg = new();
 
     [Fact]
     public async Task Happy_path_returns_canonical_text_and_cache_key()
@@ -156,6 +157,60 @@ public sealed class OllamaVlmClientTests : IDisposable
     }
 
     [Fact]
+    public async Task Large_image_is_downscaled_before_sending_to_ollama()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var originalBytes = MakeJpeg(2400, 1800);
+        wm.Given(Request.Create().WithPath("/img/test.jpg").UsingGet())
+          .RespondWith(Response.Create().WithStatusCode(200)
+              .WithHeader("Content-Type", "image/jpeg")
+              .WithBody(originalBytes));
+
+        var inner = JsonSerializer.Serialize(new { description = "ok", text_in_image = (string?)null });
+        wm.Given(Request.Create().WithPath("/api/generate").UsingPost())
+          .RespondWith(Response.Create().WithStatusCode(200)
+              .WithBody(JsonSerializer.Serialize(new { model = "m", response = inner, done = true, eval_count = 1L, eval_duration = 1L })));
+
+        var client = BuildClient();
+        var outcome = await client.ExtractAsync(MakeAttachment(), ct);
+
+        fakeFfmpeg.Calls.Count.ShouldBe(1);
+        fakeFfmpeg.Calls[0].ShouldContain("scale=w='min(iw,1024)':h='min(ih,1024)':force_original_aspect_ratio=decrease");
+        fakeFfmpeg.Calls[0].ShouldContain("-q:v 5");
+
+        var generateCalls = wm.FindLogEntries(Request.Create().WithPath("/api/generate"));
+        generateCalls.Count.ShouldBe(1);
+        using var doc = JsonDocument.Parse(generateCalls[0].RequestMessage.Body!);
+        var sentB64 = doc.RootElement.GetProperty("images")[0].GetString()!;
+        var sentBytes = Convert.FromBase64String(sentB64);
+        sentBytes.SequenceEqual(originalBytes).ShouldBeFalse();
+
+        using var extra = outcome.Extra;
+        extra.RootElement.GetProperty("dimensions").GetProperty("width").GetInt32().ShouldBe(2400);
+        extra.RootElement.GetProperty("dimensions").GetProperty("height").GetInt32().ShouldBe(1800);
+    }
+
+    [Fact]
+    public async Task Small_image_skips_ffmpeg_resize()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        wm.Given(Request.Create().WithPath("/img/test.jpg").UsingGet())
+          .RespondWith(Response.Create().WithStatusCode(200)
+              .WithHeader("Content-Type", "image/jpeg")
+              .WithBody(MakeJpeg(640, 480)));
+
+        var inner = JsonSerializer.Serialize(new { description = "ok", text_in_image = (string?)null });
+        wm.Given(Request.Create().WithPath("/api/generate").UsingPost())
+          .RespondWith(Response.Create().WithStatusCode(200)
+              .WithBody(JsonSerializer.Serialize(new { model = "m", response = inner, done = true, eval_count = 1L, eval_duration = 1L })));
+
+        var client = BuildClient();
+        await client.ExtractAsync(MakeAttachment(), ct);
+
+        fakeFfmpeg.Calls.Count.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Ollama_500_throws_for_retry()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -192,7 +247,7 @@ public sealed class OllamaVlmClientTests : IDisposable
             ["IngestSaga:Filters:Image:MinDimension"] = "100",
             ["IngestSaga:Filters:Image:MaxDimension"] = "16384",
         }).Build();
-        return new OllamaVlmClient(clientFactory, store, config, NullLogger<OllamaVlmClient>.Instance);
+        return new OllamaVlmClient(clientFactory, store, fakeFfmpeg, config, NullLogger<OllamaVlmClient>.Instance);
     }
 
     private static Attachment MakeAttachment(string storageProvider = "test", string? url = null) => new()
@@ -229,6 +284,29 @@ public sealed class OllamaVlmClientTests : IDisposable
     }
 
     public void Dispose() => wm.Dispose();
+
+    private sealed class FakeFfmpegRunner : IFfmpegRunner
+    {
+        public List<string> Calls { get; } = new();
+
+        public async Task<FfmpegResult> RunAsync(string arguments, TimeSpan timeout, CancellationToken ct)
+        {
+            Calls.Add(arguments);
+            var outPath = ExtractLastQuotedPath(arguments);
+            using var img = new Image<Rgba32>(1024, 768);
+            await img.SaveAsJpegAsync(outPath, new JpegEncoder { Quality = 85 }, ct);
+            return new FfmpegResult(0, "", "");
+        }
+
+        private static string ExtractLastQuotedPath(string args)
+        {
+            var last = args.LastIndexOf('"');
+            if (last < 0) throw new InvalidOperationException("no quoted output path in args");
+            var first = args.LastIndexOf('"', last - 1);
+            if (first < 0) throw new InvalidOperationException("no opening quote for output path");
+            return args.Substring(first + 1, last - first - 1);
+        }
+    }
 
     private sealed class FakeStoreReturningWireMockUrl(string baseUrl) : IArtifactStore
     {
