@@ -16,6 +16,7 @@ using ThanyMarcus.Cloud.Api.Features.Bootstrap;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
+using ThanyMarcus.Cloud.Api.Features.Projects;
 using ThanyMarcus.Cloud.Api.Features.Processing.Composing;
 using ThanyMarcus.Cloud.Api.Features.Processing.Composing.Renderers;
 using ThanyMarcus.Cloud.Api.Features.Processing.Phases;
@@ -328,6 +329,7 @@ app.MapNoteDeleteEndpoint();
 app.MapSyncPullEndpoint();
 app.MapSyncPushEndpoint();
 app.MapSyncEventsEndpoint();
+app.MapProjectsEndpoints();
 app.MapAdminSettingsEndpoints();
 app.MapAdminPluginTokenEndpoints();
 

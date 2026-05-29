@@ -1,17 +1,26 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, Modal, Notice, Setting, WorkspaceLeaf } from "obsidian";
+import type { ProjectDto } from "../api";
 import { isFailure, isTerminal } from "./labels";
 import type { QueueStore } from "./QueueStore";
 
 export const QUEUE_VIEW_TYPE = "thany-marcus-queue";
 
+export interface ProjectActions {
+  list: () => Promise<ProjectDto[]>;
+  create: (name: string, description?: string) => Promise<ProjectDto>;
+  remove: (id: string) => Promise<void>;
+}
+
 export class QueueSidebarView extends ItemView {
   private unsubscribe: (() => void) | null = null;
+  private projects: ProjectDto[] = [];
 
   constructor(
     leaf: WorkspaceLeaf,
     private readonly store: QueueStore,
     private readonly onOpenNote: (vaultPath: string) => void,
     private readonly onReprocess: (noteId: string) => void,
+    private readonly projectActions: ProjectActions,
   ) {
     super(leaf);
   }
@@ -31,6 +40,7 @@ export class QueueSidebarView extends ItemView {
   async onOpen(): Promise<void> {
     this.unsubscribe = this.store.subscribe(() => this.render());
     this.render();
+    void this.refreshProjects();
   }
 
   async onClose(): Promise<void> {
@@ -38,10 +48,21 @@ export class QueueSidebarView extends ItemView {
     this.unsubscribe = null;
   }
 
+  private async refreshProjects(): Promise<void> {
+    try {
+      this.projects = await this.projectActions.list();
+      this.render();
+    } catch (e) {
+      console.error("[Thany] listProjects failed", e);
+    }
+  }
+
   private render(): void {
     const root = this.containerEl.children[1] as HTMLElement;
     root.empty();
     root.addClass("tm-queue");
+
+    this.renderProjectsSection(root);
 
     const header = root.createDiv({ cls: "tm-queue__header" });
     header.setText("Recent notes");
@@ -89,6 +110,154 @@ export class QueueSidebarView extends ItemView {
         row.addClass("tm-queue__row--clickable");
       }
     }
+  }
+
+  private renderProjectsSection(root: HTMLElement): void {
+    const wrap = root.createDiv({ cls: "tm-projects" });
+    const head = wrap.createDiv({ cls: "tm-projects__header" });
+    head.createSpan({ text: "Projects" });
+    const addBtn = head.createEl("button", { cls: "tm-projects__add", text: "+ New" });
+    addBtn.onclick = () => void this.promptCreateProject();
+
+    if (this.projects.length === 0) {
+      wrap.createDiv({
+        cls: "tm-projects__empty",
+        text: "No projects yet — new notes land in Inbox.",
+      });
+      return;
+    }
+
+    const list = wrap.createDiv({ cls: "tm-projects__list" });
+    for (const p of this.projects) {
+      const row = list.createDiv({ cls: "tm-projects__row" });
+      const name = row.createDiv({ cls: "tm-projects__name", text: p.name });
+      if (p.description) name.setAttr("title", p.description);
+      row.createDiv({ cls: "tm-projects__count", text: String(p.mentionCount) });
+      const del = row.createEl("button", { cls: "tm-projects__delete", text: "×" });
+      del.setAttr("title", `Delete project '${p.name}'`);
+      del.onclick = (ev) => {
+        ev.stopPropagation();
+        void this.confirmDeleteProject(p);
+      };
+    }
+  }
+
+  private promptCreateProject(): void {
+    new CreateProjectModal(this.app, async (name, description) => {
+      try {
+        await this.projectActions.create(name, description);
+        new Notice(`Project '${name}' created`);
+        await this.refreshProjects();
+      } catch (e) {
+        new Notice(`Create failed: ${(e as Error).message}`);
+      }
+    }).open();
+  }
+
+  private confirmDeleteProject(p: ProjectDto): void {
+    new ConfirmModal(
+      this.app,
+      `Delete project '${p.name}'?`,
+      "Notes already routed there keep their folder.",
+      async () => {
+        try {
+          await this.projectActions.remove(p.id);
+          new Notice(`Project '${p.name}' deleted`);
+          await this.refreshProjects();
+        } catch (e) {
+          new Notice(`Delete failed: ${(e as Error).message}`);
+        }
+      },
+    ).open();
+  }
+}
+
+class CreateProjectModal extends Modal {
+  private name = "";
+  private description = "";
+
+  constructor(
+    app: App,
+    private readonly onSubmit: (name: string, description?: string) => Promise<void>,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: "New project" });
+
+    new Setting(contentEl)
+      .setName("Name")
+      .setDesc("Will become the vault folder for routed notes")
+      .addText((t) => {
+        t.setPlaceholder("e.g. Reply.io").onChange((v) => (this.name = v));
+        setTimeout(() => t.inputEl.focus(), 0);
+      });
+
+    new Setting(contentEl)
+      .setName("Description")
+      .setDesc("Optional. Helps the router pick the right project.")
+      .addText((t) => t.setPlaceholder("optional").onChange((v) => (this.description = v)));
+
+    new Setting(contentEl)
+      .addButton((b) =>
+        b.setButtonText("Cancel").onClick(() => this.close()),
+      )
+      .addButton((b) =>
+        b
+          .setButtonText("Create")
+          .setCta()
+          .onClick(async () => {
+            const name = this.name.trim();
+            if (!name) {
+              new Notice("Name is required");
+              return;
+            }
+            const description = this.description.trim() || undefined;
+            this.close();
+            await this.onSubmit(name, description);
+          }),
+      );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+class ConfirmModal extends Modal {
+  constructor(
+    app: App,
+    private readonly title: string,
+    private readonly message: string,
+    private readonly onConfirm: () => Promise<void>,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: this.title });
+    contentEl.createEl("p", { text: this.message });
+
+    new Setting(contentEl)
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton((b) =>
+        b
+          .setButtonText("Delete")
+          .setWarning()
+          .onClick(async () => {
+            this.close();
+            await this.onConfirm();
+          }),
+      );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }
 

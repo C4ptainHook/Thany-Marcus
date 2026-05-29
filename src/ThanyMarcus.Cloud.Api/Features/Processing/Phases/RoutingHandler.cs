@@ -70,6 +70,31 @@ public sealed class RoutingHandler : IPhaseHandler
             .Select(e => new ProjectListItem(e.Id, e.CanonicalName, e.Description))
             .ToListAsync(ct);
 
+        if (projects.Count == 0)
+        {
+            await events.AppendAsync(job.Id, new LlmEvent(
+                Stage: LlmEventStages.Route,
+                PromptId: "route:v1",
+                Model: "",
+                ModelVersion: "",
+                LlmMode: "skipped",
+                LlmModeFallback: false,
+                DurationMs: 0,
+                RetryIndex: 0,
+                Decision: "skipped:no_projects",
+                Confidence: null,
+                Rationale: null,
+                Error: null), ct);
+            await transitions.TransitionAsync(
+                job,
+                nextStatus: IngestJobStatus.Synthesizing,
+                lastError: null,
+                clearLease: true,
+                setFinishedAt: false,
+                ct);
+            return PhaseHandlerResult.Advanced;
+        }
+
         var attachments = await db.Attachments
             .Where(a => a.NoteId == note.Id)
             .ToListAsync(ct);
@@ -114,7 +139,7 @@ public sealed class RoutingHandler : IPhaseHandler
             if (project is not null)
             {
                 note.ProjectId = project.Id;
-                note.RelativePath = $"Projects/{project.CanonicalName}/{note.Id}.md";
+                note.RelativePath = $"{project.CanonicalName}/{note.Id}.md";
                 project.UpdatedAt = clock.GetCurrentInstant();
             }
         }

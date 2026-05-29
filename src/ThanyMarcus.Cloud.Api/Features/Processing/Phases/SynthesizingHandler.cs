@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using ThanyMarcus.Cloud.Api.Features.Entities;
@@ -15,12 +16,18 @@ using ThanyMarcus.Shared.PluginApi;
 
 namespace ThanyMarcus.Cloud.Api.Features.Processing.Phases;
 
-public sealed class SynthesizingHandler : IPhaseHandler
+public sealed partial class SynthesizingHandler : IPhaseHandler
 {
     public const string SynthesisTemplateVersion = "synthesis-v1";
     private const int DefaultSeed = 42;
     private const double DefaultTemperature = 0.3;
     private const int DefaultMaxOutputTokens = 2048;
+
+    [GeneratedRegex(@"^\s*#\s+(.+?)\s*$", RegexOptions.Multiline)]
+    private static partial Regex H1Title();
+
+    [GeneratedRegex(@"[^\p{L}\p{Nd}]+")]
+    private static partial Regex SlugSeparators();
 
     public string Phase => IngestJobStatus.Synthesizing;
 
@@ -166,7 +173,7 @@ public sealed class SynthesizingHandler : IPhaseHandler
         var finalBody = $"---\n{frontmatter}---\n\n{body.TrimEnd()}\n\n{sources}";
 
         note.BodyOutput = finalBody;
-        note.RelativePath ??= $"Inbox/{note.Id}.md";
+        note.RelativePath = ComputeRelativePath(note.RelativePath, note.Id, body);
         note.UpdatedAt = now;
         job.LastComposeTemplate = SynthesisTemplateVersion;
 
@@ -277,6 +284,36 @@ public sealed class SynthesizingHandler : IPhaseHandler
             "{0}|{1}|{2}|{3}|{4}|{5}",
             rawHash, mentionsHash, modelTag, promptVersion, privacyMode, preset);
         return Sha256(s);
+    }
+
+    internal static string ComputeRelativePath(string? existing, Guid noteId, string body)
+    {
+        var slug = ExtractTitleSlug(body);
+        if (string.IsNullOrEmpty(slug))
+        {
+            return existing ?? $"Inbox/{noteId}.md";
+        }
+        var idSuffix = noteId.ToString("N").Substring(0, 8);
+        var filename = $"{slug}-{idSuffix}.md";
+        if (string.IsNullOrEmpty(existing))
+        {
+            return $"Inbox/{filename}";
+        }
+        var lastSlash = existing.LastIndexOf('/');
+        var parent = lastSlash < 0 ? "Inbox" : existing.Substring(0, lastSlash);
+        return $"{parent}/{filename}";
+    }
+
+    internal static string ExtractTitleSlug(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return string.Empty;
+        var match = H1Title().Match(body);
+        if (!match.Success) return string.Empty;
+        var title = match.Groups[1].Value.Trim();
+        if (string.IsNullOrEmpty(title)) return string.Empty;
+        var normalized = SlugSeparators().Replace(title, "-").Trim('-').ToLowerInvariant();
+        if (normalized.Length > 60) normalized = normalized.Substring(0, 60).TrimEnd('-');
+        return normalized;
     }
 
     private static string Sha256(string s)

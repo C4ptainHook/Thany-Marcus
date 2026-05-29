@@ -38,7 +38,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var note = await probe.Notes.SingleAsync(n => n.Id == noteId, ct);
         note.ProjectId.ShouldBe(projectId);
-        note.RelativePath.ShouldBe($"Projects/Acme/{noteId}.md");
+        note.RelativePath.ShouldBe($"Acme/{noteId}.md");
 
         var after = await probe.IngestJobs.SingleAsync(j => j.Id == jobId, ct);
         after.Status.ShouldBe(IngestJobStatus.Synthesizing);
@@ -97,6 +97,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
+        await SeedProjectAsync(Guid.CreateVersion7(), "Acme");
         var (_, jobId) = await SeedRoutingJobAsync();
         var llm = new ConfigurableLlmClient
         {
