@@ -80,7 +80,6 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
             SshPublicKey:         EscapeTfString(section["SshPublicKey"] ?? ""),
             OllamaVisionPullTag:  section["OllamaVisionPullTag"] ?? "",
             OllamaTextPullTag:    section["OllamaTextPullTag"] ?? "",
-            OllamaImageTag:       section["OllamaImageTag"] ?? "",
             OllamaTextImageTag:   section["OllamaTextImageTag"] ?? "");
     }
 
@@ -91,8 +90,6 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
             sb.AppendLine(CultureInfo.InvariantCulture, $"ollama_vision_pull_tag = \"{cloudInit.OllamaVisionPullTag}\"");
         if (!string.IsNullOrWhiteSpace(cloudInit.OllamaTextPullTag))
             sb.AppendLine(CultureInfo.InvariantCulture, $"ollama_text_pull_tag   = \"{cloudInit.OllamaTextPullTag}\"");
-        if (!string.IsNullOrWhiteSpace(cloudInit.OllamaImageTag))
-            sb.AppendLine(CultureInfo.InvariantCulture, $"ollama_image_tag       = \"{cloudInit.OllamaImageTag}\"");
         if (!string.IsNullOrWhiteSpace(cloudInit.OllamaTextImageTag))
             sb.AppendLine(CultureInfo.InvariantCulture, $"ollama_text_image_tag  = \"{cloudInit.OllamaTextImageTag}\"");
         return sb.ToString().TrimEnd();
@@ -109,7 +106,6 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
         string SshPublicKey,
         string OllamaVisionPullTag,
         string OllamaTextPullTag,
-        string OllamaImageTag,
         string OllamaTextImageTag);
 
     public void SweepTerminal(Instant now, Duration retention)
@@ -180,7 +176,6 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                   timezone               = var.timezone
                   ollama_vision_pull_tag = var.ollama_vision_pull_tag
                   ollama_text_pull_tag   = var.ollama_text_pull_tag
-                  ollama_image_tag       = var.ollama_image_tag
                   ollama_text_image_tag  = var.ollama_text_image_tag
                 """,
                 """
@@ -221,15 +216,11 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                 }
                 variable "ollama_vision_pull_tag" {
                   type    = string
-                  default = "openbmb/minicpm-v4.6:q4_K_M"
+                  default = "qwen3-vl:2b"
                 }
                 variable "ollama_text_pull_tag" {
                   type    = string
                   default = "qwen3:1.7b-q4_K_M"
-                }
-                variable "ollama_image_tag" {
-                  type    = string
-                  default = "latest"
                 }
                 variable "ollama_text_image_tag" {
                   type    = string
