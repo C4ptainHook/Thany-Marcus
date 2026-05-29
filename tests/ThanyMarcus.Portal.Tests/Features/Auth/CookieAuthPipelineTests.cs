@@ -79,7 +79,7 @@ public sealed class CookieAuthPipelineTests(PostgresFixture postgres) : DbIntegr
         var ct = TestContext.Current.CancellationToken;
         var invalidatedAt = Clock.GetCurrentInstant() - Duration.FromHours(1);
         var user = await InsertUserAsync(sessionsInvalidatedAt: invalidatedAt);
-        var issuedAt = Clock.GetCurrentInstant().ToDateTimeOffset();
+        var issuedAt = DateTimeOffset.UtcNow;
 
         await using var factory = new PortalApiFactory(Postgres);
         var cookieValue = MintCookie(factory, user.Id, issuedAt);
