@@ -42,6 +42,7 @@ public sealed class MintingSpacesHandlerTests(PostgresFixture postgres) : DbInte
             new CloudSecretBundle(Db, Clock),
             new DigitalOceanOAuthConnections(Db, Clock),
             fakeDo,
+            new InstantSpacesKeyProbe(),
             NullLogger<MintingSpacesHandler>.Instance);
 
         await handler.HandleAsync(job, ct);
@@ -81,6 +82,7 @@ public sealed class MintingSpacesHandlerTests(PostgresFixture postgres) : DbInte
             new CloudSecretBundle(Db, Clock),
             new DigitalOceanOAuthConnections(Db, Clock),
             fakeDo,
+            new InstantSpacesKeyProbe(),
             NullLogger<MintingSpacesHandler>.Instance);
 
         await handler.HandleAsync(job, ct);
@@ -118,6 +120,7 @@ public sealed class MintingSpacesHandlerTests(PostgresFixture postgres) : DbInte
             new CloudSecretBundle(Db, Clock),
             new DigitalOceanOAuthConnections(Db, Clock),
             fakeDo,
+            new InstantSpacesKeyProbe(),
             NullLogger<MintingSpacesHandler>.Instance);
 
         await handler.HandleAsync(job, ct);
@@ -145,6 +148,7 @@ public sealed class MintingSpacesHandlerTests(PostgresFixture postgres) : DbInte
             new CloudSecretBundle(Db, Clock),
             new DigitalOceanOAuthConnections(Db, Clock),
             new FakeDigitalOceanOAuthClient(),
+            new InstantSpacesKeyProbe(),
             NullLogger<MintingSpacesHandler>.Instance);
 
         await handler.HandleAsync(job, ct);

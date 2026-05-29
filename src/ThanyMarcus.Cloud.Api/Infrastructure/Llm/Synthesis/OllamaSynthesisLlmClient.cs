@@ -1,12 +1,10 @@
-using System.Net.Http.Json;
-using System.Text.Json;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 
 namespace ThanyMarcus.Cloud.Api.Infrastructure.Llm.Synthesis;
 
 public sealed class OllamaSynthesisLlmClient : ISynthesisLlmClient
 {
-    private const string LocalModelTag = "qwen3-1.7b-q4_k_m";
+    private const string LocalModelTag = "qwen3:1.7b-q4_K_M";
 
     private readonly IHttpClientFactory clientFactory;
     private readonly IConfiguration config;

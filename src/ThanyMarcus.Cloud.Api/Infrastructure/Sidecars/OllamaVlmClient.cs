@@ -1,12 +1,12 @@
 using System.Globalization;
 using System.Text.Json;
-using CoenM.ImageHash;
 using CoenM.ImageHash.HashAlgorithms;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
+using ThanyMarcus.Cloud.Api.Infrastructure.Ffmpeg;
 using ThanyMarcus.Cloud.Api.Infrastructure.Storage;
 
 namespace ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
@@ -24,17 +24,20 @@ public sealed partial class OllamaVlmClient : IVlmClient
 
     private readonly IHttpClientFactory clientFactory;
     private readonly IArtifactStore store;
+    private readonly IFfmpegRunner ffmpeg;
     private readonly IConfiguration config;
     private readonly ILogger<OllamaVlmClient> log;
 
     public OllamaVlmClient(
         IHttpClientFactory clientFactory,
         IArtifactStore store,
+        IFfmpegRunner ffmpeg,
         IConfiguration config,
         ILogger<OllamaVlmClient> log)
     {
         this.clientFactory = clientFactory;
         this.store = store;
+        this.ffmpeg = ffmpeg;
         this.config = config;
         this.log = log;
     }
@@ -66,14 +69,18 @@ public sealed partial class OllamaVlmClient : IVlmClient
             imageBytes = await DownloadAsync(presigned.Url, ct);
         }
 
-        using var image = Image.Load<Rgba32>(imageBytes);
+        var headerInfo = Image.Identify(imageBytes);
+        var srcWidth = headerInfo.Width;
+        var srcHeight = headerInfo.Height;
 
-        if (image.Width < minDim || image.Height < minDim ||
-            image.Width > maxDim || image.Height > maxDim)
+        if (srcWidth < minDim || srcHeight < minDim ||
+            srcWidth > maxDim || srcHeight > maxDim)
         {
-            var reason = $"dimensions_out_of_range:{image.Width}x{image.Height}";
-            return Skipped(reason, image.Width, image.Height, exif: null, phash: null, blurScore: null);
+            var reason = $"dimensions_out_of_range:{srcWidth}x{srcHeight}";
+            return Skipped(reason, srcWidth, srcHeight, exif: null, phash: null, blurScore: null);
         }
+
+        using var image = Image.Load<Rgba32>(imageBytes);
 
         var exif = ReadExif(image.Metadata.ExifProfile);
 
@@ -88,8 +95,19 @@ public sealed partial class OllamaVlmClient : IVlmClient
             if (blurScore.Value < blurThreshold)
             {
                 var reason = $"too_blurry:variance={blurScore.Value.ToString("F1", CultureInfo.InvariantCulture)}";
-                return Skipped(reason, image.Width, image.Height, exif, phashHex, blurScore);
+                return Skipped(reason, srcWidth, srcHeight, exif, phashHex, blurScore);
             }
+        }
+
+        var vlmMaxEdge = config.GetValue("IngestSaga:Filters:Image:VlmMaxDimension", 1024);
+        var vlmJpegQscale = config.GetValue("IngestSaga:Filters:Image:VlmJpegQscale", 5);
+        var vlmResizeTimeoutSeconds = config.GetValue("IngestSaga:Filters:Image:VlmResizeTimeoutSeconds", 30);
+        var srcLongEdge = Math.Max(srcWidth, srcHeight);
+        if (srcLongEdge > vlmMaxEdge)
+        {
+            imageBytes = await ResizeViaFfmpegAsync(
+                imageBytes, vlmMaxEdge, vlmJpegQscale,
+                TimeSpan.FromSeconds(vlmResizeTimeoutSeconds), ct);
         }
 
         var prompt = VlmPromptBuilder.Build();
@@ -154,10 +172,10 @@ public sealed partial class OllamaVlmClient : IVlmClient
         }
 
         var cacheKey = ExtractionCacheKeys.ForOllama(modelTag);
-        var extra = BuildExtra(image.Width, image.Height, exif, phashHex, blurScore, outer);
+        var extra = BuildExtra(srcWidth, srcHeight, exif, phashHex, blurScore, outer);
 
         var evalMs = outer.EvalDuration / 1_000_000.0;
-        LogSucceeded(log, modelTag, evalMs, image.Width, image.Height);
+        LogSucceeded(log, modelTag, evalMs, srcWidth, srcHeight);
 
         return new VlmExtractionOutcome(
             ExtractedText: extractedText,
@@ -165,6 +183,28 @@ public sealed partial class OllamaVlmClient : IVlmClient
             Extra: extra,
             Skipped: false,
             SkipReason: null);
+    }
+
+    private async Task<byte[]> ResizeViaFfmpegAsync(
+        byte[] sourceBytes, int maxEdge, int qscale, TimeSpan timeout, CancellationToken ct)
+    {
+        var inPath  = Path.Combine(Path.GetTempPath(), $"vlm-in-{Guid.NewGuid():N}");
+        var outPath = Path.Combine(Path.GetTempPath(), $"vlm-out-{Guid.NewGuid():N}.jpg");
+        try
+        {
+            await File.WriteAllBytesAsync(inPath, sourceBytes, ct);
+            var filter = $"scale=w='min(iw,{maxEdge})':h='min(ih,{maxEdge})':force_original_aspect_ratio=decrease";
+            var args = $"-y -i \"{inPath}\" -vf \"{filter}\" -q:v {qscale} \"{outPath}\"";
+            await ffmpeg.RunAsync(args, timeout, ct);
+            var resized = await File.ReadAllBytesAsync(outPath, ct);
+            LogResized(log, sourceBytes.Length, resized.Length, maxEdge, qscale);
+            return resized;
+        }
+        finally
+        {
+            try { if (File.Exists(inPath))  File.Delete(inPath);  } catch { /* best effort */ }
+            try { if (File.Exists(outPath)) File.Delete(outPath); } catch { /* best effort */ }
+        }
     }
 
     private async Task<byte[]> DownloadAsync(Uri url, CancellationToken ct)
@@ -367,6 +407,11 @@ public sealed partial class OllamaVlmClient : IVlmClient
     [LoggerMessage(EventId = 1, Level = LogLevel.Information,
         Message = "OllamaVlmClient succeeded: model={Model} eval_ms={EvalMs} dims={Width}x{Height}")]
     private static partial void LogSucceeded(ILogger logger, string model, double evalMs, int width, int height);
+
+    [LoggerMessage(EventId = 2, Level = LogLevel.Information,
+        Message = "OllamaVlmClient resized via ffmpeg: bytes {SrcBytes} -> {DstBytes} (maxEdge={MaxEdge} qscale={Qscale})")]
+    private static partial void LogResized(
+        ILogger logger, int srcBytes, int dstBytes, int maxEdge, int qscale);
 }
 
 internal static class JsonElementWriteExtensions

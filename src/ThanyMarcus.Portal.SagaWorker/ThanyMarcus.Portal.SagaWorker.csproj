@@ -23,6 +23,7 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Process" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" />
     <PackageReference Include="Microsoft.Extensions.Http.Polly" />
+    <PackageReference Include="AWSSDK.S3" />
   </ItemGroup>
 
   <ItemGroup>
