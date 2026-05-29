@@ -43,7 +43,6 @@ resource "digitalocean_droplet" "cloud" {
     storage_access_secret = digitalocean_spaces_key.artifacts.secret_key
     ollama_vision_pull_tag = var.ollama_vision_pull_tag
     ollama_text_pull_tag   = var.ollama_text_pull_tag
-    ollama_image_tag       = var.ollama_image_tag
     ollama_text_image_tag  = var.ollama_text_image_tag
   })
 

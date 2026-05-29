@@ -66,7 +66,6 @@ write_files:
       POSTGRES_PASSWORD=$${POSTGRES_PASSWORD}
       OLLAMA_VISION_PULL_TAG=${ollama_vision_pull_tag}
       OLLAMA_TEXT_PULL_TAG=${ollama_text_pull_tag}
-      OLLAMA_IMAGE_TAG=${ollama_image_tag}
       OLLAMA_TEXT_IMAGE_TAG=${ollama_text_image_tag}
 
   - path: /etc/thany-cloud/nginx-site.tpl
@@ -194,8 +193,10 @@ write_files:
             Cert__LiveDir: /etc/letsencrypt/live/$${DOMAIN}
             IngestSaga__Sidecars__OllamaVision__BaseUrl: http://ollama-vision:11434
             IngestSaga__Sidecars__OllamaVision__HealthPath: /api/version
+            IngestSaga__Sidecars__OllamaVision__RequestTimeoutSeconds: "1200"
             IngestSaga__Sidecars__OllamaText__BaseUrl: http://ollama-text:11434
             IngestSaga__Sidecars__OllamaText__HealthPath: /api/version
+            IngestSaga__Sidecars__OllamaText__RequestTimeoutSeconds: "900"
             IngestSaga__Models__Vlm__OllamaTag:    $${OLLAMA_VISION_PULL_TAG}
             IngestSaga__Models__Route__OllamaTag:  $${OLLAMA_TEXT_PULL_TAG}
             IngestSaga__Models__Entity__OllamaTag: $${OLLAMA_TEXT_PULL_TAG}
@@ -235,17 +236,17 @@ write_files:
             retries: 10
 
         ollama-vision:
-          image: ghcr.io/c4ptainhook/thany-ollama-minicpm:$${OLLAMA_IMAGE_TAG:-latest}
+          image: ollama/ollama:$${OLLAMA_TEXT_IMAGE_TAG:-0.24.0}
           restart: unless-stopped
           environment:
             OLLAMA_HOST: "0.0.0.0:11434"
-            OLLAMA_KEEP_ALIVE: "30s"
+            OLLAMA_KEEP_ALIVE: "0"
             OLLAMA_NUM_PARALLEL: "1"
             OLLAMA_MAX_LOADED_MODELS: "1"
           volumes:
             - ollama-vision-models:/root/.ollama
           networks: [cloud]
-          mem_limit: 3g
+          mem_limit: 5g
           healthcheck:
             test: ["CMD", "/bin/ollama", "list"]
             interval: 15s
@@ -258,7 +259,7 @@ write_files:
           restart: unless-stopped
           environment:
             OLLAMA_HOST: "0.0.0.0:11434"
-            OLLAMA_KEEP_ALIVE: "30s"
+            OLLAMA_KEEP_ALIVE: "0"
             OLLAMA_NUM_PARALLEL: "1"
             OLLAMA_MAX_LOADED_MODELS: "1"
           volumes:
@@ -273,13 +274,13 @@ write_files:
             start_period: 30s
 
         ollama-vision-puller:
-          image: ghcr.io/c4ptainhook/thany-ollama-minicpm:$${OLLAMA_IMAGE_TAG:-latest}
+          image: ollama/ollama:$${OLLAMA_TEXT_IMAGE_TAG:-0.24.0}
           profiles: ["init"]
           restart: "no"
           entrypoint: ["/bin/sh", "/opt/puller/run.sh"]
           environment:
             OLLAMA_HOST: "127.0.0.1:11434"
-            OLLAMA_PULL_TAG: $${OLLAMA_VISION_PULL_TAG:-openbmb/minicpm-v4.6:q4_K_M}
+            OLLAMA_PULL_TAG: $${OLLAMA_VISION_PULL_TAG:-qwen3-vl:2b}
           volumes:
             - ollama-vision-models:/root/.ollama
             - /opt/thany-cloud/puller:/opt/puller:ro
@@ -351,6 +352,15 @@ runcmd:
   - apt-get update
   - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   - usermod -aG docker ${admin_user}
+
+  - |
+    if [ ! -f /swapfile ]; then
+      fallocate -l 4G /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
 
   - openssl rand -hex 32 > /run/cloud-secrets/cloud_admin_token
   - openssl rand -hex 32 > /run/cloud-secrets/jwt_signing_key
