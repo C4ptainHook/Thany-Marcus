@@ -78,19 +78,20 @@ public sealed partial class SafeLlmClient : ILlmClient
                 {
                     throw new JsonException("Ollama returned empty response field");
                 }
+                var responseText = ThinkingStripper.Strip(ollamaResp.Response);
                 if (typeof(T) == typeof(string))
                 {
-                    return (T)(object)ollamaResp.Response.Trim();
+                    return (T)(object)responseText.Trim();
                 }
                 try
                 {
-                    var parsed = JsonSerializer.Deserialize<T>(ollamaResp.Response, JsonOpts)
+                    var parsed = JsonSerializer.Deserialize<T>(responseText, JsonOpts)
                                  ?? throw new JsonException("null deserialization");
                     return parsed;
                 }
                 catch (JsonException)
                 {
-                    if (RouteV1Salvage.TryRecover<T>(promptId, ollamaResp.Response, out var salvaged) && salvaged is not null)
+                    if (RouteV1Salvage.TryRecover<T>(promptId, responseText, out var salvaged) && salvaged is not null)
                     {
                         LogSalvagedRoute(log, promptId.Name, promptId.Version);
                         return salvaged;
@@ -140,6 +141,7 @@ public sealed partial class SafeLlmClient : ILlmClient
                 model,
                 prompt,
                 stream = false,
+                think = false,
                 options = new { temperature = 0, num_ctx = 8192 },
             };
         }
@@ -149,6 +151,7 @@ public sealed partial class SafeLlmClient : ILlmClient
             prompt,
             stream = false,
             format = "json",
+            think = false,
             options = new { temperature = 0, num_ctx = 8192 },
         };
     }

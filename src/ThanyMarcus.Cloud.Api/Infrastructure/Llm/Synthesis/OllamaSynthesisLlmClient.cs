@@ -27,6 +27,7 @@ public sealed class OllamaSynthesisLlmClient : ISynthesisLlmClient
             model = modelTag,
             prompt = req.Prompt,
             stream = false,
+            think = false,
             options = new
             {
                 temperature  = req.Temperature,
@@ -50,7 +51,7 @@ public sealed class OllamaSynthesisLlmClient : ISynthesisLlmClient
         }
 
         return new SynthesisResponse(
-            Body: body.Response.Trim(),
+            Body: ThinkingStripper.Strip(body.Response).Trim(),
             ModelTag: modelTag,
             PromptTokens: 0,
             CompletionTokens: 0);
