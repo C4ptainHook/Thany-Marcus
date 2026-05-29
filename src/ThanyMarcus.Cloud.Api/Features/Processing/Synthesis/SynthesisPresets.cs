@@ -15,7 +15,8 @@ public static class SynthesisPresetBodies
         "- Use the canonical entity list below to wrap mentions as [[Wikilink]]. Never invent a wikilink target — only the names in the list may appear inside [[ ]].\n" +
         "- If an input failed (marked <input failed .../>), acknowledge it by presence (\"the attached image\") without inventing content.\n" +
         "- Output only the synthesized note body in Markdown — no frontmatter, no '## Sources' section. The server appends provenance separately.\n" +
-        "- The first line MUST be a Markdown H1 heading that summarises the note: write `# ` followed by a concise 4–8 word descriptive title. Do not write the literal word \"Title\" — emit the actual summary text after the `#`.\n";
+        "- The first line MUST be a Markdown H1 heading that summarises the note: write `# ` followed by a concise 4–8 word descriptive title. Do not write the literal word \"Title\" — emit the actual summary text after the `#`.\n" +
+        "- Each idea appears ONCE. Do not restate the same fact in different words. If you find yourself about to repeat something already written, stop and end the note instead.\n";
 
     private const string Zettelkasten =
         "You are writing a Zettelkasten-style atomic note in the user's voice.\n" +
