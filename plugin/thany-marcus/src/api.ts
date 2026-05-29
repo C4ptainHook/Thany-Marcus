@@ -112,6 +112,22 @@ export interface SyncPullResponse {
   nextSince: string | null;
 }
 
+export interface ProjectDto {
+  id: string;
+  name: string;
+  description: string | null;
+  mentionCount: number;
+}
+
+export interface ListProjectsResponse {
+  projects: ProjectDto[];
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  description?: string;
+}
+
 export class TokenRevokedError extends Error {
   constructor() {
     super("Plugin token revoked or invalid");
@@ -194,6 +210,39 @@ export class ApiClient {
     }
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`DELETE /api/notes/${noteId} failed: HTTP ${res.status}`);
+    }
+  }
+
+  async listProjects(): Promise<ProjectDto[]> {
+    const res = await this.json<ListProjectsResponse>({
+      url: `${this.base()}/api/projects`,
+      method: "GET",
+    });
+    return res.projects;
+  }
+
+  async createProject(req: CreateProjectRequest): Promise<ProjectDto> {
+    return this.json<ProjectDto>({
+      url: `${this.base()}/api/projects`,
+      method: "POST",
+      contentType: "application/json",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async deleteProject(id: string): Promise<void> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/projects/${id}`,
+      method: "DELETE",
+      headers: this.authHeader(),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`DELETE /api/projects/${id} → HTTP ${res.status}`);
     }
   }
 

@@ -90,6 +90,11 @@ export default class ThanyMarcusPlugin extends Plugin {
         this.queueStore,
         (path) => void this.openVaultFile(path),
         (noteId) => void this.reprocess(noteId),
+        {
+          list:   () => this.api.listProjects(),
+          create: (name, description) => this.api.createProject({ name, description }),
+          remove: (id) => this.api.deleteProject(id),
+        },
       ),
     );
 
