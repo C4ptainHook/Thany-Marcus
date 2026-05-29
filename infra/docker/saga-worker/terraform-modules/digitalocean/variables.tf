@@ -82,9 +82,9 @@ variable "timezone" {
 }
 
 variable "ollama_vision_pull_tag" {
-  description = "Ollama model tag to pre-pull on the vision server. Must match the tag the VlmWorker requests at runtime. Default targets Qwen3-VL 2B — fits in 5g mem_limit, ~2 min/image on 4 vCPU."
+  description = "Ollama model tag to pre-pull on the vision server. Must match the tag the VlmWorker requests at runtime. Default targets Qwen3-VL 4B — fits in 6g mem_limit with 4g swap; text container unloads at idle (OLLAMA_KEEP_ALIVE=0) to free RAM during vision calls."
   type        = string
-  default     = "qwen3-vl:2b"
+  default     = "qwen3-vl:4b"
 }
 
 variable "ollama_text_pull_tag" {

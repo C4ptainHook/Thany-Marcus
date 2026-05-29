@@ -216,7 +216,7 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
                 }
                 variable "ollama_vision_pull_tag" {
                   type    = string
-                  default = "qwen3-vl:2b"
+                  default = "qwen3-vl:4b"
                 }
                 variable "ollama_text_pull_tag" {
                   type    = string

@@ -246,7 +246,7 @@ write_files:
           volumes:
             - ollama-vision-models:/root/.ollama
           networks: [cloud]
-          mem_limit: 5g
+          mem_limit: 6g
           healthcheck:
             test: ["CMD", "/bin/ollama", "list"]
             interval: 15s
@@ -280,7 +280,7 @@ write_files:
           entrypoint: ["/bin/sh", "/opt/puller/run.sh"]
           environment:
             OLLAMA_HOST: "127.0.0.1:11434"
-            OLLAMA_PULL_TAG: $${OLLAMA_VISION_PULL_TAG:-qwen3-vl:2b}
+            OLLAMA_PULL_TAG: $${OLLAMA_VISION_PULL_TAG:-qwen3-vl:4b}
           volumes:
             - ollama-vision-models:/root/.ollama
             - /opt/thany-cloud/puller:/opt/puller:ro

@@ -64,7 +64,7 @@ services:
     volumes:
       - ollama-vision-models:/root/.ollama
     networks: [cloud]
-    mem_limit: 5g
+    mem_limit: 6g
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:11434/api/version | grep -q version || exit 1"]
       interval: 15s
@@ -106,7 +106,7 @@ services:
       wait $$SERVE_PID || true
     environment:
       OLLAMA_HOST: "127.0.0.1:11434"
-      OLLAMA_VISION_PULL_TAG: ${OLLAMA_VISION_PULL_TAG:-qwen3-vl:2b}
+      OLLAMA_VISION_PULL_TAG: ${OLLAMA_VISION_PULL_TAG:-qwen3-vl:4b}
     volumes:
       - ollama-vision-models:/root/.ollama
     networks: [cloud]

@@ -30,10 +30,12 @@ public sealed class OllamaSynthesisLlmClient : ISynthesisLlmClient
             think = false,
             options = new
             {
-                temperature  = req.Temperature,
-                seed         = req.Seed,
-                num_ctx      = 8192,
-                num_predict  = req.MaxOutputTokens,
+                temperature   = req.Temperature,
+                seed          = req.Seed,
+                num_ctx       = 8192,
+                num_predict   = req.MaxOutputTokens,
+                repeat_penalty = 1.25,
+                repeat_last_n = 256,
             },
         };
 

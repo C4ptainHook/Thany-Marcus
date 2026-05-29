@@ -48,7 +48,7 @@ public sealed partial class OllamaVlmClient : IVlmClient
         var maxDim = config.GetValue("IngestSaga:Filters:Image:MaxDimension", 16384);
         var enableBlur = config.GetValue("IngestSaga:Filters:Image:EnableBlurCheck", false);
         var blurThreshold = config.GetValue("IngestSaga:Filters:Image:LaplacianVarianceThreshold", 50.0);
-        var modelTag = config["IngestSaga:Models:Vlm:OllamaTag"] ?? "qwen3-vl:2b";
+        var modelTag = config["IngestSaga:Models:Vlm:OllamaTag"] ?? "qwen3-vl:4b";
         var numCtx = config.GetValue("IngestSaga:Models:Vlm:NumCtx", 4096);
         var temperature = config.GetValue("IngestSaga:Models:Vlm:Temperature", 0.2);
         var presignTtl = TimeSpan.FromMinutes(5);
@@ -144,9 +144,7 @@ public sealed partial class OllamaVlmClient : IVlmClient
         }
         if (outer is null || string.IsNullOrWhiteSpace(outer.Response))
         {
-            throw new OllamaJsonParseException(
-                System.Text.Encoding.UTF8.GetString(responseBytes),
-                "Ollama response payload missing 'response' field");
+            return Skipped("vision_empty_response", srcWidth, srcHeight, exif, phashHex, blurScore);
         }
 
         VlmOutput? parsed;
@@ -161,8 +159,7 @@ public sealed partial class OllamaVlmClient : IVlmClient
         }
         if (parsed is null || string.IsNullOrWhiteSpace(parsed.Description))
         {
-            throw new OllamaJsonParseException(outer.Response,
-                "Model output missing required 'description' field");
+            return Skipped("vision_missing_description", srcWidth, srcHeight, exif, phashHex, blurScore);
         }
 
         var extractedText = $"Description:\n{parsed.Description.Trim()}";

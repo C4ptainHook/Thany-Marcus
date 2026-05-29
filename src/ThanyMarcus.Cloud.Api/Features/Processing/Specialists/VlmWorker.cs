@@ -27,7 +27,7 @@ public sealed class VlmWorker : SpecialistWorkerBase<IVlmClient>
     protected override async Task<SpecialistExtractionOutcome> ExtractAsync(
         IServiceProvider scopeServices, IVlmClient client, ExtractionTask task, Attachment att, CancellationToken ct)
     {
-        var modelTag = config["IngestSaga:Models:Vlm:OllamaTag"] ?? "qwen3-vl:2b";
+        var modelTag = config["IngestSaga:Models:Vlm:OllamaTag"] ?? "qwen3-vl:4b";
         var cacheKey = ExtractionCacheKeys.ForOllama(modelTag);
 
         var cache = scopeServices.GetRequiredService<AttachmentExtractionCache>();
