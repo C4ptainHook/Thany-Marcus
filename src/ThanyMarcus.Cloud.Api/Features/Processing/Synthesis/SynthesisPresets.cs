@@ -4,16 +4,16 @@ namespace ThanyMarcus.Cloud.Api.Features.Processing.Synthesis;
 
 public static class SynthesisPresetBodies
 {
-    public const string ZettelkastenVersion = "preset-zettelkasten-v1";
-    public const string JournalVersion      = "preset-journal-v1";
-    public const string EncyclopedicVersion = "preset-encyclopedic-v1";
-    public const string TechnicalVersion    = "preset-technical-v1";
+    public const string ZettelkastenVersion = "preset-zettelkasten-v2";
+    public const string JournalVersion      = "preset-journal-v2";
+    public const string EncyclopedicVersion = "preset-encyclopedic-v2";
+    public const string TechnicalVersion    = "preset-technical-v2";
 
     private const string CommonGuardrails =
         "Hard rules:\n" +
         "- Do not invent facts, quotes, dates, names, numbers, or causal claims that are not present in the inputs.\n" +
         "- Integrate facts from EVERY input (user notes, voice transcript, image caption, URL extract, file extract). Do not focus on only one input and ignore the others. Specific names, URLs, dates, numbers, and labels from any input must appear in the body when relevant.\n" +
-        "- To reference a known entity, surround its name with double square brackets, e.g. `[[Slack]]` or `[[Customer Success]]`. The word \"Wikilink\" is NOT part of the syntax — never write `[[Wikilink:...]]` or `[[Wikilink]]`. Only names from the canonical entity list above may appear inside `[[ ]]`.\n" +
+        "- Wrap the core ideas, names, projects, people, and places of the note in `[[ ]]` — e.g. `[[Slack]]` or `[[Customer Success]]`. Use your judgment over what's central to the note; no list is provided. The word \"Wikilink\" is NOT part of the syntax — never write `[[Wikilink:...]]` or `[[Wikilink]]`.\n" +
         "- If an input failed (marked <input failed .../>), acknowledge it by presence (\"the attached image\") without inventing content.\n" +
         "- Output only the synthesized note body in Markdown — no frontmatter, no '## Sources' section. The server appends provenance separately.\n" +
         "- The first line MUST be a Markdown H1 heading that summarises the note: write `# ` followed by a concise 4–8 word descriptive title. Do not write the literal word \"Title\" — emit the actual summary text after the `#`.\n" +
@@ -22,24 +22,24 @@ public static class SynthesisPresetBodies
     private const string Zettelkasten =
         "You are writing a Zettelkasten-style atomic note in the user's voice.\n" +
         "Tone: first-person, present-tense, connecting. Short paragraphs. Each note states one idea\n" +
-        "and links it to other ideas via [[wikilinks]] drawn from the entity list.\n" +
+        "and links it to others via [[wikilinks]] for core concepts, names, and projects — your judgment.\n" +
         "Aim for 4–10 sentences. Avoid encyclopedic framing; this is the user's working memory.\n";
 
     private const string Journal =
         "You are writing a dated journal entry in the user's voice.\n" +
         "Tone: first-person, narrative, reflective. Open with the situation, then the user's observation,\n" +
-        "then implications. Use [[wikilinks]] from the entity list to reference people/projects/places.\n" +
+        "then implications. Use [[wikilinks]] for people, projects, and places the entry touches.\n" +
         "Aim for 6–14 sentences.\n";
 
     private const string Encyclopedic =
         "You are writing a neutral, third-person summary of the inputs.\n" +
         "Tone: encyclopedic, factual, dispassionate. State what is known; do not editorialize.\n" +
-        "Use [[wikilinks]] from the entity list when referencing entities. Aim for 4–10 sentences.\n";
+        "Use [[wikilinks]] for the named subjects and concepts under discussion. Aim for 4–10 sentences.\n";
 
     private const string Technical =
         "You are writing a terse, structured technical note.\n" +
         "Tone: precise, code-friendly. Prefer bullet points and short fenced blocks where useful.\n" +
-        "Use [[wikilinks]] from the entity list for named libraries, components, and concepts.\n";
+        "Use [[wikilinks]] for named libraries, components, and concepts.\n";
 
     public static string BodyFor(string preset) => preset switch
     {

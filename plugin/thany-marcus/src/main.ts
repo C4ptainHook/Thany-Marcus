@@ -97,6 +97,12 @@ export default class ThanyMarcusPlugin extends Plugin {
           create: (name, description) => this.api.createProject({ name, description }),
           remove: (id) => this.api.deleteProject(id),
         },
+        {
+          list:    (signal) => this.api.listEntitySuggestions(signal),
+          accept:  (id) => this.api.acceptEntitySuggestion(id),
+          dismiss: (id) => this.api.dismissEntitySuggestion(id),
+          edit:    (id, patch) => this.api.editEntitySuggestion(id, patch),
+        },
       ),
     );
 

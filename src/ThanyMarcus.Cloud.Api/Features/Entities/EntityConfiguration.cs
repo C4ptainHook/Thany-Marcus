@@ -25,9 +25,9 @@ public sealed class EntityConfiguration : IEntityTypeConfiguration<Entity>
         builder.Property(e => e.Description);
         builder.Property(e => e.Embedding).HasColumnType("vector(256)");
         builder.Property(e => e.HubNoteId);
+        builder.Property(e => e.StubNoteId);
         builder.Property(e => e.MentionCount).IsRequired().HasDefaultValue(0);
         builder.Property(e => e.Source).IsRequired();
-        builder.Property(e => e.IsProvisional).IsRequired().HasDefaultValue(false);
         builder.Property(e => e.VaultFolder);
         builder.Property(e => e.DeletedAt);
         builder.Property(e => e.CreatedAt).IsRequired();
@@ -45,5 +45,13 @@ public sealed class EntityConfiguration : IEntityTypeConfiguration<Entity>
             .HasDatabaseName("ix_entities_embedding")
             .HasMethod("hnsw")
             .HasOperators("vector_cosine_ops");
+
+        builder.HasIndex(e => e.StubNoteId)
+            .IsUnique()
+            .HasDatabaseName("ix_entities_stub_note")
+            .HasFilter("stub_note_id IS NOT NULL");
+
+        builder.HasOne<Ingest.Note>().WithMany().HasForeignKey(e => e.StubNoteId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

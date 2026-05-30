@@ -72,18 +72,18 @@ public static class SourcesRenderer
     {
         var sb = new StringBuilder();
         var filename = NormaliseFilename(att);
-        sb.Append(CultureInfo.InvariantCulture, $"![[{filename}]]\n");
+        sb.Append(CultureInfo.InvariantCulture, $"> [!source]- Image — ![[{filename}]]\n");
         if (att.ExtractionStatus == AttachmentExtractionStatus.Failed)
         {
-            sb.Append(CultureInfo.InvariantCulture, $"*vision extraction failed: {SanitizeOneLine(att.ExtractionError ?? "unknown")}*\n");
+            sb.Append(CultureInfo.InvariantCulture, $"> *vision extraction failed: {SanitizeOneLine(att.ExtractionError ?? "unknown")}*\n");
         }
         else if (!string.IsNullOrWhiteSpace(att.ExtractedText))
         {
-            sb.Append(CultureInfo.InvariantCulture, $"*{SanitizeOneLine(att.ExtractedText!)}*\n");
+            AppendCalloutBody(sb, att.ExtractedText!);
         }
         else
         {
-            sb.AppendLine("*no caption*");
+            sb.AppendLine("> *no caption*");
         }
         return sb.ToString();
     }

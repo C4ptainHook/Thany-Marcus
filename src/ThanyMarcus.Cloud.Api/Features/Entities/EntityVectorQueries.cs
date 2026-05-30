@@ -61,4 +61,54 @@ public static class EntityVectorQueries
             if (opened) await conn.CloseAsync();
         }
     }
+
+    // kNN match against curated entities returning cosine distance so the caller can gate on it.
+    public static async Task<List<EntityDistance>> NearestWithDistanceAsync(
+        CloudDbContext db,
+        string kind,
+        float[] candidate,
+        int k,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(kind);
+        ArgumentNullException.ThrowIfNull(candidate);
+
+        var conn = (NpgsqlConnection)db.Database.GetDbConnection();
+        var opened = false;
+        if (conn.State != ConnectionState.Open)
+        {
+            await conn.OpenAsync(ct);
+            opened = true;
+        }
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT id, embedding <=> @emb::vector AS distance
+                  FROM entities
+                 WHERE deleted_at IS NULL
+                   AND kind = @kind
+                   AND embedding IS NOT NULL
+                 ORDER BY embedding <=> @emb::vector
+                 LIMIT @k
+                """;
+            cmd.Parameters.AddWithValue("kind", kind);
+            cmd.Parameters.AddWithValue("emb", new Vector(candidate));
+            cmd.Parameters.AddWithValue("k", k);
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+            var list = new List<EntityDistance>(k);
+            while (await rdr.ReadAsync(ct))
+            {
+                list.Add(new EntityDistance(rdr.GetGuid(0), rdr.GetDouble(1)));
+            }
+            return list;
+        }
+        finally
+        {
+            if (opened) await conn.CloseAsync();
+        }
+    }
 }
+
+public readonly record struct EntityDistance(Guid Id, double Distance);

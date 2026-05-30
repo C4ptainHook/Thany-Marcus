@@ -5,8 +5,24 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Llm.Prompts;
 public static class PromptTemplates
 {
     public const string RouteV1 = """
-        You are a note-routing assistant. Given a note's content and a list of
-        projects, decide which project this note most belongs to (if any).
+        You are a note-routing assistant. Given a note and a list of the user's
+        projects, decide if the note clearly belongs to ONE of them.
+
+        Default to null. Only return a project_entity_id when the note's content
+        directly references that project's subject matter — its name, members,
+        artifacts, or topics. Tonal or vibe matches are not enough.
+
+        Examples of WRONG routing (return null instead):
+        - Personal note about a movie / book / hobby → null (even if a project name
+          slightly rhymes or shares a theme).
+        - Generic productivity musing → null.
+        - Note about one project where another project has a tangentially-similar
+          word in its name → null.
+
+        Examples of CORRECT routing:
+        - Note explicitly names the project, its lead, or its codebase.
+        - Note continues a thread from a prior note routed to that project (you
+          cannot verify this; rely on direct content overlap).
 
         PROJECTS:
         {0}
@@ -14,11 +30,10 @@ public static class PromptTemplates
         NOTE CONTENT:
         {1}
 
-        Decide which project, if any, this note belongs to. If no project is a
-        clear match, return null for project_entity_id.
-
         Respond with JSON ONLY in this exact shape:
-        {{"project_entity_id": "<uuid or null>", "confidence": <0.0-1.0>, "rationale": "<one-sentence reasoning>"}}
+        {{"project_entity_id": "<uuid or null>", "confidence": <0.0-1.0>, "rationale": "<one-sentence reasoning citing the specific overlap, or 'no clear project match' for null>"}}
+
+        Confidence ≥ 0.7 means you cite a specific overlap. Below 0.7, return null.
         /no_think
         """;
 

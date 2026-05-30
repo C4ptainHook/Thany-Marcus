@@ -5,7 +5,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
-using ThanyMarcus.Cloud.Api.Features.Entities;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.Processing.Composing;
 using ThanyMarcus.Cloud.Api.Features.Processing.Synthesis;
@@ -75,10 +74,8 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
         var topLevel = attachments.Where(a => a.ParentAttachmentId is null).OrderBy(a => a.CreatedAt).ToList();
         var inputs = BuildInputs(topLevel);
 
-        var entityNames = await LoadCanonicalEntityNamesAsync(note.Id, ct);
         var rawHash = ComputeRawExtractionsHash(note, topLevel);
-        var mentionsHash = ComputeMentionsHash(entityNames);
-        var cacheKey = ComputeCacheKey(rawHash, mentionsHash, modelTag, promptVersion, privacyMode, preset);
+        var cacheKey = ComputeCacheKey(rawHash, modelTag, promptVersion, privacyMode, preset);
 
         var now = clock.GetCurrentInstant();
         var seed = DefaultSeed;
@@ -109,7 +106,6 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
 
         var prompt = SynthesisPromptBuilder.Build(
             systemBody: systemBody,
-            entityCanonicalNames: entityNames,
             userBody: note.BodyInput,
             attachmentInputs: inputs);
 
@@ -204,30 +200,6 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
             setFinishedAt: false,
             ct);
 
-    private async Task<IReadOnlyList<string>> LoadCanonicalEntityNamesAsync(Guid noteId, CancellationToken ct)
-    {
-        var entityIds = await db.Mentions
-            .Where(m => m.NoteId == noteId)
-            .Select(m => m.EntityId)
-            .Distinct()
-            .ToListAsync(ct);
-        if (entityIds.Count == 0)
-        {
-            // Fall back to top projects to give the model some safe link targets.
-            return await db.Entities
-                .Where(e => e.Kind == EntityKind.Project && e.DeletedAt == null)
-                .OrderByDescending(e => e.UpdatedAt)
-                .Take(20)
-                .Select(e => e.CanonicalName)
-                .ToListAsync(ct);
-        }
-        return await db.Entities
-            .Where(e => entityIds.Contains(e.Id) && e.DeletedAt == null)
-            .OrderBy(e => e.CanonicalName)
-            .Select(e => e.CanonicalName)
-            .ToListAsync(ct);
-    }
-
     private static List<SynthesisInput> BuildInputs(List<Attachment> attachments)
     {
         var list = new List<SynthesisInput>(attachments.Count);
@@ -270,19 +242,13 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
         return Sha256(sb.ToString());
     }
 
-    internal static string ComputeMentionsHash(IReadOnlyList<string> entityNames)
-    {
-        var sorted = entityNames.Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal);
-        return Sha256(string.Join("\n", sorted));
-    }
-
     internal static string ComputeCacheKey(
-        string rawHash, string mentionsHash, string modelTag, string promptVersion, string privacyMode, string preset)
+        string rawHash, string modelTag, string promptVersion, string privacyMode, string preset)
     {
         var s = string.Format(
             CultureInfo.InvariantCulture,
-            "{0}|{1}|{2}|{3}|{4}|{5}",
-            rawHash, mentionsHash, modelTag, promptVersion, privacyMode, preset);
+            "{0}|{1}|{2}|{3}|{4}",
+            rawHash, modelTag, promptVersion, privacyMode, preset);
         return Sha256(s);
     }
 
@@ -293,8 +259,7 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
         {
             return existing ?? $"Inbox/{noteId}.md";
         }
-        var idSuffix = noteId.ToString("N").Substring(0, 8);
-        var filename = $"{slug}-{idSuffix}.md";
+        var filename = $"{slug}.md";
         if (string.IsNullOrEmpty(existing))
         {
             return $"Inbox/{filename}";

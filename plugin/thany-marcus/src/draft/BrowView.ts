@@ -46,7 +46,7 @@ export class BrowView {
 
     const relatedRoot = document.createElement("div");
     relatedRoot.addClass("tm-related");
-    contentEl.appendChild(relatedRoot);
+    root.insertAdjacentElement("afterend", relatedRoot);
     this.relatedContainer = relatedRoot;
     this.relatedPanel = new RelatedNotesPanel(this.related, relatedRoot, {
       onItemClick: (item) => {

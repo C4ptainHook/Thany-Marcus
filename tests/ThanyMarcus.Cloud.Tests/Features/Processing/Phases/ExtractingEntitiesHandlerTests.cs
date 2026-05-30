@@ -4,11 +4,13 @@ using NodaTime;
 using Pgvector;
 using Shouldly;
 using ThanyMarcus.Cloud.Api.Features.Entities;
+using ThanyMarcus.Cloud.Api.Features.EntitySuggestions;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.Processing;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm.Prompts;
 using ThanyMarcus.Cloud.Tests.Infrastructure;
+using ThanyMarcus.Cloud.Tests.Infrastructure.Embedding;
 
 namespace ThanyMarcus.Cloud.Tests.Features.Processing.Phases;
 
@@ -18,7 +20,7 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
     private static readonly string[] EmptyAliases = Array.Empty<string>();
 
     [Fact]
-    public async Task Extract_then_new_entity_dedup_inserts_entity_and_mention()
+    public async Task Unknown_candidate_creates_a_suggestion_not_an_entity()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
@@ -33,8 +35,6 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
                 new MentionCandidateDto("John Smith", 0, 10, EntityKind.Person, "John Smith",
                     EmptyAliases, 0.95),
             }),
-            DedupResponse = () => new DedupDecisionDto(
-                DedupDecisions.NewEntity, null, Array.Empty<Guid>(), 0.9, "not present"),
         };
         var factory = new ConfigurableLlmClientFactory(llm);
 
@@ -46,18 +46,20 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
         var after = await probe.IngestJobs.SingleAsync(j => j.Id == jobId, ct);
         after.Status.ShouldBe(IngestJobStatus.Routing);
 
-        var entities = await probe.Entities.ToListAsync(ct);
-        entities.Count.ShouldBe(1);
-        entities[0].CanonicalName.ShouldBe("John Smith");
-        entities[0].Source.ShouldBe(EntitySource.Llm);
-        entities[0].IsProvisional.ShouldBeTrue();
-        entities[0].MentionCount.ShouldBe(1);
+        // No auto-created entity, no mention — the candidate accumulates as a suggestion instead.
+        (await probe.Entities.CountAsync(ct)).ShouldBe(0);
+        (await probe.Mentions.CountAsync(m => m.NoteId == noteId, ct)).ShouldBe(0);
 
-        var mentions = await probe.Mentions.Where(m => m.NoteId == noteId).ToListAsync(ct);
-        mentions.Count.ShouldBe(1);
-        mentions[0].EntityId.ShouldBe(entities[0].Id);
-        mentions[0].StartOffset.ShouldBe(0);
-        mentions[0].EndOffset.ShouldBe(10);
+        var suggestions = await probe.EntitySuggestions.ToListAsync(ct);
+        suggestions.Count.ShouldBe(1);
+        suggestions[0].CanonicalText.ShouldBe("John Smith");
+        suggestions[0].Kind.ShouldBe(EntityKind.Person);
+        suggestions[0].OccurrenceCount.ShouldBe(1);
+        suggestions[0].DistinctNoteCount.ShouldBe(1);
+        suggestions[0].AcceptedAt.ShouldBeNull();
+        suggestions[0].DismissedAt.ShouldBeNull();
+
+        llm.Calls.ShouldNotContain(c => c.Name == "dedup");
     }
 
     [Fact]
@@ -86,11 +88,12 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         (await probe.Entities.CountAsync(ct)).ShouldBe(0);
         (await probe.Mentions.CountAsync(m => m.NoteId == noteId, ct)).ShouldBe(0);
+        (await probe.EntitySuggestions.CountAsync(ct)).ShouldBe(0);
         llm.Calls.ShouldNotContain(c => c.Name == "dedup");
     }
 
     [Fact]
-    public async Task Mention_count_crossing_threshold_spawns_hub_note_and_regen_job()
+    public async Task KnnMatch_against_curated_entity_creates_mention_and_spawns_hub()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
@@ -108,8 +111,6 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
                 new MentionCandidateDto("Acme Corp", 0, 9, EntityKind.Organization, "Acme Corp",
                     EmptyAliases, 0.95),
             }),
-            DedupResponse = () => new DedupDecisionDto(
-                DedupDecisions.AliasOf, existingEntityId, new[] { existingEntityId }, 0.9, "same"),
         };
         var factory = new ConfigurableLlmClientFactory(llm);
 
@@ -122,10 +123,16 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
         entity.MentionCount.ShouldBe(3);
         entity.HubNoteId.ShouldNotBeNull();
 
+        var mentions = await probe.Mentions.Where(m => m.NoteId == noteId).ToListAsync(ct);
+        mentions.Count.ShouldBe(1);
+        mentions[0].EntityId.ShouldBe(existingEntityId);
+
+        // A confident kNN match never falls through to a suggestion.
+        (await probe.EntitySuggestions.CountAsync(ct)).ShouldBe(0);
+
         var hubNote = await probe.Notes.SingleAsync(n => n.Id == entity.HubNoteId!.Value, ct);
         hubNote.IsHub.ShouldBeTrue();
         hubNote.HubEntityId.ShouldBe(existingEntityId);
-        hubNote.RelativePath.ShouldStartWith("_Entities/");
 
         var hubJob = await probe.IngestJobs.SingleAsync(j => j.NoteId == hubNote.Id, ct);
         hubJob.Kind.ShouldBe(IngestJobKind.HubRegen);
@@ -133,7 +140,7 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task Deleted_note_breaks_loop_without_inserting_mentions()
+    public async Task Deleted_note_breaks_loop_without_inserting_anything()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
@@ -151,6 +158,7 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
 
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         (await probe.Mentions.CountAsync(m => m.NoteId == noteId, ct)).ShouldBe(0);
+        (await probe.EntitySuggestions.CountAsync(ct)).ShouldBe(0);
         llm.Calls.ShouldBeEmpty();
     }
 
@@ -176,10 +184,10 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
             Id            = id,
             Kind          = EntityKind.Organization,
             CanonicalName = canonical,
-            Source        = EntitySource.Llm,
-            IsProvisional = true,
+            Source        = EntitySource.User,
             MentionCount  = mentionCount,
-            Embedding     = new Vector(new float[256]),
+            // Embed the canonical with the same fake embedder the host uses so the kNN distance is 0.
+            Embedding     = new Vector(FakeEmbeddingClient.DeterministicUnitVector(canonical)),
             CreatedAt     = now,
             UpdatedAt     = now,
         });

@@ -146,6 +146,37 @@ export interface RelatedNotesRequest {
   k?: number;
 }
 
+export interface EntitySuggestionOccurrence {
+  noteId: string;
+  anchorText: string;
+  surroundingText: string;
+}
+
+export interface EntitySuggestion {
+  id: string;
+  canonicalText: string;
+  kind: string;
+  aliases: string[];
+  occurrenceCount: number;
+  distinctNoteCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  sampleOccurrence?: EntitySuggestionOccurrence | null;
+}
+
+interface ListEntitySuggestionsResponse {
+  suggestions: EntitySuggestion[];
+}
+
+export interface EditEntitySuggestionRequest {
+  canonicalText?: string;
+  aliases?: string[];
+}
+
+export type AcceptEntitySuggestionResult =
+  | { ok: true; entityId: string }
+  | { ok: false; conflict: "path" | "rename"; existingKind: string };
+
 export class RelatedNotesAbortedError extends Error {
   constructor() {
     super("related notes request aborted");
@@ -345,6 +376,89 @@ export class ApiClient {
     }
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`reprocess failed: HTTP ${res.status}`);
+    }
+  }
+
+  async listEntitySuggestions(signal?: AbortSignal): Promise<EntitySuggestion[]> {
+    let res: Response;
+    try {
+      res = await fetch(`${this.base()}/api/entity-suggestions`, {
+        method: "GET",
+        headers: this.authHeader(),
+        signal,
+      });
+    } catch (e) {
+      if ((e as { name?: string }).name === "AbortError") return [];
+      throw e;
+    }
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`GET /api/entity-suggestions → HTTP ${res.status}`);
+    }
+    const data = (await res.json()) as ListEntitySuggestionsResponse;
+    return data.suggestions ?? [];
+  }
+
+  async acceptEntitySuggestion(id: string): Promise<AcceptEntitySuggestionResult> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/entity-suggestions/${id}/accept`,
+      method: "POST",
+      headers: this.authHeader(),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status >= 200 && res.status < 300) {
+      const body = res.json as { entityId: string };
+      return { ok: true, entityId: body.entityId };
+    }
+    if (res.status === 409) {
+      const body = res.json as { conflict?: "path" | "rename"; existingKind?: string } | undefined;
+      return {
+        ok: false,
+        conflict: body?.conflict ?? "path",
+        existingKind: body?.existingKind ?? "",
+      };
+    }
+    throw new Error(`accept entity-suggestion ${id} → HTTP ${res.status}`);
+  }
+
+  async dismissEntitySuggestion(id: string): Promise<void> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/entity-suggestions/${id}/dismiss`,
+      method: "POST",
+      headers: this.authHeader(),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`dismiss entity-suggestion ${id} → HTTP ${res.status}`);
+    }
+  }
+
+  async editEntitySuggestion(id: string, patch: EditEntitySuggestionRequest): Promise<void> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/entity-suggestions/${id}/edit`,
+      method: "POST",
+      headers: this.authHeader(),
+      contentType: "application/json",
+      body: JSON.stringify(patch),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`edit entity-suggestion ${id} → HTTP ${res.status}`);
     }
   }
 

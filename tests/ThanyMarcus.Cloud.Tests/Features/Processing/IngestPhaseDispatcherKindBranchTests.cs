@@ -114,7 +114,6 @@ public sealed class IngestPhaseDispatcherKindBranchTests(PostgresFixture postgre
             Kind          = EntityKind.Person,
             CanonicalName = "X",
             Source        = EntitySource.Llm,
-            IsProvisional = true,
             MentionCount  = 3,
             CreatedAt     = now,
             UpdatedAt     = now,
