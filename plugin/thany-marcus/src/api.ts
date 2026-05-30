@@ -128,6 +128,31 @@ export interface CreateProjectRequest {
   description?: string;
 }
 
+export interface RelatedNotesItem {
+  id: string;
+  relativePath: string;
+  title: string;
+  snippet: string;
+  distance: number;
+}
+
+interface RelatedNotesResponse {
+  items: RelatedNotesItem[];
+}
+
+export interface RelatedNotesRequest {
+  body?: string;
+  noteId?: string;
+  k?: number;
+}
+
+export class RelatedNotesAbortedError extends Error {
+  constructor() {
+    super("related notes request aborted");
+    this.name = "RelatedNotesAbortedError";
+  }
+}
+
 export class TokenRevokedError extends Error {
   constructor() {
     super("Plugin token revoked or invalid");
@@ -244,6 +269,67 @@ export class ApiClient {
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`DELETE /api/projects/${id} → HTTP ${res.status}`);
     }
+  }
+
+  async cancelIngest(noteId: string): Promise<{ ok: true } | { ok: false; conflict: true; reason: string }> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/ingest/${noteId}/cancel`,
+      method: "POST",
+      headers: this.authHeader(),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status === 204) return { ok: true };
+    if (res.status === 409) {
+      let reason = "already terminal";
+      try {
+        const body = res.json as { detail?: string; title?: string } | undefined;
+        reason = body?.detail ?? body?.title ?? reason;
+      } catch { /* ignore */ }
+      return { ok: false, conflict: true, reason };
+    }
+    if (res.status === 404) {
+      return { ok: false, conflict: true, reason: "note not found" };
+    }
+    throw new Error(`cancelIngest failed: HTTP ${res.status}`);
+  }
+
+  async relatedNotes(
+    req: RelatedNotesRequest,
+    signal?: AbortSignal,
+  ): Promise<RelatedNotesItem[]> {
+    let res: Response;
+    try {
+      res = await fetch(`${this.base()}/api/notes/related`, {
+        method: "POST",
+        headers: {
+          ...this.authHeader(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(req),
+        signal,
+      });
+    } catch (e) {
+      if ((e as { name?: string }).name === "AbortError") {
+        throw new RelatedNotesAbortedError();
+      }
+      throw e;
+    }
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status === 400 || res.status === 404) {
+      return [];
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`POST /api/notes/related → HTTP ${res.status}`);
+    }
+    const data = (await res.json()) as RelatedNotesResponse;
+    return data.items ?? [];
   }
 
   async reprocess(noteId: string): Promise<void> {

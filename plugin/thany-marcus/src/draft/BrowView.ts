@@ -1,10 +1,14 @@
-import { Notice, type MarkdownView, type TFile } from "obsidian";
+import { Notice, type MarkdownView, type TFile, type Workspace } from "obsidian";
 import type { DraftManager, DraftState } from "./DraftManager";
 import { MicRecorder } from "./MicRecorder";
 import { PasteInterceptor } from "./PasteInterceptor";
 import { Submitter } from "./Submitter";
 import { findUrls } from "./UrlPromoter";
 import { sha256Hex } from "../sync/AttachmentDownloader";
+import {
+  RelatedNotesPanel,
+  type RelatedNotesFetcher,
+} from "../related/RelatedNotesPanel";
 
 export interface BrowHandlers {
   onSubmitted: (noteId: string, draftLeafFile: TFile) => void;
@@ -13,6 +17,9 @@ export interface BrowHandlers {
 
 export class BrowView {
   private container: HTMLElement | null = null;
+  private relatedContainer: HTMLElement | null = null;
+  private relatedPanel: RelatedNotesPanel | null = null;
+  private editorChangeUnsub: (() => void) | null = null;
   private interceptor: PasteInterceptor;
   private recorder = new MicRecorder();
   private recordingTimer: number | null = null;
@@ -23,6 +30,8 @@ export class BrowView {
     private readonly submitter: Submitter,
     private readonly recordMimeType: () => string,
     private readonly handlers: BrowHandlers,
+    private readonly workspace: Workspace,
+    private readonly related: RelatedNotesFetcher,
   ) {
     this.interceptor = new PasteInterceptor(drafts, () => this.render());
   }
@@ -34,6 +43,24 @@ export class BrowView {
     root.addClass("tm-brow");
     contentEl.prepend(root);
     this.container = root;
+
+    const relatedRoot = document.createElement("div");
+    relatedRoot.addClass("tm-related");
+    contentEl.appendChild(relatedRoot);
+    this.relatedContainer = relatedRoot;
+    this.relatedPanel = new RelatedNotesPanel(this.related, relatedRoot, {
+      onItemClick: (item) => {
+        void this.workspace.openLinkText(item.relativePath, "", false);
+      },
+    });
+
+    const handler = () => {
+      const body = view.editor?.getValue() ?? "";
+      this.relatedPanel?.onBodyChange(body);
+    };
+    const evt = this.workspace.on("editor-change", handler);
+    this.editorChangeUnsub = () => this.workspace.offref(evt);
+    handler();
 
     const editorRoot = contentEl;
     this.interceptor.attach(editorRoot, state);
@@ -50,6 +77,14 @@ export class BrowView {
       window.clearInterval(this.recordingTimer);
       this.recordingTimer = null;
     }
+    if (this.editorChangeUnsub) {
+      this.editorChangeUnsub();
+      this.editorChangeUnsub = null;
+    }
+    this.relatedPanel?.dispose();
+    this.relatedPanel = null;
+    this.relatedContainer?.remove();
+    this.relatedContainer = null;
     this.container?.remove();
     this.container = null;
     this.state = null;

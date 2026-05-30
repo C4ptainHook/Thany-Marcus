@@ -367,3 +367,41 @@
 .tm-projects__delete:hover {
   color: var(--text-error);
 }
+
+.tm-related {
+  margin: 1em 1em 2em 1em;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 0.5em;
+}
+.tm-related__header {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.4em;
+}
+.tm-related__empty,
+.tm-related__error {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.tm-related__row {
+  padding: 0.4em 0.5em;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.tm-related__row:hover {
+  background: var(--background-modifier-hover);
+}
+.tm-related__title {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+.tm-related__snippet {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

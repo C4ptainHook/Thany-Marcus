@@ -53,6 +53,13 @@ public sealed class PostgresIngestEventBus : IIngestEventBus
             error = errorMessage,
         }, ct);
 
+    public Task PublishNoteCancelledAsync(Guid noteId, CancellationToken ct) =>
+        NotifyAsync(new
+        {
+            kind = IngestEventKinds.NoteCancelled,
+            noteId,
+        }, ct);
+
     public Task PublishHubMaterializedAsync(Guid noteId, Guid entityId, CancellationToken ct) =>
         NotifyAsync(new
         {

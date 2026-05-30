@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NodaTime;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -14,9 +15,11 @@ using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
 {
     [DbContext(typeof(CloudDbContext))]
-    partial class CloudDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260529212436_AddIngestJobsCancelledStatus")]
+    partial class AddIngestJobsCancelledStatus
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -416,8 +419,7 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasFilter("client_note_id IS NOT NULL");
 
                     b.HasIndex("Embedding")
-                        .HasDatabaseName("ix_notes_embedding")
-                        .HasFilter("deleted_at IS NULL");
+                        .HasDatabaseName("ix_notes_embedding");
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Embedding"), "hnsw");
                     NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Embedding"), new[] { "vector_cosine_ops" });

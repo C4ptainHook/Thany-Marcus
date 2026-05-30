@@ -18,6 +18,8 @@ export function phaseLabel(status: string | null | undefined): string {
     case "succeeded":
     case "ready":
       return "Ready";
+    case "cancelled":
+      return "Cancelled";
     default:
       if (s.startsWith("failed")) return "Failed";
       return status;
@@ -27,7 +29,16 @@ export function phaseLabel(status: string | null | undefined): string {
 export function isTerminal(status: string | null | undefined): boolean {
   if (!status) return false;
   const s = status.toLowerCase();
-  return s === "succeeded" || s === "ready" || s.startsWith("failed");
+  return s === "succeeded" || s === "ready" || s === "cancelled" || s.startsWith("failed");
+}
+
+export function isCancellable(status: string | null | undefined): boolean {
+  if (!status) return true;
+  const s = status.toLowerCase();
+  if (s === "succeeded" || s === "ready" || s === "cancelled") return false;
+  if (s.startsWith("failed")) return false;
+  if (s === "dead_lettered") return false;
+  return true;
 }
 
 export function isFailure(status: string | null | undefined): boolean {

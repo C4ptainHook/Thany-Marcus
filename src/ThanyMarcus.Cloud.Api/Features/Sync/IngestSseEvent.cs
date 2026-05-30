@@ -14,6 +14,9 @@ public abstract record IngestSseEvent(string Kind)
     public sealed record NoteFailed(Guid NoteId, string Error)
         : IngestSseEvent("note_failed");
 
+    public sealed record NoteCancelled(Guid NoteId)
+        : IngestSseEvent("note_cancelled");
+
     public sealed record HubMaterialized(Guid NoteId, Guid EntityId)
         : IngestSseEvent("hub_materialized");
 }

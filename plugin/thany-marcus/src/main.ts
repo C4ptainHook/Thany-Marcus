@@ -7,7 +7,7 @@ import {
 } from "obsidian";
 import { ApiClient } from "./api";
 import { BrowView } from "./draft/BrowView";
-import { DraftManager } from "./draft/DraftManager";
+import { DraftManager, type DraftState } from "./draft/DraftManager";
 import { Submitter } from "./draft/Submitter";
 import { QueueStore } from "./queue/QueueStore";
 import { QueueSidebarView, QUEUE_VIEW_TYPE } from "./queue/QueueSidebar";
@@ -44,6 +44,7 @@ export default class ThanyMarcusPlugin extends Plugin {
   private statusBarEl: HTMLElement | null = null;
   private rememberedDraftLeaves = new Map<string, WorkspaceLeaf>();
   private pendingNoteToLeaf = new Map<string, WorkspaceLeaf>();
+  private pendingDrafts = new Map<string, DraftState>();
 
   async onload(): Promise<void> {
     await this.loadState();
@@ -90,6 +91,7 @@ export default class ThanyMarcusPlugin extends Plugin {
         this.queueStore,
         (path) => void this.openVaultFile(path),
         (noteId) => void this.reprocess(noteId),
+        (noteId) => void this.cancelIngest(noteId),
         {
           list:   () => this.api.listProjects(),
           create: (name, description) => this.api.createProject({ name, description }),
@@ -215,6 +217,10 @@ export default class ThanyMarcusPlugin extends Plugin {
           this.brow = null;
         },
       },
+      this.app.workspace,
+      {
+        relatedNotes: (req, signal) => this.api.relatedNotes(req, signal),
+      },
     );
     this.brow.attach(view, state);
   }
@@ -251,7 +257,9 @@ export default class ThanyMarcusPlugin extends Plugin {
     const state = this.drafts.getByPath(draftFile.path);
     this.brow?.detach();
     this.brow = null;
-    if (state) await this.drafts.discard(state);
+    if (state) {
+      this.pendingDrafts.set(noteId, state);
+    }
 
     this.syncLoop.trigger();
   }
@@ -266,6 +274,8 @@ export default class ThanyMarcusPlugin extends Plugin {
     } else if (e.kind === "note_failed") {
       const err = String(e.data.error ?? e.data.Error ?? "failed");
       if (noteId) this.queueStore.markFailed(noteId, err);
+    } else if (e.kind === "note_cancelled") {
+      if (noteId) void this.onNoteCancelled(noteId);
     }
     this.syncLoop.trigger();
   }
@@ -276,9 +286,51 @@ export default class ThanyMarcusPlugin extends Plugin {
       this.pendingNoteToLeaf.delete(noteId);
       void this.openVaultFileInLeaf(vaultPath, leaf);
     }
+    const held = this.pendingDrafts.get(noteId);
+    if (held) {
+      this.pendingDrafts.delete(noteId);
+      void this.drafts.discard(held);
+    }
     this.queueStore.pruneCompleted(15 * 60 * 1000);
     if (this.queueStore.get(noteId) && isTerminal(this.queueStore.get(noteId)!.status)) {
       // noop — marker for future cleanup hooks
+    }
+  }
+
+  private async onNoteCancelled(noteId: string): Promise<void> {
+    this.pendingNoteToLeaf.delete(noteId);
+    const held = this.pendingDrafts.get(noteId);
+    this.pendingDrafts.delete(noteId);
+    this.queueStore.remove(noteId);
+    if (!held) {
+      return;
+    }
+    const file = this.app.vault.getAbstractFileByPath(held.filePath) as TFile | null;
+    if (!file) {
+      new Notice("Thany: ingest cancelled (draft file already gone)");
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    try {
+      await leaf.openFile(file);
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (view) await this.attachBrow(view);
+      new Notice("Thany: ingest cancelled, draft restored");
+    } catch {
+      new Notice("Thany: ingest cancelled");
+    }
+  }
+
+  private async cancelIngest(noteId: string): Promise<void> {
+    try {
+      const result = await this.api.cancelIngest(noteId);
+      if (result.ok) {
+        new Notice("Thany: cancel sent");
+      } else {
+        new Notice(`Thany: cancel rejected — ${result.reason}`);
+      }
+    } catch (e) {
+      new Notice(`Thany: cancel failed — ${(e as Error).message}`);
     }
   }
 

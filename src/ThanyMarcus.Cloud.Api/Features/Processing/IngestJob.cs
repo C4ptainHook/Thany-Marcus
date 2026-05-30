@@ -43,6 +43,7 @@ public static class IngestJobStatus
     public const string FailedSynthesis = "failed_synthesis";
     public const string FailedEmbedding = "failed_embedding";
     public const string DeadLettered = "dead_lettered";
+    public const string Cancelled = "cancelled";
 
     // Hub-regen flow uses Composing as its initial in-flight phase. Synthesis rework leaves this
     // for the hub pipeline only — user-ingest flow never enters Composing.
@@ -59,6 +60,7 @@ public static class IngestJobStatus
         FailedSynthesis,
         FailedEmbedding,
         DeadLettered,
+        Cancelled,
     };
 
     public static readonly IReadOnlySet<string> InFlightPhases = new HashSet<string>
