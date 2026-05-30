@@ -6,30 +6,14 @@ public static class SynthesisPromptBuilder
 {
     public static string Build(
         string systemBody,
-        IReadOnlyList<string> entityCanonicalNames,
         string? userBody,
         IReadOnlyList<SynthesisInput> attachmentInputs)
     {
         ArgumentNullException.ThrowIfNull(systemBody);
-        ArgumentNullException.ThrowIfNull(entityCanonicalNames);
         ArgumentNullException.ThrowIfNull(attachmentInputs);
 
         var sb = new StringBuilder();
         sb.AppendLine(systemBody.TrimEnd());
-        sb.AppendLine();
-
-        sb.AppendLine("Available entities (use ONLY these for [[wikilinks]]):");
-        if (entityCanonicalNames.Count == 0)
-        {
-            sb.AppendLine("- (none — do not use any [[wikilinks]] in the output)");
-        }
-        else
-        {
-            foreach (var name in entityCanonicalNames.Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal))
-            {
-                sb.Append("- ").AppendLine(name);
-            }
-        }
         sb.AppendLine();
 
         sb.AppendLine("Inputs:");

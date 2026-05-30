@@ -142,7 +142,6 @@ public sealed class HubGenerationHandlerTests(PostgresFixture postgres)
             Kind          = EntityKind.Person,
             CanonicalName = "John Smith",
             Source        = EntitySource.Llm,
-            IsProvisional = true,
             MentionCount  = 3,
             CreatedAt     = now,
             UpdatedAt     = now,

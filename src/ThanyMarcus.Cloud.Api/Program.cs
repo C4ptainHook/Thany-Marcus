@@ -13,6 +13,7 @@ using Scalar.AspNetCore;
 using ThanyMarcus.Cloud.Api.Features.Admin.Health;
 using ThanyMarcus.Cloud.Api.Features.Admin.PluginTokens;
 using ThanyMarcus.Cloud.Api.Features.Bootstrap;
+using ThanyMarcus.Cloud.Api.Features.EntitySuggestions;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
@@ -245,6 +246,9 @@ builder.Services.AddSingleton<IAttachmentRenderer, DocumentRenderer>();
 builder.Services.AddSingleton<FailedHiddenRenderer>();
 builder.Services.AddSingleton<CompositeNoteComposer>();
 
+builder.Services.AddScoped<EntitySuggestionAggregator>();
+builder.Services.AddScoped<EntityStubWriter>();
+builder.Services.AddScoped<EntitySuggestionRepository>();
 builder.Services.AddScoped<IPhaseHandler, ExtractingAttachmentsHandler>();
 builder.Services.AddScoped<IPhaseHandler, RoutingHandler>();
 builder.Services.AddScoped<IPhaseHandler, ExtractingEntitiesHandler>();
@@ -338,6 +342,7 @@ app.MapSyncPullEndpoint();
 app.MapSyncPushEndpoint();
 app.MapSyncEventsEndpoint();
 app.MapProjectsEndpoints();
+app.MapEntitySuggestionsEndpoints();
 app.MapAdminSettingsEndpoints();
 app.MapAdminPluginTokenEndpoints();
 

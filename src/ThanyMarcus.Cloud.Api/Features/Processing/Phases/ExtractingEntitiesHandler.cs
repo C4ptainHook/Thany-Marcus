@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NodaTime;
-using Pgvector;
 using ThanyMarcus.Cloud.Api.Features.Entities;
+using ThanyMarcus.Cloud.Api.Features.EntitySuggestions;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.Settings;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
@@ -19,6 +19,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
     private readonly CloudDbContext db;
     private readonly ILlmClientFactory llmFactory;
     private readonly IEmbeddingClient embeddings;
+    private readonly EntitySuggestionAggregator suggestions;
     private readonly LlmEventAppender events;
     private readonly IIngestEventBus eventBus;
     private readonly IOptionsMonitor<LlmIntelligenceOptions> opts;
@@ -30,6 +31,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         CloudDbContext db,
         ILlmClientFactory llmFactory,
         IEmbeddingClient embeddings,
+        EntitySuggestionAggregator suggestions,
         LlmEventAppender events,
         IIngestEventBus eventBus,
         IOptionsMonitor<LlmIntelligenceOptions> opts,
@@ -40,6 +42,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         this.db = db;
         this.llmFactory = llmFactory;
         this.embeddings = embeddings;
+        this.suggestions = suggestions;
         this.events = events;
         this.eventBus = eventBus;
         this.opts = opts;
@@ -99,6 +102,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         var newMentions = new List<Mention>();
         var hubSpawnEntityIds = new HashSet<Guid>();
         var existingHubEntityIds = new HashSet<Guid>();
+        var now = clock.GetCurrentInstant();
 
         foreach (var cand in candidates)
         {
@@ -106,64 +110,35 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
 
             var candVec = await EntityEmbeddingHelper.EmbedCanonicalAsync(embeddings, cand.CandidateCanonical, ct);
             var candEmb = candVec.ToArray();
-            var neighbors = await EntityVectorQueries.NearestAsync(
-                db, cand.CandidateKind, candEmb, o.Pgvector.DedupTopK, ct);
 
-            var surrounding = ExtractSurrounding(body, cand.StartOffset, cand.EndOffset, o.SurroundingTextChars);
-            var dedupPrompt = PromptBuilder.BuildDedup(cand, surrounding, neighbors);
-            var dedupPid = new PromptId("dedup", "v1");
-            var dedupStart = clock.GetCurrentInstant();
-            DedupDecisionDto dedup;
-            try
-            {
-                dedup = await llm.CompleteAsync<DedupDecisionDto>(
-                    dedupPid, new LlmPromptRequest(dedupPrompt), ct);
-            }
-            catch (LlmStructuredOutputException ex)
-            {
-                await events.AppendAsync(job.Id, BuildEvent(LlmEventStages.Dedup, dedupPid, llm, fellBackToSafe,
-                    ElapsedMs(dedupStart), ex.Attempts - 1, "failed", null, null, ex.Message), ct);
-                continue;
-            }
-            await events.AppendAsync(job.Id, BuildEvent(LlmEventStages.Dedup, dedupPid, llm, fellBackToSafe,
-                ElapsedMs(dedupStart), 0, dedup.Decision, dedup.Confidence, dedup.Rationale, null), ct);
+            // kNN against user-curated entities. A confident match (cosine distance within the gate)
+            // persists a mention against that entity; this deterministic gate replaces the dedup LLM.
+            var neighbors = await EntityVectorQueries.NearestWithDistanceAsync(
+                db, cand.CandidateKind, candEmb, o.Pgvector.DedupTopK, ct);
+            var best = neighbors.Count > 0 ? neighbors[0] : (EntityDistance?)null;
 
             Entity? target = null;
-            if (dedup.Decision == DedupDecisions.AliasOf &&
-                dedup.MatchedEntityId is { } mid &&
-                dedup.Confidence >= thresholds.DedupAliasMin)
+            if (best is { } match && match.Distance <= thresholds.SuggestionMatchDistance)
             {
                 target = await db.Entities.SingleOrDefaultAsync(
-                    e => e.Id == mid && e.DeletedAt == null, ct);
-                if (target is not null)
-                {
-                    var alias = cand.AnchorText?.Trim() ?? "";
-                    if (alias.Length > 0 &&
-                        !target.Aliases.Contains(alias, StringComparer.OrdinalIgnoreCase) &&
-                        !string.Equals(target.CanonicalName, alias, StringComparison.OrdinalIgnoreCase))
-                    {
-                        target.Aliases = target.Aliases.Append(alias).ToArray();
-                    }
-                }
+                    e => e.Id == match.Id && e.DeletedAt == null, ct);
             }
-            else if (dedup.Decision == DedupDecisions.NewEntity &&
-                     dedup.Confidence >= thresholds.DedupNewMin)
-            {
-                target = new Entity
-                {
-                    Id = Guid.CreateVersion7(),
-                    Kind = cand.CandidateKind,
-                    CanonicalName = cand.CandidateCanonical,
-                    Aliases = (cand.Aliases ?? Array.Empty<string>()).ToArray(),
-                    Source = EntitySource.Llm,
-                    IsProvisional = true,
-                    Embedding = candVec,
-                };
-                db.Entities.Add(target);
-            }
-            // else: ambiguous or below-threshold → drop; provenance captured the call above
 
-            if (target is null) continue;
+            if (target is null)
+            {
+                // Not a known entity → accumulate as a suggestion for the user to curate.
+                var surrounding = ExtractSurrounding(body, cand.StartOffset, cand.EndOffset, o.SurroundingTextChars);
+                await suggestions.AppendOrCreateAsync(cand, note.Id, surrounding, candVec, now, ct);
+                continue;
+            }
+
+            var alias = cand.AnchorText?.Trim() ?? "";
+            if (alias.Length > 0 &&
+                !target.Aliases.Contains(alias, StringComparer.OrdinalIgnoreCase) &&
+                !string.Equals(target.CanonicalName, alias, StringComparison.OrdinalIgnoreCase))
+            {
+                target.Aliases = target.Aliases.Append(alias).ToArray();
+            }
 
             target.MentionCount += 1;
             if (target.HubNoteId is null && target.MentionCount >= o.HubMaterializeMin)
@@ -184,7 +159,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
                 StartOffset = cand.StartOffset,
                 EndOffset = cand.EndOffset,
                 Confidence = (float)cand.Confidence,
-                CreatedAt = clock.GetCurrentInstant(),
+                CreatedAt = now,
             });
         }
 

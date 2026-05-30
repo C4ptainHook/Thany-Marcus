@@ -95,7 +95,6 @@ public static class ProjectsEndpoints
             Aliases = [],
             Description = string.IsNullOrEmpty(description) ? null : description,
             Source = EntitySource.User,
-            IsProvisional = false,
             VaultFolder = name,
             MentionCount = 0,
             CreatedAt = now,

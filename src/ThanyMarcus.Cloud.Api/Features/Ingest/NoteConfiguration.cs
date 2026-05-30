@@ -12,6 +12,8 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note>
         {
             t.HasCheckConstraint("ck_notes_status",
                 "status IN ('pending','processing','ready','failed')");
+            t.HasCheckConstraint("ck_notes_kind",
+                "kind IN ('synth_note','entity_stub')");
             t.HasCheckConstraint("ck_notes_llm_mode",
                 "llm_mode IS NULL OR llm_mode IN ('safe','unsafe_anthropic','unsafe_openai')");
         });
@@ -20,6 +22,7 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note>
         builder.Property(n => n.ClientNoteId);
         builder.Property(n => n.CapturedAt).IsRequired();
         builder.Property(n => n.Status).IsRequired();
+        builder.Property(n => n.Kind).IsRequired().HasDefaultValue(NoteKind.SynthNote);
         builder.Property(n => n.BodyInput).IsRequired();
         builder.Property(n => n.RelativePath);
         builder.Property(n => n.BodyOutput);
@@ -56,6 +59,10 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note>
 
         builder.HasIndex(n => new { n.Status, n.UpdatedAt })
             .HasDatabaseName("ix_notes_status_updated_at");
+
+        builder.HasIndex(n => n.Kind)
+            .HasDatabaseName("ix_notes_kind")
+            .HasFilter("deleted_at IS NULL");
 
         builder.HasIndex(n => n.UpdatedAt)
             .HasDatabaseName("ix_notes_updated_at")

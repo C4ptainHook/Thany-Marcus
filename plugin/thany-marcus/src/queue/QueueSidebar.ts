@@ -1,5 +1,9 @@
 import { App, ItemView, Modal, Notice, Setting, WorkspaceLeaf } from "obsidian";
 import type { ProjectDto } from "../api";
+import {
+  EntitySuggestionsPanel,
+  type EntitySuggestionActions,
+} from "../sidebar/EntitySuggestionsPanel";
 import { isCancellable, isFailure, isTerminal } from "./labels";
 import type { QueueStore } from "./QueueStore";
 
@@ -14,6 +18,8 @@ export interface ProjectActions {
 export class QueueSidebarView extends ItemView {
   private unsubscribe: (() => void) | null = null;
   private projects: ProjectDto[] = [];
+  private suggestionsPanel: EntitySuggestionsPanel | null = null;
+  private suggestionsHost: HTMLElement | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -22,6 +28,7 @@ export class QueueSidebarView extends ItemView {
     private readonly onReprocess: (noteId: string) => void,
     private readonly onCancel: (noteId: string) => void,
     private readonly projectActions: ProjectActions,
+    private readonly suggestionActions: EntitySuggestionActions,
   ) {
     super(leaf);
   }
@@ -39,6 +46,13 @@ export class QueueSidebarView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.suggestionsHost = document.createElement("div");
+    this.suggestionsPanel = new EntitySuggestionsPanel(this.suggestionActions, this.suggestionsHost, {
+      onAccepted: () => void this.refreshProjects(),
+      notify: (m) => new Notice(m),
+    });
+    this.suggestionsPanel.start();
+
     this.unsubscribe = this.store.subscribe(() => this.render());
     this.render();
     void this.refreshProjects();
@@ -47,6 +61,9 @@ export class QueueSidebarView extends ItemView {
   async onClose(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.suggestionsPanel?.dispose();
+    this.suggestionsPanel = null;
+    this.suggestionsHost = null;
   }
 
   private async refreshProjects(): Promise<void> {
@@ -64,6 +81,10 @@ export class QueueSidebarView extends ItemView {
     root.addClass("tm-queue");
 
     this.renderProjectsSection(root);
+
+    // The suggestions panel owns its own host element so its DOM + polling survive the
+    // queue's full re-render on every store change — we just re-parent it each time.
+    if (this.suggestionsHost) root.appendChild(this.suggestionsHost);
 
     const header = root.createDiv({ cls: "tm-queue__header" });
     header.setText("Recent notes");

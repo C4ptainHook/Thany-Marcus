@@ -85,6 +85,8 @@ public static class ProcessingTestHost
 
         services.AddScoped<JobStateTransitions>();
         services.AddScoped<ProvenanceMaterializer>();
+        services.AddScoped<ThanyMarcus.Cloud.Api.Features.EntitySuggestions.EntitySuggestionAggregator>();
+        services.AddScoped<ThanyMarcus.Cloud.Api.Features.EntitySuggestions.EntityStubWriter>();
         services.AddScoped<IPhaseHandler, ExtractingAttachmentsHandler>();
         services.AddScoped<IPhaseHandler, ComposingHandler>();
         services.AddScoped<IPhaseHandler, RoutingHandler>();

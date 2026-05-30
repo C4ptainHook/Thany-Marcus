@@ -12,6 +12,7 @@ public sealed class Note : IHasUpdatedAt
     public string? ClientNoteId { get; init; }
     public Instant CapturedAt { get; init; }
     public string Status { get; set; } = NoteStatus.Pending;
+    public string Kind { get; set; } = NoteKind.SynthNote;
     public string BodyInput { get; init; } = null!;
 
     public string? RelativePath { get; set; }
@@ -51,4 +52,10 @@ public static class NoteStatus
     public const string Processing = "processing";
     public const string Ready = "ready";
     public const string Failed = "failed";
+}
+
+public static class NoteKind
+{
+    public const string SynthNote = "synth_note";
+    public const string EntityStub = "entity_stub";
 }
