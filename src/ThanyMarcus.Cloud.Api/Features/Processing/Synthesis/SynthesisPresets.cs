@@ -12,7 +12,8 @@ public static class SynthesisPresetBodies
     private const string CommonGuardrails =
         "Hard rules:\n" +
         "- Do not invent facts, quotes, dates, names, numbers, or causal claims that are not present in the inputs.\n" +
-        "- Use the canonical entity list below to wrap mentions as [[Wikilink]]. Never invent a wikilink target — only the names in the list may appear inside [[ ]].\n" +
+        "- Integrate facts from EVERY input (user notes, voice transcript, image caption, URL extract, file extract). Do not focus on only one input and ignore the others. Specific names, URLs, dates, numbers, and labels from any input must appear in the body when relevant.\n" +
+        "- To reference a known entity, surround its name with double square brackets, e.g. `[[Slack]]` or `[[Customer Success]]`. The word \"Wikilink\" is NOT part of the syntax — never write `[[Wikilink:...]]` or `[[Wikilink]]`. Only names from the canonical entity list above may appear inside `[[ ]]`.\n" +
         "- If an input failed (marked <input failed .../>), acknowledge it by presence (\"the attached image\") without inventing content.\n" +
         "- Output only the synthesized note body in Markdown — no frontmatter, no '## Sources' section. The server appends provenance separately.\n" +
         "- The first line MUST be a Markdown H1 heading that summarises the note: write `# ` followed by a concise 4–8 word descriptive title. Do not write the literal word \"Title\" — emit the actual summary text after the `#`.\n" +

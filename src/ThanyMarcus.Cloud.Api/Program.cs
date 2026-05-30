@@ -220,6 +220,12 @@ builder.Services.Configure<GraniteEmbeddingOptions>(
     builder.Configuration.GetSection("IngestSaga:Models:Embedding"));
 builder.Services.AddSingleton<IEmbeddingClient, GraniteEmbeddingClient>();
 builder.Services.AddHostedService<GraniteEmbeddingWarmupService>();
+
+builder.Services.Configure<QueryEmbeddingCacheOptions>(
+    builder.Configuration.GetSection("IngestSaga:Retrieval:QueryCache"));
+builder.Services.AddSingleton<QueryEmbeddingCache>();
+builder.Services.Configure<RelatedNotesOptions>(
+    builder.Configuration.GetSection("IngestSaga:Retrieval"));
 builder.Services.AddScoped<IVlmClient, OllamaVlmClient>();
 builder.Services.AddSingleton<IDoclingClient, DoclingHttpClient>();
 builder.Services.AddSingleton<IParakeetClient, ParakeetHttpClient>();
@@ -326,6 +332,8 @@ app.MapCertInstalledEndpoint();
 app.MapIngestEndpoints();
 app.MapReprocessEndpoint();
 app.MapNoteDeleteEndpoint();
+app.MapRelatedNotesEndpoint();
+app.MapCancelIngestEndpoint();
 app.MapSyncPullEndpoint();
 app.MapSyncPushEndpoint();
 app.MapSyncEventsEndpoint();

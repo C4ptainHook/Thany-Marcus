@@ -31,6 +31,7 @@ public sealed class IngestSseTranslator
                 IngestEventKinds.AttachmentStatusChanged => ParseAttachmentStatusChanged(root),
                 IngestEventKinds.NoteSucceeded => ParseNoteSucceeded(root),
                 IngestEventKinds.NoteFailed => ParseNoteFailed(root),
+                IngestEventKinds.NoteCancelled => ParseNoteCancelled(root),
                 IngestEventKinds.HubMaterialized => ParseHubMaterialized(root),
                 _ => null,
             };
@@ -47,6 +48,8 @@ public sealed class IngestSseTranslator
             JsonSerializer.Serialize(new { noteId = s.NoteId }, JsonOpts),
         IngestSseEvent.NoteFailed f =>
             JsonSerializer.Serialize(new { noteId = f.NoteId, error = f.Error }, JsonOpts),
+        IngestSseEvent.NoteCancelled c =>
+            JsonSerializer.Serialize(new { noteId = c.NoteId }, JsonOpts),
         IngestSseEvent.HubMaterialized h =>
             JsonSerializer.Serialize(new { noteId = h.NoteId, entityId = h.EntityId }, JsonOpts),
         _ => "{}",
@@ -81,6 +84,12 @@ public sealed class IngestSseTranslator
         if (!TryGuid(root, "noteId", out var noteId)) return null;
         var error = root.TryGetProperty("error", out var e) ? e.GetString() ?? "" : "";
         return new IngestSseEvent.NoteFailed(noteId, error);
+    }
+
+    private static IngestSseEvent.NoteCancelled? ParseNoteCancelled(JsonElement root)
+    {
+        if (!TryGuid(root, "noteId", out var noteId)) return null;
+        return new IngestSseEvent.NoteCancelled(noteId);
     }
 
     private static IngestSseEvent.HubMaterialized? ParseHubMaterialized(JsonElement root)

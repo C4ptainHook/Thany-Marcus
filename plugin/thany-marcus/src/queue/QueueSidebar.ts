@@ -1,6 +1,6 @@
 import { App, ItemView, Modal, Notice, Setting, WorkspaceLeaf } from "obsidian";
 import type { ProjectDto } from "../api";
-import { isFailure, isTerminal } from "./labels";
+import { isCancellable, isFailure, isTerminal } from "./labels";
 import type { QueueStore } from "./QueueStore";
 
 export const QUEUE_VIEW_TYPE = "thany-marcus-queue";
@@ -20,6 +20,7 @@ export class QueueSidebarView extends ItemView {
     private readonly store: QueueStore,
     private readonly onOpenNote: (vaultPath: string) => void,
     private readonly onReprocess: (noteId: string) => void,
+    private readonly onCancel: (noteId: string) => void,
     private readonly projectActions: ProjectActions,
   ) {
     super(leaf);
@@ -102,6 +103,19 @@ export class QueueSidebarView extends ItemView {
         btn.onclick = (ev) => {
           ev.stopPropagation();
           this.onReprocess(e.noteId);
+        };
+      }
+
+      if (isCancellable(e.status)) {
+        const cancelBtn = row.createEl("button", { cls: "tm-queue__cancel", text: "Cancel" });
+        cancelBtn.onclick = (ev) => {
+          ev.stopPropagation();
+          new ConfirmModal(
+            this.app,
+            "Cancel this note?",
+            "Your draft will be restored to the composer. Work already done will be discarded.",
+            async () => this.onCancel(e.noteId),
+          ).open();
         };
       }
 

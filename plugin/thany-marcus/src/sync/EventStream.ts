@@ -3,6 +3,7 @@ export type SseEventKind =
   | "attachment_status_changed"
   | "note_succeeded"
   | "note_failed"
+  | "note_cancelled"
   | "hub_materialized";
 
 export interface SseEvent {

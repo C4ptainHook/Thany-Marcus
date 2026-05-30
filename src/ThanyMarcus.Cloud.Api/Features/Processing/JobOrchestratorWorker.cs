@@ -152,7 +152,7 @@ public sealed partial class JobOrchestratorWorker : BackgroundService
               WHERE id = (
                 SELECT id FROM ingest_jobs
                  WHERE status NOT IN ('succeeded','failed_extraction','failed_composition',
-                                      'failed_route','failed_entities','failed_synthesis','failed_embedding','dead_lettered')
+                                      'failed_route','failed_entities','failed_synthesis','failed_embedding','dead_lettered','cancelled')
                    AND scheduled_at <= {now}
                    AND ((status = 'queued')
                         OR (status IN ('extracting_attachments','composing','routing','extracting_entities','synthesizing','embedding')
@@ -188,7 +188,7 @@ public sealed partial class JobOrchestratorWorker : BackgroundService
                       WHERE id = {jobId}
                         AND lease_owner = {workerId}
                         AND status NOT IN ('succeeded','failed_extraction','failed_composition',
-                                           'failed_route','failed_entities','failed_synthesis','failed_embedding','dead_lettered')
+                                           'failed_route','failed_entities','failed_synthesis','failed_embedding','dead_lettered','cancelled')
                     """, ct);
             }
             catch (OperationCanceledException) { return; }

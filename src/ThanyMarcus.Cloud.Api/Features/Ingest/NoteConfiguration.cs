@@ -71,7 +71,8 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note>
         builder.HasIndex(n => n.Embedding)
             .HasDatabaseName("ix_notes_embedding")
             .HasMethod("hnsw")
-            .HasOperators("vector_cosine_ops");
+            .HasOperators("vector_cosine_ops")
+            .HasFilter("deleted_at IS NULL");
 
         builder.HasOne<Entity>().WithMany().HasForeignKey(n => n.ProjectId)
             .OnDelete(DeleteBehavior.SetNull);
