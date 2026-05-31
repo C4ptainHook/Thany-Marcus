@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invalidateAll } from '$app/navigation';
+  import { loginWithPasskey, isPasskeySupported, isPasskeyCancellation } from '$lib/passkey';
   import { fetchCaptchaState } from '$lib/turnstileClient';
   import TurnstileWidget from '$lib/TurnstileWidget.svelte';
   import CloudIdentityCard from '$lib/CloudIdentityCard.svelte';
@@ -24,6 +25,10 @@
   let captchaRequired = $state(false);
   let siteKey = $state('');
   let turnstileToken = $state('');
+
+  const passkeySupported = isPasskeySupported();
+  let passkeyBusy = $state(false);
+  let passkeyError = $state<string | null>(null);
 
   let healthz = $state<CloudHealthz | null>(null);
 
@@ -52,6 +57,21 @@
     turnstileToken = token;
   }
 
+  async function handlePasskeyLogin() {
+    passkeyError = null;
+    passkeyBusy = true;
+    try {
+      await loginWithPasskey();
+      await invalidateAll();
+    } catch (err) {
+      if (!isPasskeyCancellation(err)) {
+        passkeyError = 'Passkey sign-in failed. Try Google instead.';
+      }
+    } finally {
+      passkeyBusy = false;
+    }
+  }
+
   let view = $derived.by(() => {
     if (!data.me) return 'signed-out' as const;
     if (!data.cloud) return 'onboarding' as const;
@@ -76,13 +96,19 @@
       {#if captchaRequired && siteKey}
         <TurnstileWidget {siteKey} onToken={onCaptchaToken} />
       {/if}
-      <p>
+      <p class="signin-actions">
         {#if captchaRequired && !turnstileToken}
           <a class="btn-primary disabled" aria-disabled="true">Sign in with Google</a>
         {:else}
           <a class="btn btn-primary" href={signInHref()}>Sign in with Google</a>
         {/if}
+        {#if passkeySupported}
+          <button class="btn btn-secondary" type="button" disabled={passkeyBusy} onclick={() => void handlePasskeyLogin()}>
+            {passkeyBusy ? 'Waiting for passkey…' : 'Sign in with passkey'}
+          </button>
+        {/if}
       </p>
+      {#if passkeyError}<p class="error">{passkeyError}</p>{/if}
     </section>
 
   {:else if view === 'onboarding'}
@@ -138,6 +164,12 @@
 
 <style>
   .failure { border-color: var(--error); }
+  .signin-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    justify-content: center;
+  }
   .disabled {
     background: var(--surface-2);
     color: var(--text-muted);

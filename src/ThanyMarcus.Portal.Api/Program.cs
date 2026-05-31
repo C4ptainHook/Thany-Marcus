@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
+using Fido2NetLib;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using NodaTime;
@@ -19,6 +20,7 @@ using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.Auth.Login;
 using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
+using ThanyMarcus.Portal.Api.Features.Auth.Passkey;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
@@ -80,6 +82,20 @@ builder.Services.AddDbContext<PortalDbContext>((sp, opts) => opts
 
 builder.Services.AddScoped<GoogleSignInHandler>();
 builder.Services.AddScoped<CookiePrincipalValidator>();
+
+builder.Services.Configure<PasskeyConfiguration>(builder.Configuration.GetSection("Auth:Passkey"));
+var passkeyConfig = builder.Configuration.GetSection("Auth:Passkey").Get<PasskeyConfiguration>()
+    ?? new PasskeyConfiguration();
+builder.Services.AddFido2(opts =>
+{
+    opts.ServerDomain = passkeyConfig.ServerDomain;
+    opts.ServerName = passkeyConfig.ServerName;
+    opts.Origins = new HashSet<string>(passkeyConfig.Origins);
+    opts.TimestampDriftTolerance = 300_000;
+});
+builder.Services.AddSingleton<IPasskeyChallengeStore, PasskeyChallengeStore>();
+builder.Services.AddHostedService<PasskeyChallengeStoreSweeper>();
+builder.Services.AddScoped<PasskeySignInHandler>();
 
 var dpKeysDir = builder.Configuration["DataProtection:KeyRingPath"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data-protection-keys");
@@ -265,6 +281,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 });
 
 app.MapAuthEndpoints();
+app.MapPasskeyEndpoints();
 app.MapDigitalOceanOAuthEndpoints();
 app.MapDigitalOceanConnectionEndpoints();
 app.MapTotpEndpoints();

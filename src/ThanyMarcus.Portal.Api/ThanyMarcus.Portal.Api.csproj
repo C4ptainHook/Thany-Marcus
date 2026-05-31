@@ -39,6 +39,9 @@
     <PackageReference Include="Otp.NET" />
     <PackageReference Include="QRCoder" />
     <PackageReference Include="Konscious.Security.Cryptography.Argon2" />
+
+    <PackageReference Include="Fido2" />
+    <PackageReference Include="Fido2.AspNet" />
   </ItemGroup>
 
   <ItemGroup>

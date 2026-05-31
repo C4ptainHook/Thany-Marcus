@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { setPassphrase } from './stepUpClient';
+  import { listPasskeys, registerPasskey, isPasskeySupported, isPasskeyCancellation } from './passkey';
   import type { MeResponse } from './types/auth';
 
   let { me, onPassphraseSet }: { me: MeResponse; onPassphraseSet: () => void } = $props();
@@ -8,6 +9,29 @@
   let passphraseSet = $state(untrack(() => me.passphraseSet === true));
 
   let expanded = $state<1 | null>(null);
+
+  const passkeySupported = isPasskeySupported();
+  let passkeyCount = $state(0);
+  let passkeyBusy = $state(false);
+  let passkeyError = $state<string | null>(null);
+
+  onMount(async () => {
+    if (!passkeySupported) return;
+    try { passkeyCount = (await listPasskeys()).length; } catch { /* fail soft */ }
+  });
+
+  async function addPasskey() {
+    passkeyError = null;
+    passkeyBusy = true;
+    try {
+      await registerPasskey();
+      passkeyCount = (await listPasskeys()).length;
+    } catch (err) {
+      if (!isPasskeyCancellation(err)) passkeyError = 'Could not register passkey.';
+    } finally {
+      passkeyBusy = false;
+    }
+  }
 
   let pp = $state('');
   let pp2 = $state('');
@@ -90,6 +114,28 @@
         <a class="btn btn-primary go" href="/clouds/new">Provision cloud</a>
       {/if}
     </li>
+
+    {#if passkeySupported}
+      <li class={'step ' + (passkeyCount > 0 ? 'done' : 'open')}>
+        <div class="step-head static">
+          <span class="icon success">{passkeyCount > 0 ? '[●]' : '[○]'}</span>
+          <span class="title">3. Register a passkey <span class="muted">(optional)</span></span>
+        </div>
+        <p class="desc">
+          {#if passkeyCount > 0}
+            Faster sign-in next time — Face ID, Touch ID, Windows Hello, or a security key.
+          {:else}
+            Want faster login next time? Sign in with a passkey instead of Google.
+          {/if}
+        </p>
+        {#if passkeyError}<p class="error desc">{passkeyError}</p>{/if}
+        {#if passkeyCount === 0}
+          <button class="btn btn-secondary go" type="button" disabled={passkeyBusy} onclick={addPasskey}>
+            {passkeyBusy ? 'Waiting for passkey…' : 'Register a passkey'}
+          </button>
+        {/if}
+      </li>
+    {/if}
   </ol>
 </section>
 

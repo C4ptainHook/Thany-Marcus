@@ -8,3 +8,11 @@ export interface MeResponse {
   totp: TotpState | string;
   passphraseSet: boolean;
 }
+
+export interface PasskeyInfo {
+  id: string;
+  authenticatorName: string;
+  backedUp: boolean;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
