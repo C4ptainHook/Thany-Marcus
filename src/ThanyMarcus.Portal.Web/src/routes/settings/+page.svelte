@@ -2,12 +2,15 @@
   import { onMount } from 'svelte';
   import { enableInit, enableVerify, disable, type TotpEnableInit } from '$lib/totpClient';
   import { setPassphrase } from '$lib/stepUpClient';
+  import { generateEmergencyKit, emergencyKitStatus, unlockPassphrase } from '$lib/recoveryClient';
   import { apiFetch } from '$lib/http';
+  import EmergencyKitModal from '$lib/EmergencyKitModal.svelte';
   import {
     listPasskeys, registerPasskey, revokePasskey,
     isPasskeySupported, isPasskeyCancellation,
   } from '$lib/passkey';
   import type { PasskeyInfo } from '$lib/types/auth';
+  import type { EmergencyKit, EmergencyKitStatus } from '$lib/types/recovery';
 
   type DoConnection = { connected: false } | { connected: true; status: string; expiresAt: string };
 
@@ -16,6 +19,12 @@
   let phase = $state<Phase>('loading');
   let totpState = $state<string>('');
   let passphraseSet = $state(false);
+  let email = $state('');
+  let kitStatus = $state<EmergencyKitStatus | null>(null);
+  let kit = $state<EmergencyKit | null>(null);
+  let kitHeading = $state('Save your Emergency Kit');
+  let kitBusy = $state(false);
+  let kitError = $state<string | null>(null);
   let init = $state<TotpEnableInit | null>(null);
   let enableCode = $state('');
   let currentCode = $state('');
@@ -106,7 +115,14 @@
     const me = await r.json();
     totpState = me.totp;
     passphraseSet = me.passphraseSet === true;
+    email = me.email ?? me.username;
     phase = 'idle';
+    if (passphraseSet) await refreshKitStatus();
+  }
+
+  async function refreshKitStatus() {
+    try { kitStatus = await emergencyKitStatus(); }
+    catch { kitStatus = null; }
   }
 
   async function submitPassphrase(e: SubmitEvent) {
@@ -116,17 +132,26 @@
       passphraseError = 'Passphrases do not match.';
       return;
     }
-    if (newPassphrase.length < 12) {
-      passphraseError = 'Passphrase must be at least 12 characters.';
+    if (newPassphrase.length < 8) {
+      passphraseError = 'Passphrase must be at least 8 characters.';
       return;
     }
     passphraseBusy = true;
     try {
-      const res = await setPassphrase(newPassphrase);
+      const passphrase = newPassphrase;
+      const res = await setPassphrase(passphrase);
       if (res.status === 204) {
         newPassphrase = '';
         confirmPassphrase = '';
         passphraseSet = true;
+        await unlockPassphrase(passphrase);
+        kitHeading = 'Save your Emergency Kit';
+        kit = await generateEmergencyKit();
+      } else if (res.status === 400) {
+        const body = await res.json().catch(() => null);
+        passphraseError = body?.reason === 'too_common'
+          ? 'That passphrase is too common — pick something less guessable.'
+          : 'Passphrase must be at least 8 characters.';
       } else if (res.status === 409) {
         passphraseError = 'Passphrase is already set.';
         passphraseSet = true;
@@ -136,6 +161,28 @@
     } finally {
       passphraseBusy = false;
     }
+  }
+
+  async function regenerateKit() {
+    kitError = null;
+    kitBusy = true;
+    try {
+      kitHeading = 'Save your new Emergency Kit';
+      kit = await generateEmergencyKit();
+    } catch {
+      kitError = 'Could not generate your Emergency Kit. Please try again.';
+    } finally {
+      kitBusy = false;
+    }
+  }
+
+  async function onKitSaved() {
+    kit = null;
+    await refreshKitStatus();
+  }
+
+  function fmtDateOrNever(iso: string | null): string {
+    return iso ? fmtDate(iso) : 'never';
   }
 
   onMount(async () => {
@@ -343,6 +390,24 @@
     </section>
 
     {#if passphraseSet}
+      <section class="card danger-zone">
+        <h2 class="card-title">EMERGENCY KIT</h2>
+        {#if kitStatus?.generatedAt}
+          <p>Generated {fmtDate(kitStatus.generatedAt)} · Last used: {fmtDateOrNever(kitStatus.lastUsedAt)}.</p>
+        {:else}
+          <p class="muted">No Emergency Kit yet — generate one so you always have a way back in.</p>
+        {/if}
+        <p class="muted">Regenerating invalidates your old kit. Requires your passphrase.</p>
+        {#if kitError}<p class="error">{kitError}</p>{/if}
+        <div class="actions">
+          <button class="btn-danger" type="button" disabled={kitBusy} onclick={regenerateKit}>
+            {kitBusy ? 'Preparing…' : kitStatus?.generatedAt ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
+      </section>
+    {/if}
+
+    {#if passphraseSet}
       <section class="card">
         <h2 class="card-title">CONNECTIONS</h2>
         <p>
@@ -367,6 +432,10 @@
 
   {/if}
 </main>
+
+{#if kit}
+  <EmergencyKitModal {kit} {email} heading={kitHeading} onSaved={onKitSaved} />
+{/if}
 
 <style>
   .codes {

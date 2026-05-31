@@ -15,7 +15,7 @@ public sealed class PortalDbContext(DbContextOptions<PortalDbContext> options) :
     public DbSet<TotpSecret> TotpSecrets => Set<TotpSecret>();
     public DbSet<PasskeyCredential> PasskeyCredentials => Set<PasskeyCredential>();
     public DbSet<TotpBackupCode> TotpBackupCodes => Set<TotpBackupCode>();
-    public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
+    public DbSet<EmergencyKit> EmergencyKits => Set<EmergencyKit>();
     public DbSet<EncryptedProviderToken> EncryptedProviderTokens => Set<EncryptedProviderToken>();
     public DbSet<DigitalOceanOAuthConnection> DigitalOceanOAuthConnections => Set<DigitalOceanOAuthConnection>();
     public DbSet<AuthLockout> AuthLockouts => Set<AuthLockout>();

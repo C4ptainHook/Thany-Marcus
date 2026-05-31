@@ -15,8 +15,17 @@ public static class PassphraseEndpoints
             PassphraseInitRequest body,
             ClaimsPrincipal user,
             PassphraseService svc,
+            PassphraseValidator validator,
             CancellationToken ct) =>
         {
+            var validation = validator.Validate(body.Passphrase);
+            if (validation != PassphraseValidationResult.Ok)
+                return Results.BadRequest(new
+                {
+                    error = "passphrase_invalid",
+                    reason = validation == PassphraseValidationResult.TooShort ? "too_short" : "too_common",
+                });
+
             var userId = Guid.Parse(user.FindFirstValue(AuthClaimTypes.SubUs)!);
             var ok = await svc.InitAsync(userId, body.Passphrase, ct);
             return ok ? Results.NoContent() : Results.Conflict(new { error = "passphrase_already_set" });

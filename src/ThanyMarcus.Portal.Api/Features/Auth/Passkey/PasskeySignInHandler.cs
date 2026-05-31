@@ -26,9 +26,12 @@ public sealed class PasskeySignInHandler(PortalDbContext db, IClock clock)
             ClaimTypes.Name,
             ClaimTypes.Role);
         identity.AddClaim(new Claim(AuthClaimTypes.SubUs, user.Id.ToString()));
-        identity.AddClaim(new Claim(AuthClaimTypes.SubGoogle, user.GoogleSubject));
+        if (user.GoogleSubject is { } googleSub)
+            identity.AddClaim(new Claim(AuthClaimTypes.SubGoogle, googleSub));
+        identity.AddClaim(new Claim(AuthClaimTypes.Username, user.Username));
         identity.AddClaim(new Claim(AuthClaimTypes.Totp, totp));
-        identity.AddClaim(new Claim(ClaimTypes.Email, user.Email));
+        if (user.Email is { } email)
+            identity.AddClaim(new Claim(ClaimTypes.Email, email));
         identity.AddClaim(new Claim(ClaimTypes.Name, user.Name));
         if (user.ProfilePictureUrl is { } picture)
             identity.AddClaim(new Claim("picture", picture));

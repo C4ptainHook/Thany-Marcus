@@ -115,6 +115,8 @@ builder.Services.AddScoped<TotpService>();
 builder.Services.AddScoped<TotpBackupCodeService>();
 
 builder.Services.AddScoped<PassphraseService>();
+builder.Services.AddScoped<EmergencyKitService>();
+builder.Services.AddSingleton(new PassphraseValidator(CommonPasswords.Load()));
 builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
 builder.Services.AddHostedService<InfraOpUnlockSweepService>();
 
@@ -282,10 +284,13 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 
 app.MapAuthEndpoints();
 app.MapPasskeyEndpoints();
+app.MapPasskeySignupEndpoints();
 app.MapDigitalOceanOAuthEndpoints();
 app.MapDigitalOceanConnectionEndpoints();
 app.MapTotpEndpoints();
 app.MapPassphraseEndpoints();
+app.MapPassphraseResetEndpoints();
+app.MapEmergencyKitEndpoints();
 app.MapProviderTokenEndpoints();
 app.MapCreateCloudEndpoints();
 app.MapGetCloudStatusEndpoints();

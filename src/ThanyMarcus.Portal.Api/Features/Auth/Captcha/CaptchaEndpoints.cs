@@ -26,6 +26,9 @@ public static class CaptchaEndpoints
             string? failureKind;
             switch (kind)
             {
+                case TurnstileKinds.Signup:
+                    // Anonymous signup always requires a token when Turnstile is configured.
+                    return Results.Ok(new CaptchaStateResponse(true, cfg.SiteKey));
                 case TurnstileKinds.Signin:
                     partitionKey = "ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown");
                     failureKind = null;

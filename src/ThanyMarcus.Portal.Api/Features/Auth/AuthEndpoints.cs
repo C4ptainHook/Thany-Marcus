@@ -29,7 +29,8 @@ public static class AuthEndpoints
                 .SingleAsync(ct);
             return Results.Ok(new MeResponse(
                 UserId: userId,
-                Email: user.FindFirstValue(ClaimTypes.Email)!,
+                Email: user.FindFirstValue(ClaimTypes.Email),
+                Username: user.FindFirstValue(AuthClaimTypes.Username)!,
                 Name: user.FindFirstValue(ClaimTypes.Name)!,
                 ProfilePictureUrl: user.FindFirstValue("picture"),
                 Totp: user.FindFirstValue(AuthClaimTypes.Totp)!,

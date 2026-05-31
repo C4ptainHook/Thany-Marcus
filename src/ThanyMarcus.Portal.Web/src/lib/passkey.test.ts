@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   registerPasskey,
   loginWithPasskey,
+  signupWithPasskey,
   isPasskeySupported,
   isPasskeyCancellation,
   PasskeyCancelledError,
+  UsernameTakenError,
+  SignupRejectedError,
   b64urlToBuffer,
   bytesToB64url,
 } from './passkey';
@@ -202,5 +205,92 @@ describe('loginWithPasskey', () => {
     // Only the challenge call happened — completion was never attempted.
     expect(requests).toHaveLength(1);
     expect(requests[0].url).toContain('/login/challenge');
+  });
+});
+
+describe('signupWithPasskey', () => {
+  function makeCredential() {
+    return {
+      id: 'cred-id',
+      rawId: bytesOf([1, 2, 3]),
+      type: 'public-key',
+      response: {
+        attestationObject: bytesOf([4, 5, 6]),
+        clientDataJSON: bytesOf([7, 8, 9]),
+        getTransports: () => ['internal'],
+      },
+      getClientExtensionResults: () => ({}),
+    };
+  }
+
+  it('posts the challenge with username/ack/token, creates, then posts the attestation', async () => {
+    const requests = recordingFetch('/signup/challenge', CREATION_OPTIONS, 'chal-s');
+    const create = vi.fn(async () => makeCredential());
+    setCredentials(create, vi.fn());
+
+    await signupWithPasskey({ username: 'demo_user', acknowledged: true, turnstileToken: 'tok-1' });
+
+    expect(requests[0].url).toContain('/signup/challenge');
+    expect(requests[1].url).toContain('/signup/complete');
+    expect(create).toHaveBeenCalledTimes(1);
+
+    const challengeBody = JSON.parse(requests[0].body!);
+    expect(challengeBody.username).toBe('demo_user');
+    expect(challengeBody.acknowledgedNoRecovery).toBe(true);
+    expect(challengeBody.turnstileToken).toBe('tok-1');
+
+    const completeBody = JSON.parse(requests[1].body!);
+    expect(completeBody.challengeId).toBe('chal-s');
+    expect(completeBody.response.rawId).toBe(bytesToB64url(bytesOf([1, 2, 3])));
+  });
+
+  it('throws UsernameTakenError on a 409 challenge and never prompts the authenticator', async () => {
+    const create = vi.fn();
+    setCredentials(create, vi.fn());
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResp({ error: 'username_taken' }, 409)));
+
+    await expect(
+      signupWithPasskey({ username: 'taken', acknowledged: true }),
+    ).rejects.toBeInstanceOf(UsernameTakenError);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('throws SignupRejectedError carrying the server error code on a 400 challenge', async () => {
+    const create = vi.fn();
+    setCredentials(create, vi.fn());
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResp({ error: 'username_reserved' }, 400)));
+
+    await expect(signupWithPasskey({ username: 'admin', acknowledged: true })).rejects.toMatchObject({
+      name: 'SignupRejectedError',
+      code: 'username_reserved',
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('throws PasskeyCancelledError and skips completion when the user cancels', async () => {
+    const requests = recordingFetch('/signup/challenge', CREATION_OPTIONS, 'chal-s2');
+    setCredentials(vi.fn(async () => null), vi.fn());
+
+    await expect(
+      signupWithPasskey({ username: 'demo_user', acknowledged: true }),
+    ).rejects.toBeInstanceOf(PasskeyCancelledError);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toContain('/signup/challenge');
+  });
+
+  it('throws UsernameTakenError if the completion races and loses (409)', async () => {
+    const create = vi.fn(async () => makeCredential());
+    setCredentials(create, vi.fn());
+    const fetchMock = vi.fn(async (url: string) =>
+      url.endsWith('/signup/challenge')
+        ? jsonResp({ challengeId: 'chal-s3', options: CREATION_OPTIONS })
+        : jsonResp({ error: 'username_taken' }, 409),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      signupWithPasskey({ username: 'raceme', acknowledged: true }),
+    ).rejects.toBeInstanceOf(UsernameTakenError);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

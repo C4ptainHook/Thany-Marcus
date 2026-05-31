@@ -4,17 +4,18 @@ using NodaTime;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth.Passkey;
 
-public enum PasskeyChallengeKind { Register, Login }
+public enum PasskeyChallengeKind { Register, Login, Signup }
 
 public sealed record PasskeyChallengeRecord(
     string OptionsJson,
     Guid? UserId,
     PasskeyChallengeKind Kind,
-    Instant ExpiresAt);
+    Instant ExpiresAt,
+    string? Username = null);
 
 public interface IPasskeyChallengeStore
 {
-    Guid Stash(string optionsJson, Guid? userId, PasskeyChallengeKind kind);
+    Guid Stash(string optionsJson, Guid? userId, PasskeyChallengeKind kind, string? username = null);
 
     /// <summary>Single-use: removes the entry on read. Returns null if missing or expired.</summary>
     PasskeyChallengeRecord? Take(Guid challengeId);
@@ -27,11 +28,11 @@ public sealed class PasskeyChallengeStore(IClock clock, IOptions<PasskeyConfigur
 {
     private readonly ConcurrentDictionary<Guid, PasskeyChallengeRecord> entries = new();
 
-    public Guid Stash(string optionsJson, Guid? userId, PasskeyChallengeKind kind)
+    public Guid Stash(string optionsJson, Guid? userId, PasskeyChallengeKind kind, string? username = null)
     {
         var id = Guid.NewGuid();
         var expiresAt = clock.GetCurrentInstant() + Duration.FromSeconds(options.Value.ChallengeTtlSeconds);
-        entries[id] = new PasskeyChallengeRecord(optionsJson, userId, kind, expiresAt);
+        entries[id] = new PasskeyChallengeRecord(optionsJson, userId, kind, expiresAt, username);
         return id;
     }
 

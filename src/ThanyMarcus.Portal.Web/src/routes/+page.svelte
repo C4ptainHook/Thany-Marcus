@@ -109,6 +109,11 @@
         {/if}
       </p>
       {#if passkeyError}<p class="error">{passkeyError}</p>{/if}
+      {#if passkeySupported}
+        <p class="signup-link muted">
+          No account? <a href="/signup/passkey">Sign up with a passkey</a> — no email needed.
+        </p>
+      {/if}
     </section>
 
   {:else if view === 'onboarding'}

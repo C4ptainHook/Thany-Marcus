@@ -19,10 +19,10 @@ public sealed class CrossEntityCascadeTests(PostgresFixture postgres) : DbIntegr
         Db.Users.Add(user);
         Db.TotpSecrets.Add(new TotpSecret { UserId = user.Id, Ciphertext = [1], Nonce = new byte[12], Tag = new byte[16], CreatedAt = now, UpdatedAt = now });
         Db.TotpBackupCodes.Add(new TotpBackupCode { UserId = user.Id, HashedCode = "b", CreatedAt = now });
-        Db.RecoveryCodes.Add(new RecoveryCode
+        Db.EmergencyKits.Add(new EmergencyKit
         {
             UserId = user.Id,
-            HashedCode = "r",
+            HashedString = "r",
             WrapArgon2Salt = new byte[1],
             WrapArgon2Params = paramsDoc,
             WrappedDek = new byte[1],
@@ -50,7 +50,7 @@ public sealed class CrossEntityCascadeTests(PostgresFixture postgres) : DbIntegr
 
         (await Db.TotpSecrets.AnyAsync(t => t.UserId == user.Id, ct)).ShouldBeFalse();
         (await Db.TotpBackupCodes.AnyAsync(t => t.UserId == user.Id, ct)).ShouldBeFalse();
-        (await Db.RecoveryCodes.AnyAsync(r => r.UserId == user.Id, ct)).ShouldBeFalse();
+        (await Db.EmergencyKits.AnyAsync(r => r.UserId == user.Id, ct)).ShouldBeFalse();
         (await Db.EncryptedProviderTokens.AnyAsync(e => e.UserId == user.Id, ct)).ShouldBeFalse();
         (await Db.AuthLockouts.AnyAsync(a => a.UserId == user.Id, ct)).ShouldBeFalse();
     }

@@ -58,6 +58,59 @@ export async function registerPasskey(): Promise<void> {
   });
 }
 
+export class UsernameTakenError extends Error {
+  constructor() {
+    super('That username is already taken.');
+    this.name = 'UsernameTakenError';
+  }
+}
+
+/** A field-specific signup rejection (e.g. username_reserved, captcha_invalid). */
+export class SignupRejectedError extends Error {
+  constructor(public readonly code: string) {
+    super(code);
+    this.name = 'SignupRejectedError';
+  }
+}
+
+export interface SignupOptions {
+  username: string;
+  acknowledged: boolean;
+  turnstileToken?: string;
+}
+
+export async function signupWithPasskey(opts: SignupOptions): Promise<void> {
+  const challengeRes = await fetch('/api/auth/passkey/signup/challenge', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      username: opts.username,
+      acknowledgedNoRecovery: opts.acknowledged,
+      turnstileToken: opts.turnstileToken ?? null,
+    }),
+  });
+  if (challengeRes.status === 409) throw new UsernameTakenError();
+  if (challengeRes.status === 400) {
+    const body = await challengeRes.json().catch(() => null);
+    throw new SignupRejectedError(body?.error ?? 'invalid');
+  }
+  if (!challengeRes.ok) throw new Error(`signup challenge failed: ${challengeRes.status}`);
+  const { challengeId, options } = (await challengeRes.json()) as ChallengeEnvelope<CreationOptionsJSON>;
+
+  const credential = (await navigator.credentials.create({
+    publicKey: toCreationOptions(options),
+  })) as PublicKeyCredential | null;
+  if (!credential) throw new PasskeyCancelledError();
+
+  const completeRes = await fetch('/api/auth/passkey/signup/complete', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ challengeId, response: serializeAttestation(credential) }),
+  });
+  if (completeRes.status === 409) throw new UsernameTakenError();
+  if (!completeRes.ok) throw new Error(`signup complete failed: ${completeRes.status}`);
+}
+
 export async function loginWithPasskey(): Promise<void> {
   const { challengeId, options } = await postJson<ChallengeEnvelope<RequestOptionsJSON>>(
     '/api/auth/passkey/login/challenge');

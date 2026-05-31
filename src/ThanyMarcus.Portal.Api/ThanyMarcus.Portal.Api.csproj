@@ -45,6 +45,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Features\Auth\common-passwords.txt" />
+    <EmbeddedResource Include="Features\Auth\bip39-english.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ThanyMarcus.Shared\ThanyMarcus.Shared.csproj" />
   </ItemGroup>
 

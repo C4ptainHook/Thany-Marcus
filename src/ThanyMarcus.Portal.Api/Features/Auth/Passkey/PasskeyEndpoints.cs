@@ -41,7 +41,7 @@ public static class PasskeyEndpoints
             User = new Fido2User
             {
                 Id = userId.ToByteArray(),
-                Name = user.Email,
+                Name = user.Email ?? user.Username,
                 DisplayName = user.Name,
             },
             ExcludeCredentials = existing.Select(id => new PublicKeyCredentialDescriptor(id)).ToList(),
