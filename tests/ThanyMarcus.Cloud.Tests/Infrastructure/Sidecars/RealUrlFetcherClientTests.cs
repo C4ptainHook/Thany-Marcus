@@ -37,7 +37,7 @@ public sealed class RealUrlFetcherClientTests(PostgresFixture postgres) : IAsync
     }
 
     [Fact]
-    public async Task Html_happy_path_returns_markdown()
+    public async Task Html_happy_path_returns_metadata()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
@@ -48,7 +48,7 @@ public sealed class RealUrlFetcherClientTests(PostgresFixture postgres) : IAsync
         wm.Given(Request.Create().WithPath("/page.html").UsingGet())
           .RespondWith(Response.Create().WithStatusCode(200)
               .WithHeader("Content-Type", "text/html; charset=utf-8")
-              .WithBody(LongHtml("Article Headline", "This is a test article body. " + string.Concat(Enumerable.Repeat("Some content. ", 60)))));
+              .WithBody(OgHtml("Article Headline", "Article description text", "Test Site")));
 
         using var db = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var att = await db.Attachments.SingleAsync(a => a.Id == attId, ct);
@@ -57,8 +57,37 @@ public sealed class RealUrlFetcherClientTests(PostgresFixture postgres) : IAsync
         var outcome = await client.FetchAsync(noteId, att, ct);
 
         outcome.RedirectedToAttachmentId.ShouldBeNull();
+        outcome.IsMinimal.ShouldBeFalse();
         outcome.ExtractedText.ShouldNotBeNullOrEmpty();
+        outcome.ExtractedText!.ShouldContain("Article Headline");
         outcome.Extra.RootElement.GetProperty("http_status").GetInt32().ShouldBe(200);
+        outcome.Extra.RootElement.GetProperty("title").GetString().ShouldBe("Article Headline");
+        outcome.Extra.RootElement.GetProperty("description").GetString().ShouldBe("Article description text");
+        outcome.Extra.RootElement.GetProperty("provider_name").GetString().ShouldBe("Test Site");
+    }
+
+    [Fact]
+    public async Task Http_404_returns_minimal()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var (noteId, _, attId) = await SeedUrlAttachmentAsync($"{wm.Url}/missing.html");
+
+        wm.Given(Request.Create().WithPath("/missing.html").UsingHead())
+          .RespondWith(Response.Create().WithStatusCode(200).WithHeader("Content-Type", "text/html"));
+        wm.Given(Request.Create().WithPath("/missing.html").UsingGet())
+          .RespondWith(Response.Create().WithStatusCode(404).WithHeader("Content-Type", "text/html"));
+
+        using var db = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
+        var att = await db.Attachments.SingleAsync(a => a.Id == attId, ct);
+        var client = BuildClient(db);
+
+        var outcome = await client.FetchAsync(noteId, att, ct);
+
+        outcome.RedirectedToAttachmentId.ShouldBeNull();
+        outcome.IsMinimal.ShouldBeTrue();
+        outcome.ExtractedText.ShouldBe("(URL captured, no preview available)");
+        outcome.Extra.RootElement.GetProperty("minimal_reason").GetString().ShouldBe("http: 404");
     }
 
     [Fact]
@@ -243,4 +272,12 @@ public sealed class RealUrlFetcherClientTests(PostgresFixture postgres) : IAsync
 
     private static string LongHtml(string title, string body) =>
         $"<!doctype html><html><head><title>{title}</title></head><body><article><h1>{title}</h1><p>{body}</p></article></body></html>";
+
+    private static string OgHtml(string title, string description, string siteName) =>
+        $"<!doctype html><html><head>" +
+        $"<title>{title}</title>" +
+        $"<meta property=\"og:title\" content=\"{title}\" />" +
+        $"<meta property=\"og:description\" content=\"{description}\" />" +
+        $"<meta property=\"og:site_name\" content=\"{siteName}\" />" +
+        $"</head><body><p>body</p></body></html>";
 }

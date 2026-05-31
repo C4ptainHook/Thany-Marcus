@@ -26,7 +26,6 @@ public static class EntityKind
 {
     public const string Person = "person";
     public const string Organization = "organization";
-    public const string Project = "project";
     public const string Place = "place";
     public const string Concept = "concept";
     public const string Other = "other";

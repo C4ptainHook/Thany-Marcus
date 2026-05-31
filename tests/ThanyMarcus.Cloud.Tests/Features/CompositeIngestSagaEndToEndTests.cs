@@ -154,7 +154,6 @@ public sealed class CompositeIngestSagaEndToEndTests(PostgresFixture postgres)
         pullResp.StatusCode.ShouldBe(HttpStatusCode.OK);
         var pullBody = await pullResp.Content.ReadFromJsonAsync<SyncPullResponse>(ct);
         pullBody.ShouldNotBeNull();
-        pullBody.Projects.ShouldBeEmpty();
         var item = pullBody!.Items.SingleOrDefault(i => i.NoteId == initResp.NoteId);
         item.ShouldNotBeNull();
         item!.Deleted.ShouldBeFalse();

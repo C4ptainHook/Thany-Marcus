@@ -9,7 +9,8 @@ import { ApiClient } from "./api";
 import { BrowView } from "./draft/BrowView";
 import { DraftManager, type DraftState } from "./draft/DraftManager";
 import { Submitter } from "./draft/Submitter";
-import { QueueStore } from "./queue/QueueStore";
+import { ElectronDesktopNotifier, type DesktopNotifier } from "./notifications/DesktopNotifier";
+import { QueueStore, type QueueEntry } from "./queue/QueueStore";
 import { QueueSidebarView, QUEUE_VIEW_TYPE } from "./queue/QueueSidebar";
 import { PhaseToastController } from "./queue/PhaseToast";
 import { isTerminal } from "./queue/labels";
@@ -34,6 +35,7 @@ export default class ThanyMarcusPlugin extends Plugin {
 
   private attachmentIndex!: AttachmentIndex;
   private queueStore = new QueueStore();
+  private notifier!: DesktopNotifier;
   private toast!: PhaseToastController;
   private drafts!: DraftManager;
   private submitter!: Submitter;
@@ -55,8 +57,11 @@ export default class ThanyMarcusPlugin extends Plugin {
       () => new Notice("Thany: token revoked. Re-paste from portal."),
     );
 
+    this.notifier = new ElectronDesktopNotifier();
+    this.queueStore.onTerminalTransition((prev, next) => this.onTerminalTransition(prev, next));
+
     this.drafts = new DraftManager(this.app.vault, this.app.workspace, () => this.settings.vaultFolder);
-    this.submitter = new Submitter(this.api, this.app.vault, () => this.settings);
+    this.submitter = new Submitter(this.api, this.app.vault, () => this.settings, this.notifier);
     this.writer = new Writer(this.app.vault, () => this.settings.vaultFolder, this.attachmentIndex);
 
     this.syncLoop = new SyncPullLoop(
@@ -93,15 +98,13 @@ export default class ThanyMarcusPlugin extends Plugin {
         (noteId) => void this.reprocess(noteId),
         (noteId) => void this.cancelIngest(noteId),
         {
-          list:   () => this.api.listProjects(),
-          create: (name, description) => this.api.createProject({ name, description }),
-          remove: (id) => this.api.deleteProject(id),
-        },
-        {
           list:    (signal) => this.api.listEntitySuggestions(signal),
           accept:  (id) => this.api.acceptEntitySuggestion(id),
           dismiss: (id) => this.api.dismissEntitySuggestion(id),
           edit:    (id, patch) => this.api.editEntitySuggestion(id, patch),
+        },
+        {
+          listActiveJobs: (includeRecent) => this.api.listActiveJobs(includeRecent),
         },
       ),
     );
@@ -304,6 +307,8 @@ export default class ThanyMarcusPlugin extends Plugin {
   }
 
   private async onNoteCancelled(noteId: string): Promise<void> {
+    const entry = this.queueStore.get(noteId);
+    if (entry) this.fireDesktopNotification("cancelled", entry, null);
     this.pendingNoteToLeaf.delete(noteId);
     const held = this.pendingDrafts.get(noteId);
     this.pendingDrafts.delete(noteId);
@@ -347,6 +352,43 @@ export default class ThanyMarcusPlugin extends Plugin {
       this.syncLoop.trigger();
     } catch (e) {
       new Notice(`Thany: reprocess failed — ${(e as Error).message}`);
+    }
+  }
+
+  private onTerminalTransition(_prev: QueueEntry, next: QueueEntry): void {
+    const status = next.status.toLowerCase();
+    if (status === "ready" || status === "succeeded") {
+      this.fireDesktopNotification("ready", next, next.vaultPath ?? null);
+    } else if (status.startsWith("failed")) {
+      this.fireDesktopNotification("failed", next, null);
+    }
+  }
+
+  private fireDesktopNotification(
+    kind: "ready" | "failed" | "cancelled",
+    entry: QueueEntry,
+    vaultPath: string | null,
+  ): void {
+    if (!this.settings.desktopNotifications) return;
+    if (!this.notifier.isEnabled()) return;
+    if (kind === "ready") {
+      this.notifier.notify({
+        title: "Note ready",
+        body: truncate(entry.title, 60),
+        onClick: vaultPath ? () => void this.openVaultFile(vaultPath) : undefined,
+      });
+    } else if (kind === "failed") {
+      const reason = entry.error ? truncate(entry.error, 100) : entry.label;
+      this.notifier.notify({
+        title: "Note failed",
+        body: `${entry.label} — ${reason}`,
+        onClick: () => void this.activateQueueView(),
+      });
+    } else {
+      this.notifier.notify({
+        title: "Note cancelled",
+        body: "Your draft has been restored to the composer.",
+      });
     }
   }
 
@@ -413,4 +455,9 @@ export default class ThanyMarcusPlugin extends Plugin {
 function formatTime(d: Date): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return `${s.slice(0, n - 1)}…`;
 }

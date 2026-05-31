@@ -111,7 +111,8 @@ public sealed class PhaseDispatcherTests(PostgresFixture postgres)
         after.Status.ShouldBe(IngestJobStatus.Synthesizing);
 
         var note = await probe.Notes.SingleAsync(n => n.Id == noteId, ct);
-        note.ProjectId.ShouldBeNull();
+        note.RelativePath.ShouldNotBeNull();
+        note.RelativePath!.ShouldStartWith("Inbox/");
     }
 
     [Fact]

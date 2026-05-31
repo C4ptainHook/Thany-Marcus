@@ -60,6 +60,7 @@ public static class AttachmentExtractionStatus
 {
     public const string Pending = "pending";
     public const string Extracted = "extracted";
+    public const string ExtractedMinimal = "extracted_minimal";
     public const string Skipped = "skipped";
     public const string Failed = "failed";
 }

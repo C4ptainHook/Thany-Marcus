@@ -12,6 +12,7 @@ using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Pricing;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 
@@ -26,6 +27,7 @@ public sealed partial class TfApplyingHandler(
     IDigitalOceanOAuthConnections connections,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
+    IDoSizesCatalog doSizesCatalog,
     IConfiguration config,
     ILogger<TfApplyingHandler> log) : ISagaPhaseHandler
 {
@@ -164,6 +166,11 @@ public sealed partial class TfApplyingHandler(
 
             cloud.VmIp = TryReadIp(tfOutputs);
 
+            if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
+            {
+                await TryStampPricingAsync(cloud, dek, ct);
+            }
+
             EventsLogAppender.Append(job, clock, Phase, new JsonObject
             {
                 ["event"] = "apply_succeeded",
@@ -214,7 +221,49 @@ public sealed partial class TfApplyingHandler(
         return env;
     }
 
+    private async Task TryStampPricingAsync(Cloud cloud, byte[] dek, CancellationToken ct)
+    {
+        try
+        {
+            var accessToken = await connections.GetAccessTokenAsync(cloud.UserId, dek, ct);
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                LogPricingNoToken(log, cloud.Id);
+                return;
+            }
+
+            var size = await doSizesCatalog.GetAsync(workspaceLayout.DefaultSize, accessToken, ct);
+            if (size is null)
+            {
+                LogPricingNotFound(log, cloud.Id, workspaceLayout.DefaultSize);
+                return;
+            }
+
+            cloud.PriceMonthlyUsd = size.MonthlyUsd;
+            cloud.PriceHourlyUsd  = size.HourlyUsd;
+            cloud.PriceCurrency   = "USD";
+            cloud.PricedAt        = clock.GetCurrentInstant();
+            cloud.PricedSource    = "do_api_v2_sizes";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogPricingFetchFailed(log, ex, cloud.Id);
+        }
+    }
+
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,
         Message = "TfApplyingHandler: plan.tfplan missing for job {JobId}; re-rendering and re-planning")]
     private static partial void LogReplan(ILogger logger, Guid jobId);
+
+    [LoggerMessage(EventId = 2, Level = LogLevel.Warning,
+        Message = "TfApplyingHandler: pricing stamp skipped for cloud {CloudId}: DO access token unavailable")]
+    private static partial void LogPricingNoToken(ILogger logger, Guid cloudId);
+
+    [LoggerMessage(EventId = 3, Level = LogLevel.Warning,
+        Message = "TfApplyingHandler: pricing stamp skipped for cloud {CloudId}: size {Slug} not found in /v2/sizes")]
+    private static partial void LogPricingNotFound(ILogger logger, Guid cloudId, string slug);
+
+    [LoggerMessage(EventId = 4, Level = LogLevel.Warning,
+        Message = "TfApplyingHandler: pricing stamp failed for cloud {CloudId}; columns left null")]
+    private static partial void LogPricingFetchFailed(ILogger logger, Exception ex, Guid cloudId);
 }

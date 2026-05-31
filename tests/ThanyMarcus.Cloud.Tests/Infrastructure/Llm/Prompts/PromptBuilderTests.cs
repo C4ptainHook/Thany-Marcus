@@ -10,29 +10,21 @@ public sealed class PromptBuilderTests
     private static readonly string[] JohnnyAliases = { "Johnny" };
 
     [Fact]
-    public void BuildRoute_with_projects_emits_id_and_canonical_name()
+    public void BuildRoute_with_folders_emits_folder_names()
     {
-        var p1 = Guid.Parse("9b3c4f12-0000-0000-0000-000000000001");
-        var p2 = Guid.Parse("9b3c4f12-0000-0000-0000-000000000002");
-        var projects = new[]
-        {
-            new ProjectListItem(p1, "Acme", "supplier"),
-            new ProjectListItem(p2, "Beta", null),
-        };
-        var prompt = PromptBuilder.BuildRoute(projects, "the body");
-        prompt.ShouldContain(p1.ToString());
+        var folders = new[] { "Acme", "Beta" };
+        var prompt = PromptBuilder.BuildRoute(folders, "the body");
         prompt.ShouldContain("Acme");
-        prompt.ShouldContain("supplier");
-        prompt.ShouldContain(p2.ToString());
         prompt.ShouldContain("Beta");
         prompt.ShouldContain("the body");
         prompt.ShouldContain("Respond with JSON ONLY");
+        prompt.ShouldNotContain("9b3c4f12");
     }
 
     [Fact]
-    public void BuildRoute_with_no_projects_emits_none_marker()
+    public void BuildRoute_with_no_folders_emits_none_marker()
     {
-        var prompt = PromptBuilder.BuildRoute(Array.Empty<ProjectListItem>(), "body");
+        var prompt = PromptBuilder.BuildRoute(Array.Empty<string>(), "body");
         prompt.ShouldContain("(none)");
     }
 

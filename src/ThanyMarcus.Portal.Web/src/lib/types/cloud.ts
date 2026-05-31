@@ -1,7 +1,7 @@
 export type Provider = 'digitalocean' | 'hetzner' | 'azure';
 export type JobKind = 'create' | 'destroy';
 export type ProvisioningStatus =
-  | 'pending' | 'tf_planning' | 'tf_applying' | 'dns_creating'
+  | 'pending' | 'minting_spaces' | 'tf_planning' | 'tf_applying' | 'dns_creating'
   | 'awaiting_cloud_callback' | 'awaiting_cert' | 'issuing_plugin_token' | 'succeeded'
   | 'destroying' | 'rolling_back_dns' | 'rolling_back_tf'
   | 'rolled_back' | 'failed_tf' | 'failed_dns' | 'failed_callback'
@@ -32,6 +32,10 @@ export interface CloudStatusResponse {
   destroyedAt: string | null;
   currentJob: JobSummary | null;
   recentEvents: EventSummary[];
+  priceMonthlyUsd: number | null;
+  priceHourlyUsd: number | null;
+  priceCurrency: string | null;
+  pricedAt: string | null;
 }
 
 export interface CloudHealthz {
@@ -44,6 +48,7 @@ export interface CloudHealthz {
 
 export const IN_FLIGHT_CREATE_STATUSES: ProvisioningStatus[] = [
   'pending',
+  'minting_spaces',
   'tf_planning',
   'tf_applying',
   'dns_creating',

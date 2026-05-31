@@ -140,7 +140,7 @@
     </section>
   {/if}
 
-  <CostCard cloud={cloud} workerUptimeMonthSeconds={null} />
+  <CostCard cloud={cloud} />
 </main>
 
 <style>

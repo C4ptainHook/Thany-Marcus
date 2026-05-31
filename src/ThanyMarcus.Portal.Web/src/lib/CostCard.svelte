@@ -2,16 +2,13 @@
   import { computeMonthCosts } from './costs';
   import type { CloudStatusResponse } from './types/cloud';
 
-  type Props = {
-    cloud: CloudStatusResponse;
-    workerUptimeMonthSeconds: number | null;
-  };
-  let { cloud, workerUptimeMonthSeconds }: Props = $props();
+  type Props = { cloud: CloudStatusResponse };
+  let { cloud }: Props = $props();
 
   let breakdown = $derived(computeMonthCosts({
     provider: cloud.provider,
     provisionedAt: cloud.succeededAt,
-    workerUptimeMonthSeconds,
+    priceHourlyUsd: cloud.priceHourlyUsd,
   }));
 
   function fmt(n: number | null): string {
@@ -25,11 +22,13 @@
     {fmt(breakdown.totalThisMonth)} this month
   </p>
   <p class="meta muted">
-    {fmt(breakdown.controlPlaneCost)} control plane (always-on)
-    {#if breakdown.workerUnavailable}
-      · worker stats unavailable
+    {#if breakdown.unavailable}
+      pricing unavailable for this provider
     {:else}
-      · {fmt(breakdown.workerCost)} worker ({breakdown.workerHours?.toFixed(1)} hrs)
+      {breakdown.sku} · {breakdown.hours?.toFixed(1)} hrs since {cloud.succeededAt ? 'provision' : 'month start'}
+      {#if cloud.priceHourlyUsd != null}
+        · ${cloud.priceHourlyUsd.toFixed(5)}/h{#if cloud.pricedAt} · locked {new Date(cloud.pricedAt).toLocaleDateString()}{/if}
+      {/if}
     {/if}
   </p>
 </section>

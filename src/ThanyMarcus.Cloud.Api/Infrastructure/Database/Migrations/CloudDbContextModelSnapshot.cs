@@ -117,7 +117,7 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
 
                     b.ToTable("entities", null, t =>
                         {
-                            t.HasCheckConstraint("ck_entities_kind", "kind IN ('person','organization','project','place','concept','other')");
+                            t.HasCheckConstraint("ck_entities_kind", "kind IN ('person','organization','place','concept','other')");
 
                             t.HasCheckConstraint("ck_entities_source", "source IN ('user','llm')");
                         });
@@ -255,7 +255,7 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
 
                     b.ToTable("entity_suggestions", null, t =>
                         {
-                            t.HasCheckConstraint("ck_entity_suggestions_kind", "kind IN ('person','organization','project','place','concept','other')");
+                            t.HasCheckConstraint("ck_entity_suggestions_kind", "kind IN ('person','organization','place','concept','other')");
                         });
                 });
 
@@ -381,7 +381,7 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
 
                     b.ToTable("attachments", null, t =>
                         {
-                            t.HasCheckConstraint("ck_attachments_extraction_status", "extraction_status IN ('pending','extracted','skipped','failed')");
+                            t.HasCheckConstraint("ck_attachments_extraction_status", "extraction_status IN ('pending','extracted','extracted_minimal','skipped','failed')");
 
                             t.HasCheckConstraint("ck_attachments_kind", "kind IN ('url','image','voice','file')");
 

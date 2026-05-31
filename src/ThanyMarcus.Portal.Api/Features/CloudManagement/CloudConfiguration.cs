@@ -17,6 +17,10 @@ public sealed class CloudConfiguration : IEntityTypeConfiguration<Cloud>
         builder.Property(c => c.Hostname).IsRequired();
         builder.Property(c => c.EncryptedCloudAdminToken).IsRequired(false);
         builder.Property(c => c.ProvisioningStatus).IsRequired();
+
+        builder.Property(c => c.PriceMonthlyUsd).HasColumnType("numeric(10,4)");
+        builder.Property(c => c.PriceHourlyUsd).HasColumnType("numeric(10,6)");
+        builder.Property(c => c.PriceCurrency).HasDefaultValue("USD");
         builder.Property(c => c.CreatedAt).IsRequired();
         builder.Property(c => c.UpdatedAt).IsRequired();
 

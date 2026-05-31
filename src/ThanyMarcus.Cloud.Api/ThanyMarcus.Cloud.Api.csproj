@@ -34,8 +34,6 @@
     <PackageReference Include="OpenTelemetry.Exporter.Console" />
 
     <PackageReference Include="AWSSDK.S3" />
-    <PackageReference Include="SmartReader" />
-    <PackageReference Include="ReverseMarkdown" />
     <PackageReference Include="Pgvector" />
     <PackageReference Include="Pgvector.EntityFrameworkCore" />
 

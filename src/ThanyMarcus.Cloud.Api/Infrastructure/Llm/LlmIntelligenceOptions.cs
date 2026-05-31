@@ -9,7 +9,7 @@ public sealed class LlmIntelligenceOptions
     public int HubMaterializeMin { get; init; } = 3;
     public int HubMentionWindow { get; init; } = 20;
     public int SurroundingTextChars { get; init; } = 200;
-    public int RoutingProjectsMax { get; init; } = 50;
+    public int RoutingFoldersMax { get; init; } = 50;
 }
 
 public sealed class ThresholdsOptions

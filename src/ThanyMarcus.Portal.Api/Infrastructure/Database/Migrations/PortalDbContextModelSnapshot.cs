@@ -470,6 +470,28 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("plan_started_at");
 
+                    b.Property<string>("PriceCurrency")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("USD")
+                        .HasColumnName("price_currency");
+
+                    b.Property<decimal?>("PriceHourlyUsd")
+                        .HasColumnType("numeric(10,6)")
+                        .HasColumnName("price_hourly_usd");
+
+                    b.Property<decimal?>("PriceMonthlyUsd")
+                        .HasColumnType("numeric(10,4)")
+                        .HasColumnName("price_monthly_usd");
+
+                    b.Property<Instant?>("PricedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("priced_at");
+
+                    b.Property<string>("PricedSource")
+                        .HasColumnType("text")
+                        .HasColumnName("priced_source");
+
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasColumnType("text")

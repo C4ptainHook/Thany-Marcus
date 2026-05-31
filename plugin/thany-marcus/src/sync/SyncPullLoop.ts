@@ -73,7 +73,7 @@ export class SyncPullLoop {
       while (true) {
         const cursor = this.getCursor();
         const res: SyncPullResponse = await this.api.syncPull(cursor, PAGE_LIMIT);
-        if (res.items.length === 0 && res.projects.length === 0) break;
+        if (res.items.length === 0) break;
 
         for (const item of res.items) {
           try {

@@ -3,6 +3,7 @@
   import { subscribeToEvents } from './sse';
   import { apiFetch, parseProblem } from './http';
   import StatusPill from './StatusPill.svelte';
+  import { notify as desktopNotify } from './notifications/browserNotifier';
   import { PhaseOrder, type PhaseName, type WizardSseEvent } from './types/provisioning';
   import type { CloudStatusResponse } from './types/cloud';
 
@@ -100,6 +101,27 @@
     phases = next;
   }
 
+  let terminalNotified = false;
+  function fireFailedNotification(stage: string | undefined, reason: string | undefined): void {
+    if (mode !== 'create' || terminalNotified) return;
+    terminalNotified = true;
+    const reasonText = (reason ?? '').slice(0, 100);
+    const body = stage ? `${stage}: ${reasonText}` : reasonText || 'See dashboard for details';
+    desktopNotify({
+      title: 'Cloud provisioning failed',
+      body,
+      onClick: () => focusCloudTile(initial.cloudId),
+    });
+  }
+
+  function focusCloudTile(cloudId: string): void {
+    try { window.focus(); } catch { /* ignore */ }
+    const el = document.querySelector(`[data-cloud-id="${cloudId}"]`);
+    if (el && 'scrollIntoView' in el) {
+      (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
   onMount(() => {
     const close = subscribeToEvents<WizardSseEvent>(`/api/clouds/${initial.cloudId}/events`, {
       phase_started:   (e) => { if (e.type === 'phase_started')   advanceTo(e.phase, 'in_progress'); },
@@ -108,17 +130,27 @@
         if (e.type !== 'phase_failed') return;
         update(e.phase, 'failed');
         terminalMessage = e.message || e.reason;
+        fireFailedNotification(e.phase, e.message || e.reason);
         close();
         setTimeout(onTerminal, 800);
       },
       cloud_ready: () => {
         for (const p of (mode === 'create' ? PhaseOrder : (DESTROY_PHASES as string[]))) update(p, 'done');
+        if (mode === 'create' && !terminalNotified) {
+          terminalNotified = true;
+          desktopNotify({
+            title: 'Cloud ready',
+            body: initial.hostname,
+            onClick: () => focusCloudTile(initial.cloudId),
+          });
+        }
         close();
         setTimeout(onTerminal, 400);
       },
       cloud_failed: (e) => {
         if (e.type !== 'cloud_failed') return;
         terminalMessage = e.message || e.reason;
+        fireFailedNotification(undefined, e.message || e.reason);
         close();
         setTimeout(onTerminal, 800);
       },

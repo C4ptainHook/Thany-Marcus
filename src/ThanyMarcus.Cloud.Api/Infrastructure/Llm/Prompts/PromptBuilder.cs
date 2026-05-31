@@ -12,17 +12,14 @@ public static class PromptBuilder
         WriteIndented = false,
     };
 
-    public static string BuildRoute(IReadOnlyList<ProjectListItem> projects, string bodyExcerpt)
+    public static string BuildRoute(IReadOnlyList<string> folders, string bodyExcerpt)
     {
-        ArgumentNullException.ThrowIfNull(projects);
+        ArgumentNullException.ThrowIfNull(folders);
         ArgumentNullException.ThrowIfNull(bodyExcerpt);
-        var projectList = projects.Count == 0
+        var folderList = folders.Count == 0
             ? "(none)"
-            : string.Join("\n", projects.Select(p =>
-                string.IsNullOrWhiteSpace(p.Description)
-                    ? $"- {p.Id}: {p.CanonicalName}"
-                    : $"- {p.Id}: {p.CanonicalName} — {p.Description}"));
-        return string.Format(CultureInfo.InvariantCulture, PromptTemplates.RouteV1Format, projectList, bodyExcerpt);
+            : string.Join("\n", folders.Select(f => $"- {f}"));
+        return string.Format(CultureInfo.InvariantCulture, PromptTemplates.RouteV1Format, folderList, bodyExcerpt);
     }
 
     public static string BuildExtract(string body)
@@ -92,8 +89,6 @@ public static class PromptBuilder
         return sb.ToString();
     }
 }
-
-public sealed record ProjectListItem(Guid Id, string CanonicalName, string? Description);
 
 public sealed record EntityNeighbor(
     Guid Id,

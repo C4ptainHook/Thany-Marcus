@@ -6,32 +6,27 @@ public static class PromptTemplates
 {
     public const string RouteV1 = """
         You are a note-routing assistant. Given a note and a list of the user's
-        projects, decide if the note clearly belongs to ONE of them.
+        vault folders, decide which folder it clearly belongs to.
 
-        Default to null. Only return a project_entity_id when the note's content
-        directly references that project's subject matter — its name, members,
-        artifacts, or topics. Tonal or vibe matches are not enough.
+        Default to null (the note goes to Inbox). Only return a folder when the
+        note's content directly references its subject — its name, its members,
+        its artifacts, or its topics.
 
         Examples of WRONG routing (return null instead):
-        - Personal note about a movie / book / hobby → null (even if a project name
-          slightly rhymes or shares a theme).
+        - Personal note about a movie / book / hobby → null (even if a folder
+          name slightly rhymes or shares a theme).
         - Generic productivity musing → null.
-        - Note about one project where another project has a tangentially-similar
+        - Note about one topic where another folder has a tangentially-similar
           word in its name → null.
 
-        Examples of CORRECT routing:
-        - Note explicitly names the project, its lead, or its codebase.
-        - Note continues a thread from a prior note routed to that project (you
-          cannot verify this; rely on direct content overlap).
-
-        PROJECTS:
+        FOLDERS:
         {0}
 
         NOTE CONTENT:
         {1}
 
         Respond with JSON ONLY in this exact shape:
-        {{"project_entity_id": "<uuid or null>", "confidence": <0.0-1.0>, "rationale": "<one-sentence reasoning citing the specific overlap, or 'no clear project match' for null>"}}
+        {{"folder": "<exact folder name or null>", "confidence": <0.0-1.0>, "rationale": "<one-sentence reasoning citing the specific overlap, or 'no clear folder match' for null>"}}
 
         Confidence ≥ 0.7 means you cite a specific overlap. Below 0.7, return null.
         /no_think
@@ -42,7 +37,7 @@ public static class PromptTemplates
         in the note body below. For each mention, return:
           - the surface anchor text exactly as it appears
           - the start and end character offsets in the body (0-based, end-exclusive)
-          - the entity kind (one of: person, organization, project, place, concept, other)
+          - the entity kind (one of: person, organization, place, concept, other)
           - a canonical name (the entity's normalized form)
           - aliases (other surface forms that refer to the same entity)
           - confidence (0.0-1.0) of the extraction

@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
-using ThanyMarcus.Cloud.Api.Features.Entities;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
@@ -44,26 +43,6 @@ public static class SyncPullEndpoint
             .OrderBy(n => n.UpdatedAt)
             .Take(pageSize)
             .ToListAsync(ct);
-
-        var projectsRaw = await db.Entities
-            .Where(e => e.Kind == EntityKind.Project && e.UpdatedAt > sinceInstant)
-            .OrderBy(e => e.UpdatedAt)
-            .Take(pageSize)
-            .ToListAsync(ct);
-
-        var projects = new List<SyncPullProject>(projectsRaw.Count);
-        foreach (var e in projectsRaw)
-        {
-            projects.Add(new SyncPullProject(
-                EntityId:      e.Id,
-                CanonicalName: e.CanonicalName,
-                Aliases:       e.Aliases ?? Array.Empty<string>(),
-                Description:   e.Description,
-                VaultFolder:   e.VaultFolder,
-                IsUserSource:  string.Equals(e.Source, EntitySource.User, StringComparison.Ordinal),
-                UpdatedAt:     e.UpdatedAt.ToDateTimeOffset(),
-                DeletedAt:     e.DeletedAt?.ToDateTimeOffset()));
-        }
 
         var items = new List<SyncPullItem>(notes.Count);
         if (notes.Count > 0)
@@ -152,20 +131,8 @@ public static class SyncPullEndpoint
             }
         }
 
-        DateTimeOffset? nextSince = null;
-        if (items.Count > 0 || projects.Count > 0)
-        {
-            DateTimeOffset? notesMax = items.Count > 0 ? items.Max(i => i.UpdatedAt) : null;
-            DateTimeOffset? projectsMax = projects.Count > 0 ? projects.Max(p => p.UpdatedAt) : null;
-            nextSince = (notesMax, projectsMax) switch
-            {
-                ({ } a, { } b) => a > b ? a : b,
-                ({ } a, null)  => a,
-                (null, { } b)  => b,
-                _              => null,
-            };
-        }
+        DateTimeOffset? nextSince = items.Count > 0 ? items.Max(i => i.UpdatedAt) : null;
 
-        return Results.Ok(new SyncPullResponse(items, projects, nextSince));
+        return Results.Ok(new SyncPullResponse(items, nextSince));
     }
 }

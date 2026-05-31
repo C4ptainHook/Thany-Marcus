@@ -12,6 +12,7 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Pricing;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
@@ -67,6 +68,17 @@ public static class Program
         builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
         builder.Services.AddScoped<IDigitalOceanOAuthConnections, DigitalOceanOAuthConnections>();
         builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
+
+        builder.Services.AddMemoryCache();
+        builder.Services.AddHttpClient(DoSizesCatalog.HttpClientName, c =>
+        {
+            c.BaseAddress = new Uri("https://api.digitalocean.com/");
+            c.Timeout = TimeSpan.FromSeconds(15);
+        })
+        .AddPolicyHandler(HttpPolicyExtensions
+            .HandleTransientHttpError()
+            .WaitAndRetryAsync(2, n => TimeSpan.FromMilliseconds(200 * Math.Pow(3, n - 1))));
+        builder.Services.AddSingleton<IDoSizesCatalog, DoSizesCatalog>();
 
         builder.Services.Configure<DigitalOceanOAuthOptions>(builder.Configuration.GetSection("DigitalOcean:OAuth"));
         builder.Services.AddHttpClient<IDigitalOceanOAuthClient, DigitalOceanOAuthClient>(c =>

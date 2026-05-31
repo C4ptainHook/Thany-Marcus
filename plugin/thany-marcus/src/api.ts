@@ -95,37 +95,9 @@ export interface SyncPullItem {
   extractionFailures?: ExtractionFailure[];
 }
 
-export interface SyncPullProject {
-  entityId: string;
-  canonicalName: string;
-  aliases: string[];
-  description: string | null;
-  vaultFolder: string | null;
-  isUserSource: boolean;
-  updatedAt: string;
-  deletedAt?: string | null;
-}
-
 export interface SyncPullResponse {
   items: SyncPullItem[];
-  projects: SyncPullProject[];
   nextSince: string | null;
-}
-
-export interface ProjectDto {
-  id: string;
-  name: string;
-  description: string | null;
-  mentionCount: number;
-}
-
-export interface ListProjectsResponse {
-  projects: ProjectDto[];
-}
-
-export interface CreateProjectRequest {
-  name: string;
-  description?: string;
 }
 
 export interface RelatedNotesItem {
@@ -144,6 +116,21 @@ export interface RelatedNotesRequest {
   body?: string;
   noteId?: string;
   k?: number;
+}
+
+export interface IngestJobDto {
+  noteId: string;
+  title: string;
+  status: string;
+  attemptCount: number;
+  error: string | null;
+  vaultPath: string | null;
+  extractionFailures: { kind: string; reason: string }[];
+}
+
+export interface ListJobsResponse {
+  active: IngestJobDto[];
+  recent: IngestJobDto[];
 }
 
 export interface EntitySuggestionOccurrence {
@@ -269,39 +256,6 @@ export class ApiClient {
     }
   }
 
-  async listProjects(): Promise<ProjectDto[]> {
-    const res = await this.json<ListProjectsResponse>({
-      url: `${this.base()}/api/projects`,
-      method: "GET",
-    });
-    return res.projects;
-  }
-
-  async createProject(req: CreateProjectRequest): Promise<ProjectDto> {
-    return this.json<ProjectDto>({
-      url: `${this.base()}/api/projects`,
-      method: "POST",
-      contentType: "application/json",
-      body: JSON.stringify(req),
-    });
-  }
-
-  async deleteProject(id: string): Promise<void> {
-    const res = await requestUrl({
-      url: `${this.base()}/api/projects/${id}`,
-      method: "DELETE",
-      headers: this.authHeader(),
-      throw: false,
-    });
-    if (res.status === 401) {
-      this.onAuthFailure();
-      throw new TokenRevokedError();
-    }
-    if (res.status < 200 || res.status >= 300) {
-      throw new Error(`DELETE /api/projects/${id} → HTTP ${res.status}`);
-    }
-  }
-
   async cancelIngest(noteId: string): Promise<{ ok: true } | { ok: false; conflict: true; reason: string }> {
     const res = await requestUrl({
       url: `${this.base()}/api/ingest/${noteId}/cancel`,
@@ -361,6 +315,14 @@ export class ApiClient {
     }
     const data = (await res.json()) as RelatedNotesResponse;
     return data.items ?? [];
+  }
+
+  async listActiveJobs(includeRecent = true): Promise<ListJobsResponse> {
+    const qs = includeRecent ? "status=active&include=recent" : "status=active";
+    return this.json<ListJobsResponse>({
+      url: `${this.base()}/api/ingest/jobs?${qs}`,
+      method: "GET",
+    });
   }
 
   async reprocess(noteId: string): Promise<void> {

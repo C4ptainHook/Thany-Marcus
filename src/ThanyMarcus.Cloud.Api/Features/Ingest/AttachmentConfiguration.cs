@@ -14,7 +14,7 @@ public sealed class AttachmentConfiguration : IEntityTypeConfiguration<Attachmen
             t.HasCheckConstraint("ck_attachments_status",
                 "status IN ('pending','awaiting_upload','uploaded')");
             t.HasCheckConstraint("ck_attachments_extraction_status",
-                "extraction_status IN ('pending','extracted','skipped','failed')");
+                "extraction_status IN ('pending','extracted','extracted_minimal','skipped','failed')");
         });
         builder.HasKey(a => a.Id);
 

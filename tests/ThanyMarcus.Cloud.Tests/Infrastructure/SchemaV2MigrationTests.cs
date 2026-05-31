@@ -56,7 +56,7 @@ public sealed class SchemaV2MigrationTests(PostgresFixture fx) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task entities_partial_unique_blocks_duplicate_project()
+    public async Task entities_partial_unique_blocks_duplicate_within_kind()
     {
         var ct = TestContext.Current.CancellationToken;
         await using var conn = new NpgsqlConnection(fx.ConnectionString);
@@ -64,13 +64,13 @@ public sealed class SchemaV2MigrationTests(PostgresFixture fx) : IAsyncLifetime
 
         await ExecuteAsync(conn,
             "INSERT INTO entities (id, kind, canonical_name, source, created_at, updated_at) " +
-            "VALUES (gen_random_uuid(), 'project', 'TestProj', 'user', now(), now())",
+            "VALUES (gen_random_uuid(), 'person', 'TestPerson', 'user', now(), now())",
             ct);
 
         var ex = await Should.ThrowAsync<PostgresException>(async () =>
             await ExecuteAsync(conn,
                 "INSERT INTO entities (id, kind, canonical_name, source, created_at, updated_at) " +
-                "VALUES (gen_random_uuid(), 'project', 'TestProj', 'user', now(), now())",
+                "VALUES (gen_random_uuid(), 'person', 'TestPerson', 'user', now(), now())",
                 ct));
         ex.SqlState.ShouldBe(PostgresErrorCodes.UniqueViolation);
     }

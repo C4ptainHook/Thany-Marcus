@@ -1,23 +1,33 @@
 import { App, ItemView, Modal, Notice, Setting, WorkspaceLeaf } from "obsidian";
-import type { ProjectDto } from "../api";
+import type { ListJobsResponse } from "../api";
 import {
   EntitySuggestionsPanel,
   type EntitySuggestionActions,
 } from "../sidebar/EntitySuggestionsPanel";
 import { isCancellable, isFailure, isTerminal } from "./labels";
+import { visibleFailures } from "./queueFailures";
 import type { QueueStore } from "./QueueStore";
 
 export const QUEUE_VIEW_TYPE = "thany-marcus-queue";
 
-export interface ProjectActions {
-  list: () => Promise<ProjectDto[]>;
-  create: (name: string, description?: string) => Promise<ProjectDto>;
-  remove: (id: string) => Promise<void>;
+export interface QueueHydrator {
+  listActiveJobs: (includeRecent?: boolean) => Promise<ListJobsResponse>;
+}
+
+export async function hydrateQueueFromCloud(
+  hydrator: QueueHydrator,
+  store: QueueStore,
+): Promise<void> {
+  try {
+    const { active, recent } = await hydrator.listActiveJobs(true);
+    store.hydrate([...active, ...recent]);
+  } catch (e) {
+    console.error("[Thany] listActiveJobs failed", e);
+  }
 }
 
 export class QueueSidebarView extends ItemView {
   private unsubscribe: (() => void) | null = null;
-  private projects: ProjectDto[] = [];
   private suggestionsPanel: EntitySuggestionsPanel | null = null;
   private suggestionsHost: HTMLElement | null = null;
 
@@ -27,8 +37,8 @@ export class QueueSidebarView extends ItemView {
     private readonly onOpenNote: (vaultPath: string) => void,
     private readonly onReprocess: (noteId: string) => void,
     private readonly onCancel: (noteId: string) => void,
-    private readonly projectActions: ProjectActions,
     private readonly suggestionActions: EntitySuggestionActions,
+    private readonly hydrator: QueueHydrator,
   ) {
     super(leaf);
   }
@@ -48,14 +58,15 @@ export class QueueSidebarView extends ItemView {
   async onOpen(): Promise<void> {
     this.suggestionsHost = document.createElement("div");
     this.suggestionsPanel = new EntitySuggestionsPanel(this.suggestionActions, this.suggestionsHost, {
-      onAccepted: () => void this.refreshProjects(),
       notify: (m) => new Notice(m),
     });
     this.suggestionsPanel.start();
 
     this.unsubscribe = this.store.subscribe(() => this.render());
+
+    await hydrateQueueFromCloud(this.hydrator, this.store);
+
     this.render();
-    void this.refreshProjects();
   }
 
   async onClose(): Promise<void> {
@@ -66,21 +77,10 @@ export class QueueSidebarView extends ItemView {
     this.suggestionsHost = null;
   }
 
-  private async refreshProjects(): Promise<void> {
-    try {
-      this.projects = await this.projectActions.list();
-      this.render();
-    } catch (e) {
-      console.error("[Thany] listProjects failed", e);
-    }
-  }
-
   private render(): void {
     const root = this.containerEl.children[1] as HTMLElement;
     root.empty();
     root.addClass("tm-queue");
-
-    this.renderProjectsSection(root);
 
     // The suggestions panel owns its own host element so its DOM + polling survive the
     // queue's full re-render on every store change — we just re-parent it each time.
@@ -97,7 +97,8 @@ export class QueueSidebarView extends ItemView {
     }
 
     for (const e of entries) {
-      const hasFailures = (e.extractionFailures?.length ?? 0) > 0;
+      const displayFailures = visibleFailures(e.extractionFailures);
+      const hasFailures = displayFailures.length > 0;
       const row = list.createDiv({ cls: "tm-queue__row" });
       if (isFailure(e.status)) row.addClass("tm-queue__row--failed");
       else if (hasFailures) row.addClass("tm-queue__row--ready", "tm-queue__row--has-failures");
@@ -107,7 +108,7 @@ export class QueueSidebarView extends ItemView {
       const title = row.createDiv({ cls: "tm-queue__title", text: e.title });
       title.setAttr("title", e.noteId);
       const badgeText = hasFailures
-        ? `${e.label} · ${e.extractionFailures!.length} failure${e.extractionFailures!.length === 1 ? "" : "s"}`
+        ? `${e.label} · ${displayFailures.length} failure${displayFailures.length === 1 ? "" : "s"}`
         : e.label;
       row.createDiv({ cls: "tm-queue__badge", text: badgeText });
 
@@ -117,7 +118,7 @@ export class QueueSidebarView extends ItemView {
 
       if (hasFailures) {
         const fb = row.createDiv({ cls: "tm-queue__failures" });
-        for (const f of e.extractionFailures!) {
+        for (const f of displayFailures) {
           fb.createDiv({ text: `${f.kind}: ${f.reason}` });
         }
         const btn = row.createEl("button", { cls: "tm-queue__reprocess", text: "Reprocess" });
@@ -145,120 +146,6 @@ export class QueueSidebarView extends ItemView {
         row.addClass("tm-queue__row--clickable");
       }
     }
-  }
-
-  private renderProjectsSection(root: HTMLElement): void {
-    const wrap = root.createDiv({ cls: "tm-projects" });
-    const head = wrap.createDiv({ cls: "tm-projects__header" });
-    head.createSpan({ text: "Projects" });
-    const addBtn = head.createEl("button", { cls: "tm-projects__add", text: "+ New" });
-    addBtn.onclick = () => void this.promptCreateProject();
-
-    if (this.projects.length === 0) {
-      wrap.createDiv({
-        cls: "tm-projects__empty",
-        text: "No projects yet — new notes land in Inbox.",
-      });
-      return;
-    }
-
-    const list = wrap.createDiv({ cls: "tm-projects__list" });
-    for (const p of this.projects) {
-      const row = list.createDiv({ cls: "tm-projects__row" });
-      const name = row.createDiv({ cls: "tm-projects__name", text: p.name });
-      if (p.description) name.setAttr("title", p.description);
-      row.createDiv({ cls: "tm-projects__count", text: String(p.mentionCount) });
-      const del = row.createEl("button", { cls: "tm-projects__delete", text: "×" });
-      del.setAttr("title", `Delete project '${p.name}'`);
-      del.onclick = (ev) => {
-        ev.stopPropagation();
-        void this.confirmDeleteProject(p);
-      };
-    }
-  }
-
-  private promptCreateProject(): void {
-    new CreateProjectModal(this.app, async (name, description) => {
-      try {
-        await this.projectActions.create(name, description);
-        new Notice(`Project '${name}' created`);
-        await this.refreshProjects();
-      } catch (e) {
-        new Notice(`Create failed: ${(e as Error).message}`);
-      }
-    }).open();
-  }
-
-  private confirmDeleteProject(p: ProjectDto): void {
-    new ConfirmModal(
-      this.app,
-      `Delete project '${p.name}'?`,
-      "Notes already routed there keep their folder.",
-      async () => {
-        try {
-          await this.projectActions.remove(p.id);
-          new Notice(`Project '${p.name}' deleted`);
-          await this.refreshProjects();
-        } catch (e) {
-          new Notice(`Delete failed: ${(e as Error).message}`);
-        }
-      },
-    ).open();
-  }
-}
-
-class CreateProjectModal extends Modal {
-  private name = "";
-  private description = "";
-
-  constructor(
-    app: App,
-    private readonly onSubmit: (name: string, description?: string) => Promise<void>,
-  ) {
-    super(app);
-  }
-
-  onOpen(): void {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl("h3", { text: "New project" });
-
-    new Setting(contentEl)
-      .setName("Name")
-      .setDesc("Will become the vault folder for routed notes")
-      .addText((t) => {
-        t.setPlaceholder("e.g. Reply.io").onChange((v) => (this.name = v));
-        setTimeout(() => t.inputEl.focus(), 0);
-      });
-
-    new Setting(contentEl)
-      .setName("Description")
-      .setDesc("Optional. Helps the router pick the right project.")
-      .addText((t) => t.setPlaceholder("optional").onChange((v) => (this.description = v)));
-
-    new Setting(contentEl)
-      .addButton((b) =>
-        b.setButtonText("Cancel").onClick(() => this.close()),
-      )
-      .addButton((b) =>
-        b
-          .setButtonText("Create")
-          .setCta()
-          .onClick(async () => {
-            const name = this.name.trim();
-            if (!name) {
-              new Notice("Name is required");
-              return;
-            }
-            const description = this.description.trim() || undefined;
-            this.close();
-            await this.onSubmit(name, description);
-          }),
-      );
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
   }
 }
 
@@ -295,4 +182,3 @@ class ConfirmModal extends Modal {
     this.contentEl.empty();
   }
 }
-

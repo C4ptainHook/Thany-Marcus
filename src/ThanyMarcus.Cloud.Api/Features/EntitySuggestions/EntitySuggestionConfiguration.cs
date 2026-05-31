@@ -11,7 +11,7 @@ public sealed class EntitySuggestionConfiguration : IEntityTypeConfiguration<Ent
         builder.ToTable("entity_suggestions", t =>
         {
             t.HasCheckConstraint("ck_entity_suggestions_kind",
-                "kind IN ('person','organization','project','place','concept','other')");
+                "kind IN ('person','organization','place','concept','other')");
         });
         builder.HasKey(e => e.Id);
 

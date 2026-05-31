@@ -122,22 +122,31 @@ public static class SourcesRenderer
 
     private static string RenderUrl(Attachment att)
     {
-        var sb = new StringBuilder();
-        var (title, canonicalUrl) = ReadUrlExtra(att);
-        var url = canonicalUrl ?? att.Url ?? string.Empty;
-        var heading = !string.IsNullOrWhiteSpace(title) ? title! : url;
-        sb.Append(CultureInfo.InvariantCulture, $"> [!source]- URL — [{Escape(heading)}]({url})\n");
-        if (att.ExtractionStatus == AttachmentExtractionStatus.Failed)
+        var meta = ReadUrlExtra(att);
+        var url = meta.CanonicalUrl ?? att.Url ?? string.Empty;
+
+        string heading;
+        if (!string.IsNullOrWhiteSpace(meta.Title))
         {
-            sb.Append(CultureInfo.InvariantCulture, $"> URL fetch failed: {SanitizeOneLine(att.ExtractionError ?? "unknown")}\n");
-        }
-        else if (!string.IsNullOrWhiteSpace(att.ExtractedText))
-        {
-            AppendCalloutBody(sb, att.ExtractedText!);
+            var bracket = !string.IsNullOrWhiteSpace(meta.ProviderName) ? $"[{meta.ProviderName}] " : "";
+            var by      = !string.IsNullOrWhiteSpace(meta.AuthorName)   ? $" — {meta.AuthorName}"   : "";
+            heading = $"{bracket}{meta.Title}{by}";
         }
         else
         {
-            sb.AppendLine("> (no extracted text)");
+            heading = url;
+        }
+
+        var sb = new StringBuilder();
+        sb.Append(CultureInfo.InvariantCulture, $"> [!source]- URL — [{Escape(heading)}]({url})\n");
+
+        if (!string.IsNullOrWhiteSpace(meta.Description))
+        {
+            AppendCalloutBody(sb, meta.Description!);
+        }
+        else if (!string.IsNullOrWhiteSpace(meta.MinimalReason))
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"> *(URL captured, no preview — {SanitizeOneLine(meta.MinimalReason!)})*\n");
         }
         return sb.ToString();
     }
@@ -185,19 +194,32 @@ public static class SourcesRenderer
         return slash < 0 ? key : key[(slash + 1)..];
     }
 
-    private static (string? Title, string? CanonicalUrl) ReadUrlExtra(Attachment att)
+    private readonly record struct UrlMeta(
+        string? Title,
+        string? CanonicalUrl,
+        string? ProviderName,
+        string? AuthorName,
+        string? Description,
+        string? MinimalReason);
+
+    private static UrlMeta ReadUrlExtra(Attachment att)
     {
-        if (att.Extra is null) return (null, null);
+        if (att.Extra is null) return default;
         var root = att.Extra.RootElement;
-        if (root.ValueKind != JsonValueKind.Object) return (null, null);
-        string? title = null;
-        string? canonical = null;
-        if (root.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String)
-            title = t.GetString();
-        if (root.TryGetProperty("canonical_url", out var c) && c.ValueKind == JsonValueKind.String)
-            canonical = c.GetString();
-        return (title, canonical);
+        if (root.ValueKind != JsonValueKind.Object) return default;
+        return new UrlMeta(
+            Title: GetString(root, "title"),
+            CanonicalUrl: GetString(root, "canonical_url") ?? GetString(root, "final_url"),
+            ProviderName: GetString(root, "provider_name"),
+            AuthorName: GetString(root, "author_name"),
+            Description: GetString(root, "description"),
+            MinimalReason: GetString(root, "minimal_reason"));
     }
+
+    private static string? GetString(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String
+            ? el.GetString()
+            : null;
 
     private static string SanitizeOneLine(string s)
     {
