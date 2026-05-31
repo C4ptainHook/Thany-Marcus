@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
+using ThanyMarcus.Portal.Api.Features.Auth.Passkey;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
@@ -12,8 +13,9 @@ public sealed class PortalDbContext(DbContextOptions<PortalDbContext> options) :
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<TotpSecret> TotpSecrets => Set<TotpSecret>();
+    public DbSet<PasskeyCredential> PasskeyCredentials => Set<PasskeyCredential>();
     public DbSet<TotpBackupCode> TotpBackupCodes => Set<TotpBackupCode>();
-    public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
+    public DbSet<EmergencyKit> EmergencyKits => Set<EmergencyKit>();
     public DbSet<EncryptedProviderToken> EncryptedProviderTokens => Set<EncryptedProviderToken>();
     public DbSet<DigitalOceanOAuthConnection> DigitalOceanOAuthConnections => Set<DigitalOceanOAuthConnection>();
     public DbSet<AuthLockout> AuthLockouts => Set<AuthLockout>();

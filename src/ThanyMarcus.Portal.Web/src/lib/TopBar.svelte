@@ -34,9 +34,9 @@
       {#if me.profilePictureUrl}
         <img class="avatar" src={me.profilePictureUrl} alt="" width="28" height="28" referrerpolicy="no-referrer" />
       {:else}
-        <span class="avatar-fallback">{initial(me.name || me.email)}</span>
+        <span class="avatar-fallback">{initial(me.name || me.username)}</span>
       {/if}
-      <span class="email">{me.email}</span>
+      <span class="email">{me.email ?? me.username}</span>
       <span class="caret">▾</span>
     </button>
     {#if open}

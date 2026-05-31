@@ -13,6 +13,7 @@ public static class AuthRateLimiterPolicies
     public const string TotpChallenge = "auth-totp-challenge";
     public const string Unlock = "auth-unlock";
     public const string SignInGoogle = "signin-google";
+    public const string SignupPasskey = "signup-passkey";
 
     public static void Configure(RateLimiterOptions opts, RateLimitingOptions cfg)
     {
@@ -37,6 +38,19 @@ public static class AuthRateLimiterPolicies
                 {
                     PermitLimit = cfg.Unlock.PermitLimit,
                     Window = TimeSpan.FromSeconds(cfg.Unlock.WindowSeconds),
+                    QueueLimit = 0,
+                    AutoReplenishment = true,
+                }));
+
+        // Anonymous passkey signup is partitioned by IP (no user yet) — CAPTCHA is the primary
+        // bot defence, this caps the volume a single source can attempt.
+        opts.AddPolicy(SignupPasskey, ctx =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: PartitionKeyForUser(ctx),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = cfg.SignupPasskey.PermitLimit,
+                    Window = TimeSpan.FromSeconds(cfg.SignupPasskey.WindowSeconds),
                     QueueLimit = 0,
                     AutoReplenishment = true,
                 }));

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.RateLimiting;
@@ -7,6 +8,7 @@ using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.Captcha;
 using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
+using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Portal.Api.Features.Auth.Totp;
@@ -21,9 +23,10 @@ public static class TotpEndpoints
             ClaimsPrincipal user,
             TotpService totp) =>
         {
-            var email = user.FindFirstValue(ClaimTypes.Email)!;
+            var label = user.FindFirstValue(ClaimTypes.Email)
+                ?? user.FindFirstValue(AuthClaimTypes.Username)!;
             var secret = totp.GenerateSecret();
-            var qr = totp.BuildQrPngDataUri(secret, email);
+            var qr = totp.BuildQrPngDataUri(secret, label);
             return Results.Ok(new TotpEnableInitResponse(secret, qr));
         });
 
@@ -34,6 +37,7 @@ public static class TotpEndpoints
             PortalDbContext db,
             TotpService totp,
             TotpBackupCodeService backups,
+            IInfraOpUnlockCache unlockCache,
             IClock clock,
             CancellationToken ct) =>
         {
@@ -78,6 +82,34 @@ public static class TotpEndpoints
                 row.DisabledAt = null;
                 row.UpdatedAt = now;
             }
+
+            // Maintain the TOTP recovery wrapper: while unlocked, seal a copy of the DEK under the
+            // (possibly rotated) secret; otherwise drop any prior wrapper so it can't go stale.
+            var account = await db.Users.SingleAsync(u => u.Id == userId, ct);
+            if (account.PassphraseWrappedDek is { Length: > 0 })
+            {
+                var dek = new byte[32];
+                try
+                {
+                    if (await unlockCache.TryGetAsync(userId, dek, ct))
+                    {
+                        var (wrappedDek, wrapNonce, wrapTag) = totp.WrapDek(body.Secret, dek);
+                        account.TotpWrappedDek = wrappedDek;
+                        account.TotpWrapNonce = wrapNonce;
+                        account.TotpWrapTag = wrapTag;
+                    }
+                    else
+                    {
+                        account.TotpWrappedDek = null;
+                        account.TotpWrapNonce = null;
+                        account.TotpWrapTag = null;
+                    }
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(dek);
+                }
+            }
             await db.SaveChangesAsync(ct);
 
             var backupCodes = await backups.IssueAsync(userId, ct);
@@ -104,6 +136,14 @@ public static class TotpEndpoints
 
             var row = await db.TotpSecrets.SingleAsync(t => t.UserId == userId, ct);
             row.DisabledAt = clock.GetCurrentInstant();
+
+            // The TOTP recovery path is gone with the secret; clear the wrapped DEK so the
+            // forgot-passphrase page hides the TOTP option for this user.
+            var account = await db.Users.SingleAsync(u => u.Id == userId, ct);
+            account.TotpWrappedDek = null;
+            account.TotpWrapNonce = null;
+            account.TotpWrapTag = null;
+
             await db.SaveChangesAsync(ct);
             await backups.PurgeUnusedAsync(userId, ct);
 

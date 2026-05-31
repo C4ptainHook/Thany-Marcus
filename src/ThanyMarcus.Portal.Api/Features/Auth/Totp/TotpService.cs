@@ -55,6 +55,60 @@ public sealed class TotpService(IDataProtectionProvider dp, IClock clock)
     public string Decrypt(byte[] ciphertext) =>
         Encoding.UTF8.GetString(_protector.Unprotect(ciphertext));
 
+    // Wrap the DEK under a key derived from the TOTP shared secret. This second wrapper is what
+    // lets a user reset a forgotten passphrase by proving possession of their authenticator.
+    public (byte[] Ciphertext, byte[] Nonce, byte[] Tag) WrapDek(string base32Secret, ReadOnlySpan<byte> dek)
+    {
+        var key = DeriveDekKey(base32Secret);
+        try
+        {
+            var nonce = RandomNumberGenerator.GetBytes(12);
+            var tag = new byte[16];
+            var cipher = new byte[dek.Length];
+            using var aes = new AesGcm(key, tagSizeInBytes: 16);
+            aes.Encrypt(nonce, dek, cipher, tag);
+            return (cipher, nonce, tag);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    public bool TryUnwrapDek(string base32Secret, byte[] ciphertext, byte[] nonce, byte[] tag, byte[] destination)
+    {
+        var key = DeriveDekKey(base32Secret);
+        try
+        {
+            using var aes = new AesGcm(key, tagSizeInBytes: 16);
+            aes.Decrypt(nonce, ciphertext, tag, destination);
+            return true;
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    private static byte[] DeriveDekKey(string base32Secret)
+    {
+        var secretBytes = Base32Encoding.ToBytes(base32Secret);
+        try
+        {
+            return HKDF.DeriveKey(
+                HashAlgorithmName.SHA256, secretBytes, outputLength: 32,
+                salt: null, info: "totp-dek-wrap.v1"u8.ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(secretBytes);
+        }
+    }
+
     public async Task<TotpChallengeResult> VerifyChallengeAsync(
         PortalDbContext db, Guid userId, string code, CancellationToken ct)
     {

@@ -113,6 +113,70 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                     b.ToTable("digitalocean_oauth_connections", (string)null);
                 });
 
+            modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.EmergencyKit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Instant>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("HashedString")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("hashed_string");
+
+                    b.Property<Instant?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<Instant?>("UsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("used_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<JsonDocument>("WrapArgon2Params")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("wrap_argon2params");
+
+                    b.Property<byte[]>("WrapArgon2Salt")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("wrap_argon2salt");
+
+                    b.Property<byte[]>("WrapNonce")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("wrap_nonce");
+
+                    b.Property<byte[]>("WrapTag")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("wrap_tag");
+
+                    b.Property<byte[]>("WrappedDek")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("wrapped_dek");
+
+                    b.HasKey("Id")
+                        .HasName("pk_emergency_kits");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_emergency_kits_active_per_user")
+                        .HasFilter("used_at IS NULL AND revoked_at IS NULL");
+
+                    b.ToTable("emergency_kits", (string)null);
+                });
+
             modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.EncryptedProviderToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -162,62 +226,77 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                     b.ToTable("encrypted_provider_tokens", (string)null);
                 });
 
-            modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.RecoveryCode", b =>
+            modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.Passkey.PasskeyCredential", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<Guid>("Aaguid")
+                        .HasColumnType("uuid")
+                        .HasColumnName("aaguid");
+
+                    b.Property<string>("AuthenticatorName")
+                        .HasColumnType("text")
+                        .HasColumnName("authenticator_name");
+
+                    b.Property<bool>("BackedUp")
+                        .HasColumnType("boolean")
+                        .HasColumnName("backed_up");
+
                     b.Property<Instant>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<string>("HashedCode")
+                    b.Property<byte[]>("CredentialId")
                         .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("hashed_code");
+                        .HasColumnType("bytea")
+                        .HasColumnName("credential_id");
 
-                    b.Property<Instant?>("UsedAt")
+                    b.Property<Instant?>("LastUsedAt")
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("used_at");
+                        .HasColumnName("last_used_at");
+
+                    b.Property<byte[]>("PublicKey")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("public_key");
+
+                    b.Property<Instant?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<long>("SignCount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("sign_count");
+
+                    b.PrimitiveCollection<string[]>("Transports")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("transports");
+
+                    b.Property<Instant>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid")
                         .HasColumnName("user_id");
 
-                    b.Property<JsonDocument>("WrapArgon2Params")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("wrap_argon2params");
-
-                    b.Property<byte[]>("WrapArgon2Salt")
-                        .IsRequired()
-                        .HasColumnType("bytea")
-                        .HasColumnName("wrap_argon2salt");
-
-                    b.Property<byte[]>("WrapNonce")
-                        .IsRequired()
-                        .HasColumnType("bytea")
-                        .HasColumnName("wrap_nonce");
-
-                    b.Property<byte[]>("WrapTag")
-                        .IsRequired()
-                        .HasColumnType("bytea")
-                        .HasColumnName("wrap_tag");
-
-                    b.Property<byte[]>("WrappedDek")
-                        .IsRequired()
-                        .HasColumnType("bytea")
-                        .HasColumnName("wrapped_dek");
-
                     b.HasKey("Id")
-                        .HasName("pk_recovery_codes");
+                        .HasName("pk_passkey_credentials");
+
+                    b.HasIndex("CredentialId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_passkey_credentials_credential_id")
+                        .HasFilter("revoked_at IS NULL");
 
                     b.HasIndex("UserId")
-                        .HasDatabaseName("ix_recovery_codes_user_id");
+                        .HasDatabaseName("ix_passkey_credentials_user_id")
+                        .HasFilter("revoked_at IS NULL");
 
-                    b.ToTable("recovery_codes", (string)null);
+                    b.ToTable("passkey_credentials", (string)null);
                 });
 
             modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.StepUp.StepUpUnlock", b =>
@@ -349,12 +428,10 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnName("created_at");
 
                     b.Property<string>("Email")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("email");
 
                     b.Property<string>("GoogleSubject")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("google_subject");
 
@@ -399,9 +476,26 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("sessions_invalidated_at");
 
+                    b.Property<byte[]>("TotpWrapNonce")
+                        .HasColumnType("bytea")
+                        .HasColumnName("totp_wrap_nonce");
+
+                    b.Property<byte[]>("TotpWrapTag")
+                        .HasColumnType("bytea")
+                        .HasColumnName("totp_wrap_tag");
+
+                    b.Property<byte[]>("TotpWrappedDek")
+                        .HasColumnType("bytea")
+                        .HasColumnName("totp_wrapped_dek");
+
                     b.Property<Instant>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("username");
 
                     b.HasKey("Id")
                         .HasName("pk_users");
@@ -783,6 +877,16 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasConstraintName("fk_digitalocean_oauth_connections_users_user_id");
                 });
 
+            modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.EmergencyKit", b =>
+                {
+                    b.HasOne("ThanyMarcus.Portal.Api.Features.Auth.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_emergency_kits_users_user_id");
+                });
+
             modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.EncryptedProviderToken", b =>
                 {
                     b.HasOne("ThanyMarcus.Portal.Api.Features.Auth.User", null)
@@ -793,14 +897,14 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasConstraintName("fk_encrypted_provider_tokens_users_user_id");
                 });
 
-            modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.RecoveryCode", b =>
+            modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.Passkey.PasskeyCredential", b =>
                 {
                     b.HasOne("ThanyMarcus.Portal.Api.Features.Auth.User", null)
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_recovery_codes_users_user_id");
+                        .HasConstraintName("fk_passkey_credentials_users_user_id");
                 });
 
             modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.StepUp.StepUpUnlock", b =>

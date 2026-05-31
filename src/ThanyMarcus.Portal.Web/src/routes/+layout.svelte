@@ -2,6 +2,7 @@
   import '../app.css';
   import type { Snippet } from 'svelte';
   import StepUpModal from '$lib/StepUpModal.svelte';
+  import ForgotPassphraseModal from '$lib/ForgotPassphraseModal.svelte';
   import TopBar from '$lib/TopBar.svelte';
   import type { MeResponse } from '$lib/types/auth';
 
@@ -16,3 +17,4 @@
 {/if}
 {@render children()}
 <StepUpModal />
+<ForgotPassphraseModal />

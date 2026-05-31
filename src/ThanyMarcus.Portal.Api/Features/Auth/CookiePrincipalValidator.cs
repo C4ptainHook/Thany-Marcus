@@ -37,7 +37,11 @@ public sealed class CookiePrincipalValidator(PortalDbContext db, IInfraOpUnlockC
         }
 
         var identity = (ClaimsIdentity)principal.Identity!;
-        ReplaceClaim(identity, ClaimTypes.Email, user.Email);
+        if (user.Email is { } email)
+            ReplaceClaim(identity, ClaimTypes.Email, email);
+        else
+            RemoveClaim(identity, ClaimTypes.Email);
+        ReplaceClaim(identity, AuthClaimTypes.Username, user.Username);
         ReplaceClaim(identity, ClaimTypes.Name, user.Name);
         if (user.ProfilePictureUrl is { } pic)
             ReplaceClaim(identity, "picture", pic);

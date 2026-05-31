@@ -1,4 +1,4 @@
-export type CaptchaStateKind = 'signin' | 'totp' | 'unlock';
+export type CaptchaStateKind = 'signin' | 'signup' | 'totp' | 'unlock';
 
 export type CaptchaState = {
   required: boolean;

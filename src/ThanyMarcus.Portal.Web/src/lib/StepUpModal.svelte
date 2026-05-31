@@ -1,5 +1,6 @@
 <script lang="ts">
   import { stepUpPrompt } from './stepUpClient';
+  import { openForgotPassphrase } from './forgotPassphraseClient';
   import TurnstileWidget from './TurnstileWidget.svelte';
 
   let passphrase = $state('');
@@ -34,6 +35,15 @@
   function onCaptchaToken(token: string) {
     turnstileToken = token;
   }
+
+  function forgot() {
+    const prompt = $stepUpPrompt;
+    passphrase = '';
+    turnstileToken = '';
+    error = null;
+    prompt?.resolve(null);
+    openForgotPassphrase();
+  }
 </script>
 
 {#if $stepUpPrompt}
@@ -59,6 +69,7 @@
           Unlock
         </button>
       </div>
+      <button class="forgot" type="button" onclick={forgot}>I forgot my passphrase →</button>
     </form>
   </div>
 {/if}
@@ -96,6 +107,18 @@
   }
   .error {
     color: var(--error);
+  }
+  .forgot {
+    display: block;
+    margin-top: var(--space-3);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: var(--text-dim);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    text-decoration: underline;
   }
   @media (max-width: 600px) {
     .modal {

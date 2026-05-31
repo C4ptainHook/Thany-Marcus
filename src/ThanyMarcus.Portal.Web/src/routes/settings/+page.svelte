@@ -2,7 +2,15 @@
   import { onMount } from 'svelte';
   import { enableInit, enableVerify, disable, type TotpEnableInit } from '$lib/totpClient';
   import { setPassphrase } from '$lib/stepUpClient';
+  import { generateEmergencyKit, emergencyKitStatus, unlockPassphrase } from '$lib/recoveryClient';
   import { apiFetch } from '$lib/http';
+  import EmergencyKitModal from '$lib/EmergencyKitModal.svelte';
+  import {
+    listPasskeys, registerPasskey, revokePasskey,
+    isPasskeySupported, isPasskeyCancellation,
+  } from '$lib/passkey';
+  import type { PasskeyInfo } from '$lib/types/auth';
+  import type { EmergencyKit, EmergencyKitStatus } from '$lib/types/recovery';
 
   type DoConnection = { connected: false } | { connected: true; status: string; expiresAt: string };
 
@@ -11,6 +19,12 @@
   let phase = $state<Phase>('loading');
   let totpState = $state<string>('');
   let passphraseSet = $state(false);
+  let email = $state('');
+  let kitStatus = $state<EmergencyKitStatus | null>(null);
+  let kit = $state<EmergencyKit | null>(null);
+  let kitHeading = $state('Save your Emergency Kit');
+  let kitBusy = $state(false);
+  let kitError = $state<string | null>(null);
   let init = $state<TotpEnableInit | null>(null);
   let enableCode = $state('');
   let currentCode = $state('');
@@ -24,6 +38,52 @@
   let error = $state<string | null>(null);
   let doConnection = $state<DoConnection | null>(null);
   let doDisconnectBusy = $state(false);
+
+  const passkeySupported = isPasskeySupported();
+  let passkeys = $state<PasskeyInfo[]>([]);
+  let passkeyBusy = $state(false);
+  let passkeyError = $state<string | null>(null);
+
+  async function refreshPasskeys() {
+    try {
+      passkeys = await listPasskeys();
+    } catch {
+      passkeys = [];
+    }
+  }
+
+  async function addPasskey() {
+    passkeyError = null;
+    passkeyBusy = true;
+    try {
+      await registerPasskey();
+      await refreshPasskeys();
+    } catch (err) {
+      if (!isPasskeyCancellation(err)) passkeyError = 'Could not register passkey.';
+    } finally {
+      passkeyBusy = false;
+    }
+  }
+
+  async function revoke(id: string) {
+    if (!confirm('Revoke this passkey? It can no longer be used to sign in.')) return;
+    passkeyError = null;
+    passkeyBusy = true;
+    try {
+      await revokePasskey(id);
+      await refreshPasskeys();
+    } catch {
+      passkeyError = 'Could not revoke passkey.';
+    } finally {
+      passkeyBusy = false;
+    }
+  }
+
+  function fmtDate(iso: string | null): string {
+    if (!iso) return 'never';
+    try { return new Date(iso).toISOString().slice(0, 10); }
+    catch { return iso; }
+  }
 
   async function refreshDoConnection() {
     try {
@@ -55,7 +115,14 @@
     const me = await r.json();
     totpState = me.totp;
     passphraseSet = me.passphraseSet === true;
+    email = me.email ?? me.username;
     phase = 'idle';
+    if (passphraseSet) await refreshKitStatus();
+  }
+
+  async function refreshKitStatus() {
+    try { kitStatus = await emergencyKitStatus(); }
+    catch { kitStatus = null; }
   }
 
   async function submitPassphrase(e: SubmitEvent) {
@@ -65,17 +132,26 @@
       passphraseError = 'Passphrases do not match.';
       return;
     }
-    if (newPassphrase.length < 12) {
-      passphraseError = 'Passphrase must be at least 12 characters.';
+    if (newPassphrase.length < 8) {
+      passphraseError = 'Passphrase must be at least 8 characters.';
       return;
     }
     passphraseBusy = true;
     try {
-      const res = await setPassphrase(newPassphrase);
+      const passphrase = newPassphrase;
+      const res = await setPassphrase(passphrase);
       if (res.status === 204) {
         newPassphrase = '';
         confirmPassphrase = '';
         passphraseSet = true;
+        await unlockPassphrase(passphrase);
+        kitHeading = 'Save your Emergency Kit';
+        kit = await generateEmergencyKit();
+      } else if (res.status === 400) {
+        const body = await res.json().catch(() => null);
+        passphraseError = body?.reason === 'too_common'
+          ? 'That passphrase is too common — pick something less guessable.'
+          : 'Passphrase must be at least 8 characters.';
       } else if (res.status === 409) {
         passphraseError = 'Passphrase is already set.';
         passphraseSet = true;
@@ -87,7 +163,33 @@
     }
   }
 
-  onMount(async () => { await refreshMe(); await refreshDoConnection(); });
+  async function regenerateKit() {
+    kitError = null;
+    kitBusy = true;
+    try {
+      kitHeading = 'Save your new Emergency Kit';
+      kit = await generateEmergencyKit();
+    } catch {
+      kitError = 'Could not generate your Emergency Kit. Please try again.';
+    } finally {
+      kitBusy = false;
+    }
+  }
+
+  async function onKitSaved() {
+    kit = null;
+    await refreshKitStatus();
+  }
+
+  function fmtDateOrNever(iso: string | null): string {
+    return iso ? fmtDate(iso) : 'never';
+  }
+
+  onMount(async () => {
+    await refreshMe();
+    await refreshDoConnection();
+    if (passkeySupported) await refreshPasskeys();
+  });
 
   async function startEnable() {
     error = null;
@@ -233,6 +335,35 @@
       </div>
     </section>
 
+    {#if passkeySupported}
+      <section class="card">
+        <h2 class="card-title">PASSKEYS</h2>
+        <p>Sign in with Face ID, Touch ID, Windows Hello, or a security key — no Google redirect.</p>
+        {#if passkeys.length === 0}
+          <p class="muted">No passkeys registered yet.</p>
+        {:else}
+          <ul class="passkey-list">
+            {#each passkeys as p (p.id)}
+              <li>
+                <span class="pk-name">
+                  {p.authenticatorName}
+                  <span class="muted">{p.backedUp ? '(synced)' : '(device-bound)'}</span>
+                </span>
+                <span class="muted pk-meta">added {fmtDate(p.createdAt)} · last used {fmtDate(p.lastUsedAt)}</span>
+                <button class="btn-danger" type="button" disabled={passkeyBusy} onclick={() => revoke(p.id)}>Revoke</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if passkeyError}<p class="error">{passkeyError}</p>{/if}
+        <div class="actions">
+          <button class="btn-secondary" type="button" disabled={passkeyBusy} onclick={addPasskey}>
+            {passkeyBusy ? 'Working…' : 'Add a passkey'}
+          </button>
+        </div>
+      </section>
+    {/if}
+
     <section class="card">
       <h2 class="card-title">PASSPHRASE</h2>
       {#if !passphraseSet}
@@ -259,6 +390,24 @@
     </section>
 
     {#if passphraseSet}
+      <section class="card danger-zone">
+        <h2 class="card-title">EMERGENCY KIT</h2>
+        {#if kitStatus?.generatedAt}
+          <p>Generated {fmtDate(kitStatus.generatedAt)} · Last used: {fmtDateOrNever(kitStatus.lastUsedAt)}.</p>
+        {:else}
+          <p class="muted">No Emergency Kit yet — generate one so you always have a way back in.</p>
+        {/if}
+        <p class="muted">Regenerating invalidates your old kit. Requires your passphrase.</p>
+        {#if kitError}<p class="error">{kitError}</p>{/if}
+        <div class="actions">
+          <button class="btn-danger" type="button" disabled={kitBusy} onclick={regenerateKit}>
+            {kitBusy ? 'Preparing…' : kitStatus?.generatedAt ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
+      </section>
+    {/if}
+
+    {#if passphraseSet}
       <section class="card">
         <h2 class="card-title">CONNECTIONS</h2>
         <p>
@@ -283,6 +432,10 @@
 
   {/if}
 </main>
+
+{#if kit}
+  <EmergencyKitModal {kit} {email} heading={kitHeading} onSaved={onKitSaved} />
+{/if}
 
 <style>
   .codes {
@@ -317,6 +470,25 @@
     padding: var(--space-2);
     margin-bottom: var(--space-3);
   }
+  .passkey-list {
+    list-style: none;
+    padding: 0;
+    margin: var(--space-3) 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .passkey-list li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+    padding: var(--space-2);
+    background: var(--surface-2);
+  }
+  .pk-name { font-weight: bold; }
+  .pk-meta { grid-column: 1; font-size: var(--text-sm); }
+  .passkey-list li .btn-danger { grid-row: 1 / span 2; grid-column: 2; }
   details summary { cursor: pointer; }
   details code {
     display: block;
