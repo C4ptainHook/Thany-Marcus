@@ -5,7 +5,6 @@ namespace ThanyMarcus.Shared.PluginApi;
 
 public sealed record SyncPullResponse(
     [property: JsonPropertyName("items")]     IReadOnlyList<SyncPullItem> Items,
-    [property: JsonPropertyName("projects")]  IReadOnlyList<SyncPullProject> Projects,
     [property: JsonPropertyName("nextSince")] DateTimeOffset? NextSince);
 
 public sealed record SyncPullItem(
@@ -40,12 +39,3 @@ public sealed record SyncPullAttachment(
     [property: JsonPropertyName("downloadUrlExpiresAt")] DateTimeOffset? DownloadUrlExpiresAt,
     [property: JsonPropertyName("extra")]                JsonElement Extra);
 
-public sealed record SyncPullProject(
-    [property: JsonPropertyName("entityId")]      Guid EntityId,
-    [property: JsonPropertyName("canonicalName")] string CanonicalName,
-    [property: JsonPropertyName("aliases")]       IReadOnlyList<string> Aliases,
-    [property: JsonPropertyName("description")]   string? Description,
-    [property: JsonPropertyName("vaultFolder")]   string? VaultFolder,
-    [property: JsonPropertyName("isUserSource")]  bool IsUserSource,
-    [property: JsonPropertyName("updatedAt")]     DateTimeOffset UpdatedAt,
-    [property: JsonPropertyName("deletedAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? DeletedAt = null);

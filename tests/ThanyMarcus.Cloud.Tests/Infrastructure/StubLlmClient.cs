@@ -15,7 +15,7 @@ public sealed class StubLlmClient : ILlmClient
     {
         object payload = promptId.Name switch
         {
-            "route" => new RouteDecisionDto(ProjectEntityId: null, Confidence: 0.0, Rationale: "stub"),
+            "route" => new RouteDecisionDto(Folder: null, Confidence: 0.0, Rationale: "stub"),
             "extract" => new EntityExtractionDto(Mentions: Array.Empty<MentionCandidateDto>()),
             "dedup" => new DedupDecisionDto(
                 Decision: DedupDecisions.Ambiguous,

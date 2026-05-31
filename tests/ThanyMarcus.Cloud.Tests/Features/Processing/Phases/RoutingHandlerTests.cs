@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NodaTime;
 using Shouldly;
-using ThanyMarcus.Cloud.Api.Features.Entities;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.Processing;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
@@ -15,19 +14,18 @@ namespace ThanyMarcus.Cloud.Tests.Features.Processing.Phases;
 public sealed class RoutingHandlerTests(PostgresFixture postgres)
 {
     [Fact]
-    public async Task High_confidence_route_writes_project_id_and_projects_path()
+    public async Task High_confidence_route_writes_folder_path()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        var projectId = Guid.CreateVersion7();
-        await SeedProjectAsync(projectId, "Acme");
+        await SeedNoteInFolderAsync("Acme");
 
         var (noteId, jobId) = await SeedRoutingJobAsync();
 
         var llm = new ConfigurableLlmClient
         {
-            RouteResponse = () => new RouteDecisionDto(projectId, 0.9, "matches Acme"),
+            RouteResponse = () => new RouteDecisionDto("Acme", 0.9, "matches Acme"),
         };
         var factory = new ConfigurableLlmClientFactory(llm);
 
@@ -37,7 +35,6 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
 
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var note = await probe.Notes.SingleAsync(n => n.Id == noteId, ct);
-        note.ProjectId.ShouldBe(projectId);
         note.RelativePath.ShouldBe($"Acme/{noteId}.md");
 
         var after = await probe.IngestJobs.SingleAsync(j => j.Id == jobId, ct);
@@ -51,13 +48,12 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        var projectId = Guid.CreateVersion7();
-        await SeedProjectAsync(projectId, "Acme");
+        await SeedNoteInFolderAsync("Acme");
 
         var (noteId, jobId) = await SeedRoutingJobAsync();
         var llm = new ConfigurableLlmClient
         {
-            RouteResponse = () => new RouteDecisionDto(projectId, 0.3, "weak"),
+            RouteResponse = () => new RouteDecisionDto("Acme", 0.3, "weak"),
         };
         var factory = new ConfigurableLlmClientFactory(llm);
 
@@ -67,8 +63,84 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
 
         using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var note = await probe.Notes.SingleAsync(n => n.Id == noteId, ct);
-        note.ProjectId.ShouldBeNull();
         note.RelativePath.ShouldBe($"Inbox/{noteId}.md");
+    }
+
+    [Fact]
+    public async Task Hallucinated_folder_not_in_candidates_routes_to_inbox()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+
+        await SeedNoteInFolderAsync("Acme");
+
+        var (noteId, jobId) = await SeedRoutingJobAsync();
+        var llm = new ConfigurableLlmClient
+        {
+            RouteResponse = () => new RouteDecisionDto("Hallucinated", 0.95, "made up"),
+        };
+        var factory = new ConfigurableLlmClientFactory(llm);
+
+        await using var sp = BuildHost(factory);
+        var job = await LoadJobAsync(jobId);
+        await DispatchAsync(sp, job, ct);
+
+        using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
+        var note = await probe.Notes.SingleAsync(n => n.Id == noteId, ct);
+        note.RelativePath.ShouldBe($"Inbox/{noteId}.md");
+    }
+
+    [Fact]
+    public async Task No_candidate_folders_routes_to_inbox_without_llm_call()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+
+        var (noteId, jobId) = await SeedRoutingJobAsync();
+        var llm = new ConfigurableLlmClient
+        {
+            RouteResponse = () => new RouteDecisionDto("never", 0.9, "should not be called"),
+        };
+        var factory = new ConfigurableLlmClientFactory(llm);
+
+        await using var sp = BuildHost(factory);
+        var job = await LoadJobAsync(jobId);
+        await DispatchAsync(sp, job, ct);
+
+        using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
+        var note = await probe.Notes.SingleAsync(n => n.Id == noteId, ct);
+        note.RelativePath.ShouldBe($"Inbox/{noteId}.md");
+        llm.Calls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Denylisted_folders_are_excluded_from_candidates()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+
+        await SeedNoteInFolderAsync("_drafts");
+        await SeedNoteInFolderAsync(".trash");
+        await SeedNoteInFolderAsync("Entities");
+        await SeedNoteInFolderAsync("Inbox");
+
+        var (noteId, jobId) = await SeedRoutingJobAsync();
+        var llm = new ConfigurableLlmClient
+        {
+            RouteResponse = () => new RouteDecisionDto("_drafts", 0.9, "denylisted"),
+        };
+        var factory = new ConfigurableLlmClientFactory(llm);
+
+        await using var sp = BuildHost(factory);
+        var job = await LoadJobAsync(jobId);
+        await DispatchAsync(sp, job, ct);
+
+        using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
+        var note = await probe.Notes.SingleAsync(n => n.Id == noteId, ct);
+        note.RelativePath.ShouldBe($"Inbox/{noteId}.md");
+        // None of the denylisted folders should reach the LLM as candidates, so the call should
+        // have been skipped entirely (no candidates).
+        llm.Calls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -97,7 +169,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        await SeedProjectAsync(Guid.CreateVersion7(), "Acme");
+        await SeedNoteInFolderAsync("Acme");
         var (_, jobId) = await SeedRoutingJobAsync();
         var llm = new ConfigurableLlmClient
         {
@@ -133,18 +205,21 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
             services.AddSingleton<ILlmClientFactory>(factory);
         });
 
-    private async Task SeedProjectAsync(Guid projectId, string canonical)
+    private async Task SeedNoteInFolderAsync(string folder)
     {
         using var db = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var now = SystemClock.Instance.GetCurrentInstant();
-        db.Entities.Add(new Entity
+        var noteId = Guid.CreateVersion7();
+        db.Notes.Add(new Note
         {
-            Id            = projectId,
-            Kind          = EntityKind.Project,
-            CanonicalName = canonical,
-            Source        = EntitySource.User,
-            CreatedAt     = now,
-            UpdatedAt     = now,
+            Id           = noteId,
+            ClientNoteId = Guid.NewGuid().ToString(),
+            CapturedAt   = now,
+            Status       = NoteStatus.Ready,
+            BodyInput    = "seed body",
+            RelativePath = $"{folder}/{noteId}.md",
+            CreatedAt    = now,
+            UpdatedAt    = now,
         });
         await db.SaveChangesAsync();
     }

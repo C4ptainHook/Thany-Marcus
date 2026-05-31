@@ -57,7 +57,12 @@ public sealed partial class RealUrlFetcherClient : IUrlFetcherClient
         {
             var result = await extractor.ExtractAsync(url, ct);
             var extra = BuildExtraFromExtractor(result);
-            return new UrlFetchOutcome(result.Markdown, extra, RedirectedToAttachmentId: null);
+            var extracted = BuildExtractedTextFromResult(result);
+            return new UrlFetchOutcome(
+                ExtractedText: extracted,
+                Extra: extra,
+                RedirectedToAttachmentId: null,
+                IsMinimal: result.MinimalReason is not null);
         }
 
         var target = BinaryRerouteMap.Resolve(contentType);
@@ -214,19 +219,50 @@ public sealed partial class RealUrlFetcherClient : IUrlFetcherClient
         using (var writer = new Utf8JsonWriter(ms))
         {
             writer.WriteStartObject();
-            writer.WriteString("final_url", r.CanonicalUrl);
+            writer.WriteString("canonical_url", r.CanonicalUrl);
             writer.WriteString("title", r.Title);
-            writer.WriteString("byline", r.Byline);
-            writer.WriteString("excerpt", r.Excerpt);
-            writer.WriteString("published_at", r.PublishedAt);
-            writer.WriteString("lang", r.Lang);
+            writer.WriteString("description", r.Description);
+            writer.WriteString("author_name", r.AuthorName);
+            writer.WriteString("provider_name", r.ProviderName);
+            writer.WriteString("thumbnail_url", r.ThumbnailUrl);
             writer.WriteNumber("http_status", r.HttpStatus);
-            writer.WriteBoolean("truncated", r.Truncated);
+            writer.WriteString("minimal_reason", r.MinimalReason);
             writer.WriteNull("redirected_to");
             writer.WriteEndObject();
         }
         ms.Position = 0;
         return JsonDocument.Parse(ms);
+    }
+
+    private static string BuildExtractedTextFromResult(UrlExtractionResult r)
+    {
+        if (r.MinimalReason is not null)
+        {
+            return "(URL captured, no preview available)";
+        }
+
+        var sb = new System.Text.StringBuilder();
+        if (!string.IsNullOrWhiteSpace(r.ProviderName))
+        {
+            sb.Append('[').Append(r.ProviderName).Append("] ");
+        }
+        if (!string.IsNullOrWhiteSpace(r.Title))
+        {
+            sb.Append(r.Title);
+        }
+        else
+        {
+            sb.Append(r.CanonicalUrl);
+        }
+        if (!string.IsNullOrWhiteSpace(r.AuthorName))
+        {
+            sb.Append(" — ").Append(r.AuthorName);
+        }
+        if (!string.IsNullOrWhiteSpace(r.Description))
+        {
+            sb.Append('\n').Append(r.Description);
+        }
+        return sb.ToString();
     }
 
     private static JsonDocument BuildRerouteExtra(string url, string contentType, Guid childId)

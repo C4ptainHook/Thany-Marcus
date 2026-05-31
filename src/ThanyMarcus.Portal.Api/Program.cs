@@ -22,6 +22,7 @@ using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
 using ThanyMarcus.Portal.Api.Features.Auth.RateLimiting;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
+using ThanyMarcus.Portal.Api.Features.Admin;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Callback;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Cancel;
@@ -35,6 +36,7 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Status;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Pricing;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 
@@ -115,6 +117,17 @@ builder.Services.AddHttpClient<IDigitalOceanOAuthClient, DigitalOceanOAuthClient
     .HandleTransientHttpError()
     .WaitAndRetryAsync(3, n => TimeSpan.FromMilliseconds(200 * Math.Pow(5, n - 1))));
 builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
+
+builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient(DoSizesCatalog.HttpClientName, c =>
+{
+    c.BaseAddress = new Uri("https://api.digitalocean.com/");
+    c.Timeout = TimeSpan.FromSeconds(15);
+})
+.AddPolicyHandler(Polly.Extensions.Http.HttpPolicyExtensions
+    .HandleTransientHttpError()
+    .WaitAndRetryAsync(2, n => TimeSpan.FromMilliseconds(200 * Math.Pow(3, n - 1))));
+builder.Services.AddSingleton<IDoSizesCatalog, DoSizesCatalog>();
 
 builder.Services.Configure<PluginTokenSyncOptions>(
     builder.Configuration.GetSection(PluginTokenSyncOptions.SectionName));
@@ -267,6 +280,7 @@ app.MapCancelCloudEndpoints();
 app.MapPluginTokenEndpoints();
 app.MapRetryPluginTokenEndpoint();
 app.MapCaptchaEndpoints();
+app.MapPricingBackfillEndpoint();
 
 app.MapFallbackToFile("index.html");
 

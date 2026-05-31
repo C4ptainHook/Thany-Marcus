@@ -52,7 +52,7 @@
   }
 </script>
 
-<section class="card">
+<section class="card" data-cloud-id={cloud.cloudId}>
   <div class="header">
     <a class="host" href={'https://' + cloud.hostname} target="_blank" rel="noreferrer">
       {cloud.hostname}

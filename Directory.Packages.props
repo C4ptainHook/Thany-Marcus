@@ -68,11 +68,7 @@
     <PackageVersion Include="AWSSDK.S3" Version="4.*" />
     <PackageVersion Include="Testcontainers.Minio" Version="4.*" />
 
-    <!-- URL extraction: Readability port + HTML→Markdown (CLOUD-002 Pass B). AngleSharp pulled transitively. -->
-    <PackageVersion Include="SmartReader" Version="0.10.*" />
-    <PackageVersion Include="ReverseMarkdown" Version="4.*" />
-
-    <!-- LLM (CLOUD-002 Pass B): Microsoft.Extensions.AI.IChatClient abstraction +
+<!-- LLM (CLOUD-002 Pass B): Microsoft.Extensions.AI.IChatClient abstraction +
          LlmTornado multi-provider adapter (30+ native providers including Anthropic).
          Provider swap is a ChatModel argument change; no parallel client per vendor. -->
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.*" />

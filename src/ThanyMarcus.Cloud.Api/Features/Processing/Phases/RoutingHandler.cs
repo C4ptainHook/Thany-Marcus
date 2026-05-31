@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NodaTime;
-using ThanyMarcus.Cloud.Api.Features.Entities;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.Settings;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
@@ -15,6 +14,7 @@ public sealed class RoutingHandler : IPhaseHandler
     public string Phase => IngestJobStatus.Routing;
 
     private const int BodyExcerptMax = 1500;
+    private const string InboxFolder = "Inbox";
 
     private readonly CloudDbContext db;
     private readonly ILlmClientFactory llmFactory;
@@ -45,8 +45,6 @@ public sealed class RoutingHandler : IPhaseHandler
 
         var note = await db.Notes.SingleAsync(n => n.Id == job.NoteId, ct);
 
-        // FORK: hub-regen notes don't get routed to a project — they live under _Entities/.
-        // Hub flow skips synthesis entirely and goes straight to embedding.
         if (note.IsHub)
         {
             await transitions.TransitionAsync(
@@ -62,15 +60,11 @@ public sealed class RoutingHandler : IPhaseHandler
         var settings = await db.CloudSettings.SingleAsync(s => s.Id == CloudSettings.SingletonId, ct);
         var llm = llmFactory.Resolve(settings, out var fellBackToSafe);
         var o = opts.CurrentValue;
+        var stubsFolder = (o.EntitySuggestions.StubsFolder ?? string.Empty).Trim().Trim('/');
 
-        var projects = await db.Entities
-            .Where(e => e.Kind == EntityKind.Project && e.DeletedAt == null)
-            .OrderByDescending(e => e.UpdatedAt)
-            .Take(o.RoutingProjectsMax)
-            .Select(e => new ProjectListItem(e.Id, e.CanonicalName, e.Description))
-            .ToListAsync(ct);
+        var folders = await LoadCandidateFoldersAsync(stubsFolder, o.RoutingFoldersMax, ct);
 
-        if (projects.Count == 0)
+        if (folders.Count == 0)
         {
             await events.AppendAsync(job.Id, new LlmEvent(
                 Stage: LlmEventStages.Route,
@@ -81,10 +75,12 @@ public sealed class RoutingHandler : IPhaseHandler
                 LlmModeFallback: false,
                 DurationMs: 0,
                 RetryIndex: 0,
-                Decision: "skipped:no_projects",
+                Decision: "skipped:no_folders",
                 Confidence: null,
                 Rationale: null,
                 Error: null), ct);
+            note.RelativePath = $"{InboxFolder}/{note.Id}.md";
+            await db.SaveChangesAsync(ct);
             await transitions.TransitionAsync(
                 job,
                 nextStatus: IngestJobStatus.Synthesizing,
@@ -101,7 +97,7 @@ public sealed class RoutingHandler : IPhaseHandler
         var rawBody = RawExtractions.Concatenate(note, attachments);
         if (string.IsNullOrEmpty(rawBody)) rawBody = note.BodyInput ?? string.Empty;
         var bodyExcerpt = Truncate(rawBody, BodyExcerptMax);
-        var prompt = PromptBuilder.BuildRoute(projects, bodyExcerpt);
+        var prompt = PromptBuilder.BuildRoute(folders, bodyExcerpt);
 
         var pid = new PromptId("route", "v1");
         var start = clock.GetCurrentInstant();
@@ -130,19 +126,18 @@ public sealed class RoutingHandler : IPhaseHandler
         }
 
         note.LlmMode = llm.Mode;
-        if (decision.ProjectEntityId is { } projectId &&
+        string? chosenFolder = null;
+        if (!string.IsNullOrWhiteSpace(decision.Folder) &&
             decision.Confidence >= o.Thresholds.RouteAcceptMin)
         {
-            var project = await db.Entities.SingleOrDefaultAsync(
-                e => e.Id == projectId && e.Kind == EntityKind.Project && e.DeletedAt == null,
-                ct);
-            if (project is not null)
-            {
-                note.ProjectId = project.Id;
-                note.RelativePath = $"{project.CanonicalName}/{note.Id}.md";
-                project.UpdatedAt = clock.GetCurrentInstant();
-            }
+            var match = folders.FirstOrDefault(f =>
+                string.Equals(f, decision.Folder, StringComparison.Ordinal));
+            if (match is not null) chosenFolder = match;
         }
+
+        note.RelativePath = chosenFolder is null
+            ? $"{InboxFolder}/{note.Id}.md"
+            : $"{chosenFolder}/{note.Id}.md";
 
         var durationMs = (long)(clock.GetCurrentInstant() - start).TotalMilliseconds;
         await events.AppendAsync(job.Id, new LlmEvent(
@@ -154,7 +149,7 @@ public sealed class RoutingHandler : IPhaseHandler
             LlmModeFallback: fellBackToSafe,
             DurationMs: durationMs,
             RetryIndex: 0,
-            Decision: note.ProjectId is null ? "unrouted" : $"project:{note.ProjectId}",
+            Decision: chosenFolder is null ? "unrouted" : $"folder:{chosenFolder}",
             Confidence: decision.Confidence,
             Rationale: decision.Rationale,
             Error: null), ct);
@@ -169,6 +164,33 @@ public sealed class RoutingHandler : IPhaseHandler
             setFinishedAt: false,
             ct);
         return PhaseHandlerResult.Advanced;
+    }
+
+    private async Task<List<string>> LoadCandidateFoldersAsync(
+        string stubsFolder, int limit, CancellationToken ct)
+    {
+        // Top-level folder = first segment of relative_path; skip Inbox + stubs + dot/underscore folders.
+        var rows = await db.Notes
+            .Where(n => n.DeletedAt == null && n.RelativePath != null && n.RelativePath != "")
+            .Select(n => n.RelativePath!)
+            .Distinct()
+            .ToListAsync(ct);
+
+        var set = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var path in rows)
+        {
+            var slashIdx = path.IndexOf('/', StringComparison.Ordinal);
+            if (slashIdx <= 0) continue;
+            var folder = path[..slashIdx];
+            if (folder.Length == 0) continue;
+            if (folder.StartsWith('_') || folder.StartsWith('.')) continue;
+            if (string.Equals(folder, InboxFolder, StringComparison.Ordinal)) continue;
+            if (stubsFolder.Length > 0 &&
+                string.Equals(folder, stubsFolder, StringComparison.Ordinal)) continue;
+            set.Add(folder);
+            if (set.Count >= limit) break;
+        }
+        return set.Take(limit).ToList();
     }
 
     private static string Truncate(string s, int max) =>

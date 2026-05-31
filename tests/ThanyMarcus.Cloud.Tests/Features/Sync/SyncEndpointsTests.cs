@@ -7,7 +7,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using Shouldly;
-using ThanyMarcus.Cloud.Api.Features.Entities;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
@@ -47,44 +46,7 @@ public sealed class SyncEndpointsTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task SyncPull_surfaces_projects()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        await postgres.ResetAsync();
-        var (factory, client) = await BuildAuthedClientAsync();
-        await using var f = factory;
-
-        var projectId = await SeedProjectEntityAsync("Project Alpha", aliases: ["alpha"], vaultFolder: "Projects/Alpha");
-
-        var pull = await PullAsync(client, since: DateTimeOffset.MinValue, ct: ct);
-        var p = pull.Projects.SingleOrDefault(x => x.EntityId == projectId);
-        p.ShouldNotBeNull();
-        p!.CanonicalName.ShouldBe("Project Alpha");
-        p.Aliases.ShouldBe(["alpha"]);
-        p.VaultFolder.ShouldBe("Projects/Alpha");
-        p.IsUserSource.ShouldBeFalse();
-        p.DeletedAt.ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task SyncPull_surfaces_soft_deleted_project_as_tombstone()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        await postgres.ResetAsync();
-        var (factory, client) = await BuildAuthedClientAsync();
-        await using var f = factory;
-
-        var projectId = await SeedProjectEntityAsync("Project Beta");
-        await SoftDeleteEntityAsync(projectId);
-
-        var pull = await PullAsync(client, since: DateTimeOffset.MinValue, ct: ct);
-        var p = pull.Projects.SingleOrDefault(x => x.EntityId == projectId);
-        p.ShouldNotBeNull();
-        p!.DeletedAt.ShouldNotBeNull();
-    }
-
-    [Fact]
-    public async Task SyncPull_advances_next_since_across_notes_and_projects()
+    public async Task SyncPull_next_since_advances_to_last_note_updated_at()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
@@ -92,15 +54,11 @@ public sealed class SyncEndpointsTests(PostgresFixture postgres)
         await using var f = factory;
 
         var noteId = await SeedReadyNoteAsync("body 1", "Inbox/a.md");
-        await Task.Delay(50, ct);
-        var projectId = await SeedProjectEntityAsync("Late Project");
 
         var pull = await PullAsync(client, since: DateTimeOffset.MinValue, ct: ct);
         pull.NextSince.ShouldNotBeNull();
         var noteAt = pull.Items.Single(i => i.NoteId == noteId).UpdatedAt;
-        var projAt = pull.Projects.Single(p => p.EntityId == projectId).UpdatedAt;
-        var expected = noteAt > projAt ? noteAt : projAt;
-        pull.NextSince!.Value.ShouldBe(expected);
+        pull.NextSince!.Value.ShouldBe(noteAt);
     }
 
     [Fact]
@@ -113,7 +71,6 @@ public sealed class SyncEndpointsTests(PostgresFixture postgres)
 
         var pull = await PullAsync(client, since: DateTimeOffset.MinValue, ct: ct);
         pull.Items.ShouldBeEmpty();
-        pull.Projects.ShouldBeEmpty();
         pull.NextSince.ShouldBeNull();
     }
 
@@ -312,30 +269,6 @@ public sealed class SyncEndpointsTests(PostgresFixture postgres)
         return note.Id;
     }
 
-    private async Task<Guid> SeedProjectEntityAsync(
-        string canonicalName,
-        string[]? aliases = null,
-        string? vaultFolder = null)
-    {
-        var now = SystemClock.Instance.GetCurrentInstant();
-        using var db = NewDb();
-        var e = new Entity
-        {
-            Id            = Guid.CreateVersion7(),
-            Kind          = EntityKind.Project,
-            CanonicalName = canonicalName,
-            Aliases       = aliases ?? [],
-            Description   = null,
-            Source        = EntitySource.Llm,
-            VaultFolder   = vaultFolder,
-            CreatedAt     = now,
-            UpdatedAt     = now,
-        };
-        db.Entities.Add(e);
-        await db.SaveChangesAsync();
-        return e.Id;
-    }
-
     private async Task SoftDeleteAsync(Guid noteId)
     {
         var now = SystemClock.Instance.GetCurrentInstant();
@@ -346,18 +279,6 @@ public sealed class SyncEndpointsTests(PostgresFixture postgres)
                 updated_at         = {now},
                 transition_version = transition_version + 1
               WHERE id = {noteId}
-            """);
-    }
-
-    private async Task SoftDeleteEntityAsync(Guid entityId)
-    {
-        var now = SystemClock.Instance.GetCurrentInstant();
-        using var db = NewDb();
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
-            UPDATE entities SET
-                deleted_at = {now},
-                updated_at = {now}
-              WHERE id = {entityId}
             """);
     }
 

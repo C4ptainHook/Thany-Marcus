@@ -7,6 +7,7 @@ import type {
   IngestInitUpload,
 } from "../api";
 import { mapWithConcurrency } from "../concurrency";
+import type { DesktopNotifier } from "../notifications/DesktopNotifier";
 import type { ThanyMarcusSettings } from "../settings";
 import type { DraftState } from "./DraftManager";
 
@@ -22,9 +23,11 @@ export class Submitter {
     private readonly api: ApiClient,
     private readonly vault: Vault,
     private readonly settings: () => ThanyMarcusSettings,
+    private readonly notifier?: DesktopNotifier,
   ) {}
 
   async submit(state: DraftState, file: TFile): Promise<SubmissionResult> {
+    void this.notifier?.requestPermission().catch(() => { /* user dismissed; harmless */ });
     console.log("[Thany.submit] start", { draftId: state.draftId, attachments: state.attachments.length });
     const body = await this.vault.read(file);
     const clientNoteId = crypto.randomUUID();

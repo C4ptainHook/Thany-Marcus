@@ -14,6 +14,7 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens.Sync;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Pricing;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Cloudflare;
@@ -101,11 +102,18 @@ internal static class SagaHostBuilder
         builder.Services.AddScoped<SagaPhaseDispatcher>();
 
         builder.Services.AddSingleton<IHttpClientFactory>(_ => new ScriptedHttpFactory(certPollReady));
+        builder.Services.AddSingleton<IDoSizesCatalog>(new NoopDoSizesCatalog());
 
         builder.Services.AddHostedService<CrashRecoveryService>();
         builder.Services.AddHostedService<SagaWorkerService>();
 
         return builder.Build();
+    }
+
+    private sealed class NoopDoSizesCatalog : IDoSizesCatalog
+    {
+        public Task<DoSize?> GetAsync(string slug, string oauthToken, CancellationToken ct) =>
+            Task.FromResult<DoSize?>(null);
     }
 
     private sealed class ScriptedHttpFactory(bool certReady) : IHttpClientFactory

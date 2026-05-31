@@ -68,7 +68,11 @@ public static class GetCloudStatusEndpoints
             SucceededAt:         cloud.ProvisioningCompletedAt,
             DestroyedAt:         cloud.DestroyedAt,
             CurrentJob:          job is null ? null : new JobSummary(job.Id, job.Kind, job.Status),
-            RecentEvents:        recentEvents);
+            RecentEvents:        recentEvents,
+            PriceMonthlyUsd:     cloud.PriceMonthlyUsd,
+            PriceHourlyUsd:      cloud.PriceHourlyUsd,
+            PriceCurrency:       cloud.PriceCurrency,
+            PricedAt:            cloud.PricedAt);
     }
 
     internal static IReadOnlyList<EventSummary> ParseEventsTail(JsonDocument log, int take)

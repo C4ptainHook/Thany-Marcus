@@ -28,6 +28,12 @@ public sealed class Cloud : IHasUpdatedAt
     public Instant? ProvisioningCompletedAt { get; set; }
     public string? ProvisioningError { get; set; }
 
+    public decimal? PriceMonthlyUsd { get; set; }
+    public decimal? PriceHourlyUsd { get; set; }
+    public string? PriceCurrency { get; set; }
+    public Instant? PricedAt { get; set; }
+    public string? PricedSource { get; set; }
+
     public Instant CreatedAt { get; init; }
     public Instant UpdatedAt { get; set; }
     public Instant? DestroyedAt { get; set; }

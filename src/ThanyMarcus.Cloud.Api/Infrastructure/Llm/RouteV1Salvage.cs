@@ -6,9 +6,9 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 internal static partial class RouteV1Salvage
 {
     [GeneratedRegex(
-        "\"project_entity_id\"\\s*:\\s*(?:\"(?<id>[0-9a-fA-F\\-]{36})\"|null)",
+        "\"folder\"\\s*:\\s*(?:\"(?<folder>(?:[^\"\\\\]|\\\\.)*)\"|null)",
         RegexOptions.CultureInvariant)]
-    private static partial Regex ProjectIdRegex();
+    private static partial Regex FolderRegex();
 
     [GeneratedRegex(
         "\"confidence\"\\s*:\\s*(?<conf>-?\\d+(?:\\.\\d+)?)",
@@ -28,7 +28,7 @@ internal static partial class RouteV1Salvage
         if (promptId.Name != "route" || promptId.Version != "v1") return false;
         if (string.IsNullOrWhiteSpace(raw)) return false;
 
-        var idMatch = ProjectIdRegex().Match(raw);
+        var folderMatch = FolderRegex().Match(raw);
         var confMatch = ConfidenceRegex().Match(raw);
         if (!confMatch.Success) return false;
 
@@ -40,18 +40,17 @@ internal static partial class RouteV1Salvage
             return false;
         }
 
-        Guid? projectId = null;
-        if (idMatch.Success && idMatch.Groups["id"].Success &&
-            Guid.TryParse(idMatch.Groups["id"].Value, out var parsed))
+        string? folder = null;
+        if (folderMatch.Success && folderMatch.Groups["folder"].Success)
         {
-            projectId = parsed;
+            folder = folderMatch.Groups["folder"].Value;
         }
 
         var rationale = "";
         var rationaleMatch = RationaleRegex().Match(raw);
         if (rationaleMatch.Success) rationale = rationaleMatch.Groups["r"].Value;
 
-        recovered = (T)(object)new RouteDecisionDto(projectId, confidence, rationale);
+        recovered = (T)(object)new RouteDecisionDto(folder, confidence, rationale);
         return true;
     }
 }

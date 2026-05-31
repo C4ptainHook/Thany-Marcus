@@ -13,6 +13,7 @@ export interface ThanyMarcusSettings {
   synthesisPreset: SynthesisPreset;
   customPrompt: string;
   googleApiKey: string;
+  desktopNotifications: boolean;
 }
 
 export const DEFAULT_SETTINGS: ThanyMarcusSettings = {
@@ -26,6 +27,7 @@ export const DEFAULT_SETTINGS: ThanyMarcusSettings = {
   synthesisPreset: "zettelkasten",
   customPrompt: "",
   googleApiKey: "",
+  desktopNotifications: true,
 };
 
 // PREVIEW ONLY — these strings are NOT sent to the cloud. The cloud applies its own preset
@@ -230,6 +232,16 @@ export class ThanyMarcusSettingTab extends PluginSettingTab {
       })
       .addButton((b) =>
         b.setButtonText("Test").onClick(() => testGoogleKey(this.plugin.settings.googleApiKey)),
+      );
+
+    new Setting(containerEl)
+      .setName("Desktop notifications")
+      .setDesc("Show a desktop notification when a note finishes processing.")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.desktopNotifications).onChange(async (v) => {
+          this.plugin.settings.desktopNotifications = v;
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl)

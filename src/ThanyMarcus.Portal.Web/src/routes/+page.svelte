@@ -69,18 +69,21 @@
 
 <main>
   {#if view === 'signed-out'}
-    <h1>Thany-Marcus</h1>
-    <p class="muted">Your own cloud for Obsidian — provisioned in minutes, destroyed any time.</p>
-    {#if captchaRequired && siteKey}
-      <TurnstileWidget {siteKey} onToken={onCaptchaToken} />
-    {/if}
-    <p>
-      {#if captchaRequired && !turnstileToken}
-        <a class="btn-primary disabled" aria-disabled="true">Sign in with Google</a>
-      {:else}
-        <a class="btn btn-primary" href={signInHref()}>Sign in with Google</a>
+    <section class="hero">
+      <h1 class="hero-title">Thany Marcus</h1>
+      <img class="hero-logo" src="/favicon.png" alt="" aria-hidden="true" />
+      <p class="hero-tagline muted">Your own cloud for Obsidian — provisioned in minutes, destroyed any time.</p>
+      {#if captchaRequired && siteKey}
+        <TurnstileWidget {siteKey} onToken={onCaptchaToken} />
       {/if}
-    </p>
+      <p>
+        {#if captchaRequired && !turnstileToken}
+          <a class="btn-primary disabled" aria-disabled="true">Sign in with Google</a>
+        {:else}
+          <a class="btn btn-primary" href={signInHref()}>Sign in with Google</a>
+        {/if}
+      </p>
+    </section>
 
   {:else if view === 'onboarding'}
     {#if data.me}
@@ -101,7 +104,7 @@
   {:else if view === 'dashboard'}
     {#if data.cloud}
       <CloudIdentityCard cloud={data.cloud} />
-      <CostCard cloud={data.cloud} workerUptimeMonthSeconds={healthz?.workerUptimeMonthSeconds ?? null} />
+      <CostCard cloud={data.cloud} />
       <PluginTokenCard cloudId={data.cloud.cloudId} cloudHostname={data.cloud.hostname} />
       <DangerZone
         cloudId={data.cloud.cloudId}
@@ -141,5 +144,31 @@
     border-color: var(--border);
     cursor: not-allowed;
     text-decoration: none;
+  }
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--space-3);
+    padding-block: clamp(var(--space-3), 3vw, 32px);
+  }
+  .hero-logo {
+    width: clamp(64px, 8vw, 120px);
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
+  }
+  .hero-title {
+    font-size: clamp(64px, 12vw, 160px);
+    line-height: 1;
+    margin: 0;
+    letter-spacing: 0.02em;
+    text-shadow: -7px 0 #5b8def;
+  }
+  .hero-tagline {
+    font-size: var(--text-lg);
+    max-width: 56ch;
+    margin: 0;
   }
 </style>

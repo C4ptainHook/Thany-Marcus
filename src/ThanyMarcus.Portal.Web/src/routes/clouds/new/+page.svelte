@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { apiFetch, parseProblem } from '$lib/http';
   import { projectedRates } from '$lib/costs';
+  import { requestPermission as requestNotifyPermission } from '$lib/notifications/browserNotifier';
   import type { RegionInfo } from '$lib/types/providerMeta';
   import type { Provider } from '$lib/types/cloud';
 
@@ -88,6 +89,7 @@
     if (!provider || !region) return;
     submitting = true;
     submitError = null;
+    void requestNotifyPermission().catch(() => { /* user dismissed; harmless */ });
     try {
       const r = await apiFetch('/api/clouds', {
         method: 'POST',
@@ -229,11 +231,11 @@
         {@const rates = projectedRates(provider)}
         {#if rates}
           <section class="card">
-            <p class="cost-total">From ${rates.controlPlaneMonthly.toFixed(2)} / month</p>
+            <p class="cost-total">${rates.monthly.toFixed(2)} / month</p>
             <p class="muted cost-detail">
-              ${rates.controlPlaneMonthly.toFixed(2)} control plane (always-on, {rates.controlPlaneSku})
-              · ${rates.workerHourly.toFixed(3)}/h worker ({rates.workerSku}, billed only when active)
+              {rates.sku} · ${rates.hourly.toFixed(5)}/h, billed continuously while the droplet is up
             </p>
+            <p class="muted cost-detail">Estimate. Final price is locked in at provision time from DigitalOcean's current rate.</p>
             <p class="muted cost-detail">Real accrued cost shows on the dashboard once provisioned.</p>
           </section>
         {/if}

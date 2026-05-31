@@ -12,6 +12,8 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
     private readonly string modulesDir = config.GetValue("Provisioning:TerraformModulesDir", "/app/terraform-modules")!;
     private readonly string defaultSize = config.GetValue("Provisioning:DefaultSize", "s-1vcpu-1gb")!;
 
+    public string DefaultSize => defaultSize;
+
     public string GetJobDir(Guid jobId) => Path.Combine(baseDir, "jobs", jobId.ToString());
 
     public async Task<string> RenderAsync(ProvisioningJob job, Cloud cloud, CancellationToken ct)

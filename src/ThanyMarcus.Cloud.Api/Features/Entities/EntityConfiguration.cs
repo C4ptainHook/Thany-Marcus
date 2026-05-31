@@ -10,7 +10,7 @@ public sealed class EntityConfiguration : IEntityTypeConfiguration<Entity>
         builder.ToTable("entities", t =>
         {
             t.HasCheckConstraint("ck_entities_kind",
-                "kind IN ('person','organization','project','place','concept','other')");
+                "kind IN ('person','organization','place','concept','other')");
             t.HasCheckConstraint("ck_entities_source",
                 "source IN ('user','llm')");
         });

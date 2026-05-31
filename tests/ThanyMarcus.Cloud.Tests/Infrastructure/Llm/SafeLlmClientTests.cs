@@ -38,11 +38,11 @@ public sealed class SafeLlmClientTests
     public async Task Returns_parsed_dto_on_first_valid_response()
     {
         var ct = TestContext.Current.CancellationToken;
-        var handler = new StubHandler(_ => OllamaOk("""{"project_entity_id": null, "confidence": 0.4, "rationale": "ok"}"""));
+        var handler = new StubHandler(_ => OllamaOk("""{"folder": null, "confidence": 0.4, "rationale": "ok"}"""));
         var client = NewClient(handler);
         var dto = await client.CompleteAsync<RouteDecisionDto>(
             new PromptId("route", "v1"), new LlmPromptRequest("prompt"), ct);
-        dto.ProjectEntityId.ShouldBeNull();
+        dto.Folder.ShouldBeNull();
         dto.Confidence.ShouldBe(0.4);
         handler.Attempts.ShouldBe(1);
     }
@@ -53,7 +53,7 @@ public sealed class SafeLlmClientTests
         var ct = TestContext.Current.CancellationToken;
         var responses = new Queue<string>([
             "not valid json",
-            """{"project_entity_id": null, "confidence": 0.9, "rationale": "x"}""",
+            """{"folder": null, "confidence": 0.9, "rationale": "x"}""",
         ]);
         var handler = new StubHandler(_ => OllamaOk(responses.Dequeue()));
         var client = NewClient(handler);
@@ -94,12 +94,12 @@ public sealed class SafeLlmClientTests
     public async Task Route_v1_salvages_decision_from_unterminated_json()
     {
         var ct = TestContext.Current.CancellationToken;
-        var truncated = """{"project_entity_id": null, "confidence": 0.83, "rationale": "matches scope""";
+        var truncated = """{"folder": null, "confidence": 0.83, "rationale": "matches scope""";
         var handler = new StubHandler(_ => OllamaOk(truncated));
         var client = NewClient(handler);
         var dto = await client.CompleteAsync<RouteDecisionDto>(
             new PromptId("route", "v1"), new LlmPromptRequest("prompt"), ct);
-        dto.ProjectEntityId.ShouldBeNull();
+        dto.Folder.ShouldBeNull();
         dto.Confidence.ShouldBe(0.83);
         dto.Rationale.ShouldBe("matches scope");
         handler.Attempts.ShouldBe(1);

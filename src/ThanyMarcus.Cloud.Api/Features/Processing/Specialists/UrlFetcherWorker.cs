@@ -36,7 +36,9 @@ public sealed class UrlFetcherWorker : SpecialistWorkerBase<IUrlFetcherClient>
             ExtractedText: outcome.ExtractedText,
             ExtractionCacheKey: null,
             Extra: outcome.Extra,
-            AttachmentStatus: AttachmentExtractionStatus.Extracted,
+            AttachmentStatus: outcome.IsMinimal
+                ? AttachmentExtractionStatus.ExtractedMinimal
+                : AttachmentExtractionStatus.Extracted,
             ExtractionError: null);
     }
 }

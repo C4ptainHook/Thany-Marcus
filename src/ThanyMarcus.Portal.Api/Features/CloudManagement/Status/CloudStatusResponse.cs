@@ -11,7 +11,11 @@ public sealed record CloudStatusResponse(
     Instant? SucceededAt,
     Instant? DestroyedAt,
     JobSummary? CurrentJob,
-    IReadOnlyList<EventSummary> RecentEvents);
+    IReadOnlyList<EventSummary> RecentEvents,
+    decimal? PriceMonthlyUsd,
+    decimal? PriceHourlyUsd,
+    string? PriceCurrency,
+    Instant? PricedAt);
 
 public sealed record JobSummary(Guid JobId, string Kind, string Status);
 

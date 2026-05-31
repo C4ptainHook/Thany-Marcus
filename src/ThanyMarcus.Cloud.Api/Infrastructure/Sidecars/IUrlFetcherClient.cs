@@ -11,4 +11,5 @@ public interface IUrlFetcherClient
 public sealed record UrlFetchOutcome(
     string? ExtractedText,
     JsonDocument Extra,
-    Guid? RedirectedToAttachmentId);
+    Guid? RedirectedToAttachmentId,
+    bool IsMinimal = false);

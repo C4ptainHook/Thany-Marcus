@@ -17,7 +17,6 @@ using ThanyMarcus.Cloud.Api.Features.EntitySuggestions;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
-using ThanyMarcus.Cloud.Api.Features.Projects;
 using ThanyMarcus.Cloud.Api.Features.Processing.Composing;
 using ThanyMarcus.Cloud.Api.Features.Processing.Composing.Renderers;
 using ThanyMarcus.Cloud.Api.Features.Processing.Phases;
@@ -295,8 +294,15 @@ builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 const string PluginCorsPolicy = "PluginOrigin";
 builder.Services.AddCors(o =>
 {
+    var origins = new List<string> { "app://obsidian.md", "capacitor://localhost" };
+    var portalCallback = builder.Configuration["Bootstrap:PortalCallbackUrl"];
+    if (!string.IsNullOrWhiteSpace(portalCallback)
+        && Uri.TryCreate(portalCallback, UriKind.Absolute, out var portalUri))
+    {
+        origins.Add($"{portalUri.Scheme}://{portalUri.Authority}");
+    }
     o.AddPolicy(PluginCorsPolicy, p => p
-        .WithOrigins("app://obsidian.md", "capacitor://localhost")
+        .WithOrigins([.. origins])
         .AllowAnyHeader()
         .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
         .AllowCredentials());
@@ -334,6 +340,7 @@ app.MapAdminHealthEndpoint();
 app.MapCertInstalledEndpoint();
 
 app.MapIngestEndpoints();
+app.MapListJobsEndpoint();
 app.MapReprocessEndpoint();
 app.MapNoteDeleteEndpoint();
 app.MapRelatedNotesEndpoint();
@@ -341,7 +348,6 @@ app.MapCancelIngestEndpoint();
 app.MapSyncPullEndpoint();
 app.MapSyncPushEndpoint();
 app.MapSyncEventsEndpoint();
-app.MapProjectsEndpoints();
 app.MapEntitySuggestionsEndpoints();
 app.MapAdminSettingsEndpoints();
 app.MapAdminPluginTokenEndpoints();
