@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NodaTime;
@@ -40,7 +41,8 @@ public sealed class StepUpInvalidationTests(PostgresFixture postgres) : FactoryD
         var factory = Factory
             .WithTestAuth(user.Id, totp: TotpClaimValues.Verified)
             .WithClock(Clock);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(
+            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
         var dek = new byte[32];
         Array.Fill(dek, (byte)0xAB);
@@ -52,7 +54,7 @@ public sealed class StepUpInvalidationTests(PostgresFixture postgres) : FactoryD
         (await Db.StepUpUnlocks.AnyAsync(u => u.UserId == user.Id, ct)).ShouldBeTrue();
 
         var res = await client.PostAsync(new Uri("/api/auth/signout", UriKind.Relative), content: null, ct);
-        res.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        res.StatusCode.ShouldBe(HttpStatusCode.Found);
 
         (await Db.StepUpUnlocks.AnyAsync(u => u.UserId == user.Id, ct)).ShouldBeFalse();
     }

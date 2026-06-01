@@ -132,6 +132,19 @@ export default class ThanyMarcusPlugin extends Plugin {
       callback: () => void this.syncLoop.runNow(),
     });
 
+    this.registerObsidianProtocolHandler("thany-marcus-connect", async (params) => {
+      const cloudUrl = params.cloudUrl;
+      const token = params.token;
+      if (!cloudUrl || !token) {
+        new Notice("Thany: connect link missing cloudUrl or token.");
+        return;
+      }
+      this.settings.cloudUrl = cloudUrl.replace(/\/+$/, "");
+      this.settings.token = token;
+      await this.saveSettings();
+      new Notice(`Thany: connected to ${new URL(this.settings.cloudUrl).hostname}`);
+    });
+
     this.statusBarEl = this.addStatusBarItem();
     this.setStatusBar("idle");
 

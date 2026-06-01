@@ -47,7 +47,7 @@ public static class AuthEndpoints
             if (sub is not null && Guid.TryParse(sub, out var userId))
                 await cache.InvalidateAsync(userId, ct);
             await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return Results.NoContent();
+            return Results.Redirect("/");
         });
 
         grp.MapGet("/signin", () =>

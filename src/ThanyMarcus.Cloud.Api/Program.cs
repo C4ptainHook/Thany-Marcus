@@ -89,6 +89,7 @@ builder.Services.AddHttpClient(PortalCallbackService.HttpClientName, c => c.Time
 builder.Services.AddSingleton<PortalCallbackService>();
 
 builder.Services.AddSingleton<CertFileReader>();
+builder.Services.AddHostedService<RegistrationStartupSweeper>();
 
 builder.Services.AddSingleton(_ => new StorageOptions
 {

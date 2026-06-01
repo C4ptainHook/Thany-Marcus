@@ -67,12 +67,15 @@ public sealed class AuthEndpointsTests(PostgresFixture postgres) : FactoryDbTest
     }
 
     [Fact]
-    public async Task Signout_when_signed_in_clears_auth_cookie()
+    public async Task Signout_when_signed_in_clears_auth_cookie_and_redirects_home()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var client = Factory.WithTestAuth(Guid.CreateVersion7()).CreateClient();
+        using var client = Factory.WithTestAuth(Guid.CreateVersion7()).CreateClient(
+            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         var response = await client.PostAsync(new Uri("/api/auth/signout", UriKind.Relative), content: null, ct);
-        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+        response.Headers.Location.ShouldNotBeNull();
+        response.Headers.Location!.OriginalString.ShouldBe("/");
 
         var setCookies = response.Headers.GetValues("Set-Cookie").ToList();
         var authCookie = setCookies.SingleOrDefault(c => c.StartsWith(".Portal.Auth=", StringComparison.Ordinal));
