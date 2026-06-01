@@ -72,13 +72,13 @@
     </div>
 
     <div class="actions">
-      <a class="btn-primary" href={deepLink} title="Requires Thany-Marcus Obsidian plugin (coming soon)">
+      <a class="btn-primary" href={deepLink} title="Opens the Thany-Marcus plugin in Obsidian">
         Open in Obsidian
       </a>
     </div>
 
     <p class="muted small">
-      Lost it later? Rotate from your cloud's settings page (coming soon).
+      Lost it later? Use Settings → Plugin token to re-issue.
     </p>
   </section>
 {:else if failedPluginToken}

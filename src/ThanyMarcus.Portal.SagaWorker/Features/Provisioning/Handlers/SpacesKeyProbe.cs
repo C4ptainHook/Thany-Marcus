@@ -12,7 +12,7 @@ public interface ISpacesKeyProbe
 
 public sealed class AwsS3SpacesKeyProbe : ISpacesKeyProbe
 {
-    private static readonly int[] DelaysSeconds = [2, 3, 5, 8, 13, 13];
+    private static readonly int[] DelaysSeconds = [2, 3, 5, 8, 13, 21, 30, 30, 30, 30, 30, 30, 30];
 
     public async Task WaitForActiveAsync(
         string region, string accessKeyId, string secretKey, CancellationToken ct)

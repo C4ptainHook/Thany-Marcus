@@ -147,7 +147,16 @@ write_files:
         exit 1
       fi
       echo "[puller] pulling $OLLAMA_PULL_TAG"
-      ollama pull "$OLLAMA_PULL_TAG" || { echo "[puller] FATAL: ollama pull failed" >&2; exit 1; }
+      pulled=0
+      for attempt in 1 2 3 4 5; do
+        if ollama pull "$OLLAMA_PULL_TAG"; then pulled=1; break; fi
+        echo "[puller] ollama pull attempt $attempt failed; sleeping $((15*attempt))s..." >&2
+        sleep $((15 * attempt))
+      done
+      if [ "$pulled" != "1" ]; then
+        echo "[puller] FATAL: ollama pull failed after 5 attempts" >&2
+        exit 1
+      fi
       echo "[puller] verifying model is present after pull"
       MODEL_NAME=$${OLLAMA_PULL_TAG%:*}
       ollama list | grep -q "$MODEL_NAME" || { echo "[puller] FATAL: model missing from ollama list after pull" >&2; exit 1; }
@@ -344,14 +353,28 @@ runcmd:
   - ufw --force enable
 
   - install -m 0755 -d /etc/apt/keyrings
-  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  - chmod a+r /etc/apt/keyrings/docker.gpg
   - |
+    retry() {
+      label=$1; shift
+      for i in 1 2 3 4 5; do
+        if "$@"; then return 0; fi
+        echo "[cloud-init] $label attempt $i failed; sleeping $((10*i))s..." >&2
+        sleep $((10 * i))
+      done
+      echo "[cloud-init] $label failed after 5 attempts" >&2
+      return 1
+    }
+    fetch_docker_gpg() {
+      (set -o pipefail; curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg)
+    }
+    retry "docker gpg fetch" fetch_docker_gpg || exit 1
+    chmod a+r /etc/apt/keyrings/docker.gpg
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
       > /etc/apt/sources.list.d/docker.list
-  - apt-get update
-  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-  - usermod -aG docker ${admin_user}
+    retry "apt-get update" apt-get update || exit 1
+    retry "apt-get install docker" apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin || exit 1
+    usermod -aG docker ${admin_user}
 
   - |
     if [ ! -f /swapfile ]; then
@@ -392,8 +415,17 @@ runcmd:
 
   - |
     cd /opt/thany-cloud
-    sudo -u ${admin_user} docker compose pull ollama-vision ollama-text docling parakeet
-    sudo -u ${admin_user} docker compose --profile init pull ollama-vision-puller ollama-text-puller
+    pull_with_retry() {
+      for i in 1 2 3 4 5; do
+        if sudo -u ${admin_user} docker compose "$@" pull; then return 0; fi
+        echo "[cloud-init] '$@' pull attempt $i failed; sleeping $((15*i))s..." >&2
+        sleep $((15 * i))
+      done
+      echo "[cloud-init] '$@' pull failed after 5 attempts" >&2
+      return 1
+    }
+    pull_with_retry || exit 1
+    pull_with_retry --profile init || exit 1
 
   - |
     cd /opt/thany-cloud
