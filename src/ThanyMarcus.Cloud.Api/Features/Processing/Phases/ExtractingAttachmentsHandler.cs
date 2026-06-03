@@ -15,6 +15,7 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
     private static readonly string[] SidecarPriority =
     [
         ExtractionTaskSidecar.Url,
+        ExtractionTaskSidecar.UrlMetadata,
         ExtractionTaskSidecar.Docling,
         ExtractionTaskSidecar.Parakeet,
         ExtractionTaskSidecar.Ollama,
@@ -65,7 +66,9 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
             .ToList();
         foreach (var (att, sidecar) in candidates.Where(c => c.Sidecar is null))
         {
-            att.ExtractionStatus = AttachmentExtractionStatus.Skipped;
+            att.ExtractionStatus = att.Mode == AttachmentMode.Reference
+                ? AttachmentExtractionStatus.Referenced
+                : AttachmentExtractionStatus.Skipped;
         }
         await db.SaveChangesAsync(ct);
 
@@ -260,12 +263,14 @@ public sealed class ExtractingAttachmentsHandler : IPhaseHandler
         }
     }
 
-    private static string? ResolveSidecar(Attachment att) => att.Kind switch
+    internal static string? ResolveSidecar(Attachment att) => (att.Mode, att.Kind) switch
     {
-        AttachmentKind.Image => ExtractionTaskSidecar.Ollama,
-        AttachmentKind.Voice => ExtractionTaskSidecar.Parakeet,
-        AttachmentKind.Url   => ExtractionTaskSidecar.Url,
-        AttachmentKind.File  => ExtractionTaskSidecar.Docling,
+        (AttachmentMode.Reference, _)                  => null,
+        (AttachmentMode.Metadata, AttachmentKind.Url)  => ExtractionTaskSidecar.UrlMetadata,
+        (AttachmentMode.Extract, AttachmentKind.Image) => ExtractionTaskSidecar.Ollama,
+        (AttachmentMode.Extract, AttachmentKind.Voice) => ExtractionTaskSidecar.Parakeet,
+        (AttachmentMode.Extract, AttachmentKind.Url)   => ExtractionTaskSidecar.Url,
+        (AttachmentMode.Extract, AttachmentKind.File)  => ExtractionTaskSidecar.Docling,
         _ => null,
     };
 }

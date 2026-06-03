@@ -11,6 +11,7 @@ export type WizardSseEvent =
   | { type: 'cloud_ready'; cloudId: string; hostname: string; ip: string | null }
   | { type: 'cloud_failed'; terminalStatus: string; reason: string; message: string }
   | { type: 'cloud_rolled_back'; reason: string }
+  | { type: 'cloud_cancelled'; reason: string }
   | { type: 'plugin_token_issued'; rawToken: string; deepLink: string };
 
 export const PhaseOrder: PhaseName[] = [

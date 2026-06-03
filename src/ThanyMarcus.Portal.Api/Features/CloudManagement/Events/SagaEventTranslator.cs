@@ -9,7 +9,8 @@ public sealed record JobStateSnapshot(
     string Status,
     string Hostname,
     string? Ip,
-    string? LastError);
+    string? LastError,
+    bool CancelRequested);
 
 public sealed class SagaEventTranslator(IClock clock)
 {
@@ -60,6 +61,9 @@ public sealed class SagaEventTranslator(IClock clock)
     private static WizardSseEvent TerminalEvent(JobStateSnapshot state) => state.Status switch
     {
         SagaStatus.Succeeded   => WizardSseEvent.CloudReady(state.CloudId, state.Hostname, state.Ip),
+        SagaStatus.Cancelled   => WizardSseEvent.CloudCancelled(state.LastError ?? "cancelled"),
+        SagaStatus.RolledBack when state.CancelRequested
+                               => WizardSseEvent.CloudCancelled(state.LastError ?? "cancelled"),
         SagaStatus.RolledBack  => WizardSseEvent.CloudRolledBack(state.LastError ?? "rolled_back"),
         _                      => WizardSseEvent.CloudFailed(state.Status, state.Status, state.LastError ?? ""),
     };

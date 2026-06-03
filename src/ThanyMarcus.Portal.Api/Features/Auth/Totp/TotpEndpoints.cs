@@ -83,32 +83,21 @@ public static class TotpEndpoints
                 row.UpdatedAt = now;
             }
 
-            // Maintain the TOTP recovery wrapper: while unlocked, seal a copy of the DEK under the
-            // (possibly rotated) secret; otherwise drop any prior wrapper so it can't go stale.
             var account = await db.Users.SingleAsync(u => u.Id == userId, ct);
-            if (account.PassphraseWrappedDek is { Length: > 0 })
+            var dek = new byte[32];
+            try
             {
-                var dek = new byte[32];
-                try
-                {
-                    if (await unlockCache.TryGetAsync(userId, dek, ct))
-                    {
-                        var (wrappedDek, wrapNonce, wrapTag) = totp.WrapDek(body.Secret, dek);
-                        account.TotpWrappedDek = wrappedDek;
-                        account.TotpWrapNonce = wrapNonce;
-                        account.TotpWrapTag = wrapTag;
-                    }
-                    else
-                    {
-                        account.TotpWrappedDek = null;
-                        account.TotpWrapNonce = null;
-                        account.TotpWrapTag = null;
-                    }
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(dek);
-                }
+                if (!await unlockCache.TryGetAsync(userId, dek, ct))
+                    return Results.Json(new { error = "step_up_required" }, statusCode: StatusCodes.Status401Unauthorized);
+
+                var (wrappedDek, wrapNonce, wrapTag) = totp.WrapDek(body.Secret, dek);
+                account.TotpWrappedDek = wrappedDek;
+                account.TotpWrapNonce = wrapNonce;
+                account.TotpWrapTag = wrapTag;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(dek);
             }
             await db.SaveChangesAsync(ct);
 
@@ -117,7 +106,8 @@ public static class TotpEndpoints
             await RefreshTotpClaim(http, user, TotpClaimValues.Verified);
 
             return Results.Ok(new TotpEnableVerifyResponse(backupCodes));
-        });
+        })
+           .AddEndpointFilter<RequireInfraOpUnlockFilter>();
 
         grp.MapPost("/disable", async (
             TotpDisableRequest body,

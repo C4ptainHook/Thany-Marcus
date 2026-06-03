@@ -39,5 +39,6 @@ public static class ExtractionTaskSidecar
     public const string Docling = "docling";
     public const string Parakeet = "parakeet";
     public const string Url = "url";
+    public const string UrlMetadata = "url_metadata";
     public const string Video = "video";
 }

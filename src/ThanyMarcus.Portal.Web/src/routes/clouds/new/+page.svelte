@@ -7,25 +7,11 @@
   import type { RegionInfo } from '$lib/types/providerMeta';
   import type { Provider } from '$lib/types/cloud';
 
-  type ProviderOption = {
-    id: Provider;
-    name: string;
-    tagline: string;
-    price: string;
-    disabled?: boolean;
-    preview?: boolean;
-  };
+  const provider: Provider = 'digitalocean';
 
-  const providers: ProviderOption[] = [
-    { id: 'digitalocean', name: 'DigitalOcean', tagline: 'Simple droplets, fast spin-up.',  price: 'from $14/mo' },
-    { id: 'hetzner',      name: 'Hetzner',      tagline: 'Cheap EU compute.',                price: 'from $9/mo'  },
-    { id: 'azure',        name: 'Azure',        tagline: 'Preview — validation only.',       price: '—', disabled: true, preview: true },
-  ];
+  type Step = 'region' | 'review';
 
-  type Step = 'provider' | 'region' | 'review';
-
-  let step = $state<Step>('provider');
-  let provider = $state<Provider | ''>('');
+  let step = $state<Step>('region');
   let region = $state('');
   let regions = $state<RegionInfo[]>([]);
   let loadingRegions = $state(false);
@@ -47,12 +33,12 @@
     return regions.find(r => r.slug === slug)?.label ?? slug;
   }
 
-  async function loadRegionsFor(p: Provider) {
+  async function loadRegions() {
     loadingRegions = true;
     regionsError = null;
     regions = [];
     try {
-      const r = await fetch(`/api/clouds/provider-meta/${p}`);
+      const r = await fetch(`/api/clouds/provider-meta/${provider}`);
       if (!r.ok) { regionsError = `Failed to load regions (HTTP ${r.status}).`; return; }
       const data = await r.json() as { regions: RegionInfo[] };
       regions = data.regions;
@@ -61,18 +47,6 @@
     } finally {
       loadingRegions = false;
     }
-  }
-
-  function pickProvider(p: Provider) {
-    if (provider === p) return;
-    provider = p;
-    region = '';
-  }
-
-  async function nextFromProvider() {
-    if (!provider) return;
-    step = 'region';
-    if (regions.length === 0 || !loadingRegions) await loadRegionsFor(provider);
   }
 
   function mapErrorToMessage(code: string | undefined, status: number): string {
@@ -86,7 +60,7 @@
   }
 
   async function submit() {
-    if (!provider || !region) return;
+    if (!region) return;
     submitting = true;
     submitError = null;
     void requestNotifyPermission().catch(() => { /* user dismissed; harmless */ });
@@ -102,8 +76,8 @@
       }
       if (r.status === 412) {
         const problem = await parseProblem(r);
-        if (problem?.error === 'connect_required' && provider === 'digitalocean') {
-          const returnTo = `/clouds/new?provider=${encodeURIComponent(provider)}&region=${encodeURIComponent(region)}`;
+        if (problem?.error === 'connect_required') {
+          const returnTo = `/clouds/new?region=${encodeURIComponent(region)}`;
           window.location.href = `/oauth/digitalocean/start?return_to=${encodeURIComponent(returnTo)}`;
           return;
         }
@@ -138,57 +112,26 @@
         default:               submitError = `Connection failed (${err}).`;
       }
     }
+    await loadRegions();
     if (params.get('connected') === '1') {
-      const presetProvider = params.get('provider');
-      const presetRegion   = params.get('region');
-      if (presetProvider === 'digitalocean') {
-        provider = 'digitalocean' as Provider;
-        await loadRegionsFor(provider);
-        if (presetRegion && DigitalOceanRegions(presetRegion)) {
-          region = presetRegion;
-          step = 'review';
-        } else {
-          step = 'region';
-        }
+      const presetRegion = params.get('region');
+      if (presetRegion && isKnownRegion(presetRegion)) {
+        region = presetRegion;
+        step = 'review';
       }
     }
   });
 
-  function DigitalOceanRegions(slug: string): boolean {
+  function isKnownRegion(slug: string): boolean {
     return regions.some(r => r.slug === slug) || /^[a-z]{3}[0-9]$/.test(slug);
   }
 </script>
 
 <main>
   <h1>Create cloud</h1>
-  <p class="muted">Step {step === 'provider' ? 1 : step === 'region' ? 2 : 3} of 3</p>
+  <p class="muted">Step {step === 'region' ? 1 : 2} of 2</p>
 
-  {#if step === 'provider'}
-    <section>
-      <h2>Choose a provider</h2>
-      <div class="providers">
-        {#each providers as p (p.id)}
-          <button
-            type="button"
-            class={'provider-card ' + (provider === p.id ? 'selected' : '') + (p.disabled ? ' disabled' : '')}
-            disabled={p.disabled}
-            onclick={() => pickProvider(p.id)}
-          >
-            <span class="radio">{provider === p.id ? '●' : p.disabled ? '○' : '○'}</span>
-            <span class="body">
-              <span class="name">{p.name}</span>
-              <span class="tagline muted">{p.tagline}</span>
-            </span>
-            <span class="price muted">{p.price}</span>
-          </button>
-        {/each}
-      </div>
-      <div class="actions">
-        <button class="btn-primary" disabled={!provider} onclick={nextFromProvider}>Next</button>
-      </div>
-    </section>
-
-  {:else if step === 'region'}
+  {#if step === 'region'}
     <section>
       <h2>Choose a region</h2>
       {#if loadingRegions}
@@ -211,7 +154,6 @@
         </label>
       {/if}
       <div class="actions">
-        <button class="btn-secondary" onclick={() => step = 'provider'}>Back</button>
         <button class="btn-primary" disabled={!region} onclick={() => step = 'review'}>Next</button>
       </div>
     </section>
@@ -221,7 +163,7 @@
       <h2>Review</h2>
       <dl>
         <dt class="muted">Provider</dt>
-        <dd>{providers.find(p => p.id === provider)?.name ?? provider}</dd>
+        <dd>DigitalOcean</dd>
         <dt class="muted">Region</dt>
         <dd>{regionLabel(region)}</dd>
         <dt class="muted">Hostname</dt>
@@ -242,9 +184,9 @@
       {/if}
       {#if submitError}<p class="error">{submitError}</p>{/if}
       <div class="actions">
-        <button class="btn-secondary" onclick={() => step = 'provider'} disabled={submitting}>Edit</button>
+        <button class="btn-secondary" onclick={() => step = 'region'} disabled={submitting}>Edit</button>
         <button class="btn-primary" disabled={submitting} onclick={submit}>
-          {submitting ? (provider === 'digitalocean' ? 'Connecting…' : 'Provisioning…') : (provider === 'digitalocean' ? 'Connect DigitalOcean' : 'Provision')}
+          {submitting ? 'Connecting…' : 'Connect DigitalOcean'}
         </button>
       </div>
     </section>
@@ -252,36 +194,6 @@
 </main>
 
 <style>
-  .providers {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    margin: var(--space-3) 0;
-  }
-  .provider-card {
-    height: auto;
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    background: var(--surface);
-    border: var(--border-width) solid var(--border);
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font: inherit;
-    border-radius: 0;
-  }
-  .provider-card:hover:not(.disabled):not(.selected) { border-color: var(--text-dim); }
-  .provider-card.selected { border-color: var(--primary); }
-  .provider-card.disabled { cursor: not-allowed; opacity: 0.5; }
-
-  .radio { font-size: var(--text-lg); color: var(--primary); width: 1.5rem; }
-  .body { display: flex; flex-direction: column; gap: 2px; flex: 1; }
-  .name { font-size: var(--text-base); }
-  .tagline { font-size: var(--text-sm); }
-  .price { font-size: var(--text-sm); }
-
   .actions {
     display: flex;
     gap: var(--space-2);

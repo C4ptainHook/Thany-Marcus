@@ -1,3 +1,5 @@
+import { fetchWithStepUp } from './stepUpClient';
+
 export type TotpEnableInit = { secret: string; qrPngDataUri: string };
 export type TotpEnableVerify = { backupCodes: string[] };
 
@@ -8,7 +10,7 @@ export async function enableInit(): Promise<TotpEnableInit> {
 }
 
 export async function enableVerify(secret: string, code: string, currentCode?: string): Promise<TotpEnableVerify> {
-  const r = await fetch('/api/auth/totp/enable/verify', {
+  const r = await fetchWithStepUp('/api/auth/totp/enable/verify', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ secret, code, currentCode }),

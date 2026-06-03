@@ -203,6 +203,7 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
     private static List<SynthesisInput> BuildInputs(List<Attachment> attachments)
     {
         var list = new List<SynthesisInput>(attachments.Count);
+        var n = 0;
         foreach (var att in attachments)
         {
             var kind = att.Kind switch
@@ -213,17 +214,48 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
                 AttachmentKind.File  => "file",
                 _ => att.Kind,
             };
-            if (att.ExtractionStatus == AttachmentExtractionStatus.Failed)
+            var id = $"att-{++n}";
+
+            if (att.Mode == AttachmentMode.Reference)
             {
-                list.Add(new SynthesisInput(kind, Content: null, FailureReason: att.ExtractionError ?? "unknown"));
+                list.Add(new SynthesisInput(kind, Content: null, FailureReason: null,
+                    Mode: AttachmentMode.Reference, Id: id));
+            }
+            else if (att.Mode == AttachmentMode.Metadata)
+            {
+                var (title, description, url) = ReadMetadata(att);
+                list.Add(new SynthesisInput(kind, Content: null, FailureReason: null,
+                    Mode: AttachmentMode.Metadata, Id: id,
+                    Title: title, Description: description, Url: url));
+            }
+            else if (att.ExtractionStatus == AttachmentExtractionStatus.Failed)
+            {
+                list.Add(new SynthesisInput(kind, Content: null,
+                    FailureReason: att.ExtractionError ?? "unknown", Id: id));
             }
             else if (att.ExtractionStatus == AttachmentExtractionStatus.Extracted
                      && !string.IsNullOrWhiteSpace(att.ExtractedText))
             {
-                list.Add(new SynthesisInput(kind, Content: att.ExtractedText, FailureReason: null));
+                list.Add(new SynthesisInput(kind, Content: att.ExtractedText, FailureReason: null, Id: id));
             }
         }
         return list;
+    }
+
+    private static (string? Title, string? Description, string? Url) ReadMetadata(Attachment att)
+    {
+        if (att.Extra is null || att.Extra.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+            return (null, null, att.Url);
+        var root = att.Extra.RootElement;
+        return (
+            GetString(root, "title"),
+            GetString(root, "description"),
+            GetString(root, "canonical_url") ?? att.Url);
+
+        static string? GetString(System.Text.Json.JsonElement root, string name) =>
+            root.TryGetProperty(name, out var el) && el.ValueKind == System.Text.Json.JsonValueKind.String
+                ? el.GetString()
+                : null;
     }
 
     internal static string ComputeRawExtractionsHash(Note note, IReadOnlyList<Attachment> attachments)

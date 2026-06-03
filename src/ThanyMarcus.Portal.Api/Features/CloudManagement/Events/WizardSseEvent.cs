@@ -14,6 +14,8 @@ public abstract record WizardSseEvent(string Type)
         : WizardSseEvent("cloud_failed");
     public sealed record CloudRolledBackEvent(string Reason)
         : WizardSseEvent("cloud_rolled_back");
+    public sealed record CloudCancelledEvent(string Reason)
+        : WizardSseEvent("cloud_cancelled");
     public sealed record PluginTokenIssuedEvent(string RawToken, string DeepLink)
         : WizardSseEvent("plugin_token_issued");
 
@@ -26,6 +28,7 @@ public abstract record WizardSseEvent(string Type)
     public static CloudFailedEvent CloudFailed(string terminalStatus, string reason, string message)
         => new(terminalStatus, reason, message);
     public static CloudRolledBackEvent CloudRolledBack(string reason) => new(reason);
+    public static CloudCancelledEvent CloudCancelled(string reason) => new(reason);
     public static PluginTokenIssuedEvent PluginTokenIssued(string rawToken, string deepLink)
         => new(rawToken, deepLink);
 }

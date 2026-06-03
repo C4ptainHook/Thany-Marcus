@@ -1,4 +1,5 @@
 using Shouldly;
+using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.Processing.Phases;
 using ThanyMarcus.Cloud.Api.Features.Processing.Synthesis;
 using ThanyMarcus.Shared.PluginApi;
@@ -8,6 +9,38 @@ namespace ThanyMarcus.Cloud.Tests.Features.Processing.Synthesis;
 public sealed class SynthesisPromptBuilderTests
 {
     private static readonly SynthesisInput[] NoInputs = Array.Empty<SynthesisInput>();
+
+    [Fact]
+    public void Reference_attachments_absent_from_prompt()
+    {
+        var systemBody = SynthesisPresetBodies.BodyFor(SynthesisPresets.Zettelkasten);
+        var withReference = SynthesisPromptBuilder.Build(systemBody, "note body",
+            new[] { new SynthesisInput("voice", Content: null, FailureReason: null,
+                Mode: AttachmentMode.Reference, Id: "att-1") });
+        var withNoInputs = SynthesisPromptBuilder.Build(systemBody, "note body", NoInputs);
+
+        withReference.ShouldBe(withNoInputs);
+        withReference.ShouldNotContain("att-1");
+    }
+
+    [Fact]
+    public void Metadata_attachments_emit_reference_block_not_input_block()
+    {
+        var inputs = new[]
+        {
+            new SynthesisInput("url", Content: null, FailureReason: null,
+                Mode: AttachmentMode.Metadata, Id: "att-2",
+                Title: "Some Page", Description: "A blurb", Url: "https://example.com/p"),
+        };
+
+        var prompt = SynthesisPromptBuilder.Build(
+            systemBody: SynthesisPresetBodies.BodyFor(SynthesisPresets.Zettelkasten),
+            userBody: "note body",
+            attachmentInputs: inputs);
+
+        prompt.ShouldContain("<reference id=\"att-2\" title=\"Some Page\" description=\"A blurb\" url=\"https://example.com/p\"/>");
+        prompt.ShouldNotContain("URL extract:");
+    }
 
     [Fact]
     public void Build_does_not_emit_an_available_entities_section()

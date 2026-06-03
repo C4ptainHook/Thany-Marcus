@@ -42,7 +42,7 @@
   let confirmHost = $state('');
   let cancelBusy = $state(false);
   let cancelError = $state<string | null>(null);
-  let cancelRequested = $state(false);
+  let cancelRequested = $state(initial.cancelRequestedAt != null);
 
   function startConfirm() {
     confirming = true;
@@ -155,6 +155,18 @@
         setTimeout(onTerminal, 800);
       },
       cloud_rolled_back: () => {
+        close();
+        setTimeout(onTerminal, 400);
+      },
+      cloud_cancelled: () => {
+        if (!terminalNotified) {
+          terminalNotified = true;
+          desktopNotify({
+            title: 'Provisioning cancelled',
+            body: initial.hostname,
+            onClick: () => focusCloudTile(initial.cloudId),
+          });
+        }
         close();
         setTimeout(onTerminal, 400);
       },

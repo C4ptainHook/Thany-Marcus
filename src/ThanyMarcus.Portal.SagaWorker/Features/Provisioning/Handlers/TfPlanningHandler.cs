@@ -35,6 +35,9 @@ public sealed partial class TfPlanningHandler(
         job = await db.ProvisioningJobs.SingleAsync(j => j.Id == jobId, ct);
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
 
+        if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
+            return;
+
         if (cloud.PlanStartedAt is null)
         {
             cloud.PlanStartedAt = clock.GetCurrentInstant();
@@ -137,6 +140,10 @@ public sealed partial class TfPlanningHandler(
             {
                 ["event"] = "plan_succeeded",
             });
+
+            if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
+                return;
+
             await SagaTransitions.TransitionAsync(
                 db, clock, job, SagaStatus.TfApplying, Duration.Zero, ct: ct);
         }

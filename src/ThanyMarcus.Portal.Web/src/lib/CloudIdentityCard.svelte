@@ -11,8 +11,6 @@
 
   const PROVIDER_LABEL: Record<string, string> = {
     digitalocean: 'DIGITALOCEAN',
-    hetzner:      'HETZNER',
-    azure:        'AZURE',
   };
 
   async function ping() {

@@ -5,6 +5,7 @@ using NodaTime;
 using OtpNet;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
 using ThanyMarcus.Portal.Tests.Infrastructure;
 
@@ -12,6 +13,16 @@ namespace ThanyMarcus.Portal.Tests.Features.Auth.Totp;
 
 public sealed class TotpEndpointsTests(PostgresFixture postgres) : FactoryDbTestBase(postgres)
 {
+    private static readonly Uri PassphraseInitUri = new("/api/auth/passphrase/init", UriKind.Relative);
+    private static readonly Uri UnlockUri = new("/api/auth/unlock", UriKind.Relative);
+
+    private static async Task UnlockAsync(HttpClient client, string passphrase = "hunter2hunter2")
+    {
+        var ct = TestContext.Current.CancellationToken;
+        (await client.PostAsJsonAsync(PassphraseInitUri, new PassphraseInitRequest(passphrase), ct)).EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync(UnlockUri, new PassphraseUnlockRequest(passphrase), ct)).EnsureSuccessStatusCode();
+    }
+
     private async Task<User> InsertUserAsync()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -55,7 +66,7 @@ public sealed class TotpEndpointsTests(PostgresFixture postgres) : FactoryDbTest
     }
 
     [Fact]
-    public async Task Enable_verify_round_trip_writes_secret_and_8_backup_codes()
+    public async Task Enable_verify_round_trip_writes_secret_backup_codes_and_recovery_wrapper()
     {
         var ct = TestContext.Current.CancellationToken;
         var user = await InsertUserAsync();
@@ -63,6 +74,7 @@ public sealed class TotpEndpointsTests(PostgresFixture postgres) : FactoryDbTest
             .WithTestAuth(user.Id, totp: TotpClaimValues.NotEnabled)
             .WithClock(Clock)
             .CreateClient();
+        await UnlockAsync(client);
 
         var init = await client.PostAsync(
             new Uri("/api/auth/totp/enable/init", UriKind.Relative), content: null, ct);
@@ -82,6 +94,33 @@ public sealed class TotpEndpointsTests(PostgresFixture postgres) : FactoryDbTest
         secret.EnabledAt.ShouldNotBeNull();
         secret.DisabledAt.ShouldBeNull();
         (await Db.TotpBackupCodes.CountAsync(b => b.UserId == user.Id, ct)).ShouldBe(8);
+
+        var account = await Db.Users.SingleAsync(u => u.Id == user.Id, ct);
+        account.TotpWrappedDek.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Enable_verify_without_step_up_returns_401_and_writes_nothing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var user = await InsertUserAsync();
+        using var client = Factory
+            .WithTestAuth(user.Id, totp: TotpClaimValues.NotEnabled)
+            .WithClock(Clock)
+            .CreateClient();
+
+        var init = await client.PostAsync(
+            new Uri("/api/auth/totp/enable/init", UriKind.Relative), content: null, ct);
+        var initBody = (await init.Content.ReadFromJsonAsync<TotpEnableInitResponse>(ct))!;
+        var code = ComputeCode(initBody.Secret, Clock.GetCurrentInstant());
+
+        var verify = await client.PostAsJsonAsync(
+            new Uri("/api/auth/totp/enable/verify", UriKind.Relative),
+            new TotpEnableVerifyRequest(initBody.Secret, code),
+            ct);
+        verify.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await Db.TotpSecrets.AnyAsync(t => t.UserId == user.Id, ct)).ShouldBeFalse();
+        (await Db.TotpBackupCodes.AnyAsync(b => b.UserId == user.Id, ct)).ShouldBeFalse();
     }
 
     [Fact]
@@ -93,6 +132,7 @@ public sealed class TotpEndpointsTests(PostgresFixture postgres) : FactoryDbTest
             .WithTestAuth(user.Id, totp: TotpClaimValues.NotEnabled)
             .WithClock(Clock)
             .CreateClient();
+        await UnlockAsync(client);
 
         var init = await client.PostAsync(
             new Uri("/api/auth/totp/enable/init", UriKind.Relative), content: null, ct);
@@ -236,6 +276,7 @@ public sealed class TotpEndpointsTests(PostgresFixture postgres) : FactoryDbTest
             .WithTestAuth(userId, totp: TotpClaimValues.NotEnabled)
             .WithClock(Clock)
             .CreateClient();
+        await UnlockAsync(client);
 
         var init = await client.PostAsync(
             new Uri("/api/auth/totp/enable/init", UriKind.Relative), content: null, ct);

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using NodaTime;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
@@ -47,6 +48,73 @@ public sealed class SagaConcurrencyTests(PostgresFixture postgres) : DbIntegrati
 
                 var claimedCount = await CountClaimedAsync(jobs, ct);
                 claimedCount.ShouldBe(3);
+
+                blocker.ReleaseAll();
+            }
+            finally
+            {
+                blocker.ReleaseAll();
+                await host.StopAsync(ct);
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(dpKeysDir, recursive: true); } catch { }
+            try { Directory.Delete(workspaceBase, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task Sibling_jobs_for_same_cloud_are_not_claimed_concurrently()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dpKeysDir = MakeTempDir("ser-keys");
+        var workspaceBase = MakeTempDir("ser-ws");
+        try
+        {
+            var dp = new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider();
+            var (_, cloud, _) = await SagaTestSeed.SeedAsync(
+                Db, Clock, dp,
+                status: SagaStatus.TfPlanning,
+                ct: ct);
+
+            // A sibling cancel job for the SAME cloud, visible slightly later so the create job
+            // wins the first claim and holds the per-cloud lease while we observe.
+            var now = Clock.GetCurrentInstant();
+            var cancelJob = new ProvisioningJob
+            {
+                CloudId = cloud.Id,
+                UserId = cloud.UserId,
+                Kind = SagaKinds.Cancel,
+                Payload = JsonDocument.Parse("""{"reason":"user_initiated"}"""),
+                Status = SagaStatus.Pending,
+                NextVisibleAt = now.Plus(Duration.FromSeconds(1)),
+                EventsLog = JsonDocument.Parse("[]"),
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            Db.ProvisioningJobs.Add(cancelJob);
+            await Db.SaveChangesAsync(ct);
+            Db.ChangeTracker.Clear();
+
+            Directory.CreateDirectory(Path.Combine(workspaceBase, "stub"));
+
+            var blocker = new BlockingPlanRunner();
+            var cf = new FakeCloudflareDnsClient();
+
+            using var host = SagaHostBuilder.Build(
+                Postgres.ConnectionString, dpKeysDir, workspaceBase, blocker, cf,
+                maxConcurrent: 3, dataProtectionProvider: dp,
+                clock: Clock);
+            await host.StartAsync(ct);
+            try
+            {
+                // Create job claimed and blocked mid-plan ⇒ it holds the cloud's lease.
+                await WaitForAsync(async () => await blocker.PlanCallCountAsync(ct) == 1, TimeSpan.FromSeconds(15), ct);
+
+                // The sibling cancel job must not be claimed while the create job runs.
+                var cancelClaimed = await CountClaimedAsync([cancelJob.Id], ct);
+                cancelClaimed.ShouldBe(0);
 
                 blocker.ReleaseAll();
             }

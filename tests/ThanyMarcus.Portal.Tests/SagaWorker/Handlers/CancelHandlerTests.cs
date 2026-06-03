@@ -22,13 +22,13 @@ namespace ThanyMarcus.Portal.Tests.SagaWorker.Handlers;
 public sealed class CancelHandlerTests(PostgresFixture postgres) : DbIntegrationTestBase(postgres)
 {
     [Fact]
-    public async Task Cancel_with_sibling_create_job_marks_both_terminal()
+    public async Task Defers_while_sibling_create_is_non_terminal()
     {
         var ct = TestContext.Current.CancellationToken;
         var dp = new EphemeralDataProtectionProvider();
         var (user, cloud, createJob) = await SagaTestSeed.SeedAsync(
             Db, Clock, dp,
-            status: SagaStatus.TfPlanning,
+            status: SagaStatus.TfApplying,
             kind: SagaKinds.Create,
             ct: ct);
 
@@ -36,113 +36,29 @@ public sealed class CancelHandlerTests(PostgresFixture postgres) : DbIntegration
 
         using var workspaceBase = new TfPlanningHandlerTests.TempDir();
         var tf = new FakeTerraformRunner();
-        tf.QueueHasResources(false);
         var handler = BuildHandler(dp, tf, workspaceBase.Path);
 
         await handler.HandleAsync(cancelJob, ct);
         Db.ChangeTracker.Clear();
 
+        // Cancel job parks itself; the create saga self-compensates instead.
+        tf.Calls.ShouldBeEmpty();
+
         var reloadedCancel = await Db.ProvisioningJobs.SingleAsync(j => j.Id == cancelJob.Id, ct);
-        reloadedCancel.Status.ShouldBe(SagaStatus.Succeeded);
+        reloadedCancel.Status.ShouldBe(SagaStatus.Pending);
+        SagaStatus.IsTerminal(reloadedCancel.Status).ShouldBeFalse();
 
         var reloadedCreate = await Db.ProvisioningJobs.SingleAsync(j => j.Id == createJob.Id, ct);
-        reloadedCreate.Status.ShouldBe(SagaStatus.Cancelled);
+        reloadedCreate.Status.ShouldBe(SagaStatus.TfApplying);
 
         var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
-        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.Cancelled);
-        reloadedCloud.DestroyedAt.ShouldNotBeNull();
-        reloadedCloud.ProvisioningCompletedAt.ShouldNotBeNull();
+        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.TfApplying);
+        reloadedCloud.CancelRequestedAt.ShouldNotBeNull();
+        reloadedCloud.DestroyedAt.ShouldBeNull();
     }
 
     [Fact]
-    public async Task Cancel_with_no_sibling_create_still_marks_cloud_terminal()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var dp = new EphemeralDataProtectionProvider();
-        var (user, cloud) = await SeedUserAndCloudAsync(SagaStatus.FailedTf, ct);
-        var cancelJob = await SeedCancelJobAsync(cloud.Id, user.Id, ct);
-
-        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
-        var tf = new FakeTerraformRunner();
-        tf.QueueHasResources(false);
-        var handler = BuildHandler(dp, tf, workspaceBase.Path);
-
-        await handler.HandleAsync(cancelJob, ct);
-        Db.ChangeTracker.Clear();
-
-        var reloadedCancel = await Db.ProvisioningJobs.SingleAsync(j => j.Id == cancelJob.Id, ct);
-        reloadedCancel.Status.ShouldBe(SagaStatus.Succeeded);
-
-        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
-        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.Cancelled);
-        reloadedCloud.DestroyedAt.ShouldNotBeNull();
-    }
-
-    [Fact]
-    public async Task Cancel_with_terraform_state_invokes_destroy()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var dp = new EphemeralDataProtectionProvider();
-        var (user, cloud, createJob) = await SagaTestSeed.SeedAsync(
-            Db, Clock, dp,
-            status: SagaStatus.TfApplying,
-            kind: SagaKinds.Create,
-            ct: ct);
-        var cancelJob = await SeedCancelJobAsync(cloud.Id, user.Id, ct);
-
-        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
-        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", createJob.Id.ToString()));
-
-        var tf = new FakeTerraformRunner();
-        tf.QueueHasResources(true);
-        tf.QueueInitOk();
-        tf.QueueDestroyOk();
-        var handler = BuildHandler(dp, tf, workspaceBase.Path);
-
-        await handler.HandleAsync(cancelJob, ct);
-        Db.ChangeTracker.Clear();
-
-        tf.Calls.ShouldContain(c => c.Command == "state-list");
-        tf.Calls.ShouldContain(c => c.Command == "destroy");
-
-        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
-        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.Cancelled);
-        reloadedCloud.ProvisioningError.ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task Terraform_destroy_failure_still_completes_cancel_with_provisioning_error()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var dp = new EphemeralDataProtectionProvider();
-        var (user, cloud, createJob) = await SagaTestSeed.SeedAsync(
-            Db, Clock, dp,
-            status: SagaStatus.TfApplying,
-            kind: SagaKinds.Create,
-            ct: ct);
-        var cancelJob = await SeedCancelJobAsync(cloud.Id, user.Id, ct);
-
-        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
-        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", createJob.Id.ToString()));
-
-        var tf = new ThrowingTerraformRunner();
-        var handler = BuildHandler(dp, tf, workspaceBase.Path);
-
-        await handler.HandleAsync(cancelJob, ct);
-        Db.ChangeTracker.Clear();
-
-        var reloadedCancel = await Db.ProvisioningJobs.SingleAsync(j => j.Id == cancelJob.Id, ct);
-        reloadedCancel.Status.ShouldBe(SagaStatus.Succeeded);
-
-        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
-        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.Cancelled);
-        reloadedCloud.DestroyedAt.ShouldNotBeNull();
-        reloadedCloud.ProvisioningError.ShouldNotBeNull();
-        reloadedCloud.ProvisioningError.ShouldContain("terraform destroy failed");
-    }
-
-    [Fact]
-    public async Task Handler_is_idempotent_when_create_already_terminal()
+    public async Task Finalizes_clean_when_create_already_compensated()
     {
         var ct = TestContext.Current.CancellationToken;
         var dp = new EphemeralDataProtectionProvider();
@@ -153,7 +69,7 @@ public sealed class CancelHandlerTests(PostgresFixture postgres) : DbIntegration
             ct: ct);
 
         var trackedCreate = await Db.ProvisioningJobs.SingleAsync(j => j.Id == createJob.Id, ct);
-        trackedCreate.Status = SagaStatus.Cancelled;
+        trackedCreate.Status = SagaStatus.RolledBack;
         await Db.SaveChangesAsync(ct);
         Db.ChangeTracker.Clear();
 
@@ -161,20 +77,203 @@ public sealed class CancelHandlerTests(PostgresFixture postgres) : DbIntegration
 
         using var workspaceBase = new TfPlanningHandlerTests.TempDir();
         var tf = new FakeTerraformRunner();
-        tf.QueueHasResources(false);
         var handler = BuildHandler(dp, tf, workspaceBase.Path);
 
         await handler.HandleAsync(cancelJob, ct);
         Db.ChangeTracker.Clear();
 
+        // Rollback already destroyed everything: no Terraform from the cancel job.
+        tf.Calls.ShouldBeEmpty();
+
         var reloadedCreate = await Db.ProvisioningJobs.SingleAsync(j => j.Id == createJob.Id, ct);
-        reloadedCreate.Status.ShouldBe(SagaStatus.Cancelled);
+        reloadedCreate.Status.ShouldBe(SagaStatus.RolledBack);
 
         var reloadedCancel = await Db.ProvisioningJobs.SingleAsync(j => j.Id == cancelJob.Id, ct);
         reloadedCancel.Status.ShouldBe(SagaStatus.Succeeded);
 
         var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
         reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.Cancelled);
+        reloadedCloud.DestroyedAt.ShouldNotBeNull();
+        reloadedCloud.ProvisioningCompletedAt.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task No_sibling_create_with_empty_state_finalizes_without_destroy()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (user, cloud) = await SeedUserAndCloudAsync(SagaStatus.FailedTf, ct);
+        var cancelJob = await SeedCancelJobAsync(cloud.Id, user.Id, ct);
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        // Pre-create the workdir so the handler does not need to render.
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", cancelJob.Id.ToString()));
+
+        var tf = new FakeTerraformRunner();
+        tf.QueueInitOk();
+        tf.QueueHasResources(false);
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(cancelJob, ct);
+        Db.ChangeTracker.Clear();
+
+        // Reliable check: init + workspace select before state list, but nothing to destroy.
+        tf.Calls.ShouldContain(c => c.Command == "init");
+        tf.Calls.ShouldContain(c => c.Command == "workspace-select-only");
+        tf.Calls.ShouldContain(c => c.Command == "state-list");
+        tf.Calls.ShouldNotContain(c => c.Command == "destroy");
+
+        var reloadedCancel = await Db.ProvisioningJobs.SingleAsync(j => j.Id == cancelJob.Id, ct);
+        reloadedCancel.Status.ShouldBe(SagaStatus.Succeeded);
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.Cancelled);
+        reloadedCloud.DestroyedAt.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Failed_create_with_live_resources_invokes_destroy()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (user, cloud, createJob) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.FailedTf,
+            kind: SagaKinds.Create,
+            ct: ct);
+        var cancelJob = await SeedCancelJobAsync(cloud.Id, user.Id, ct);
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", createJob.Id.ToString()));
+
+        var tf = new FakeTerraformRunner();
+        tf.QueueInitOk();
+        tf.QueueHasResources(true);
+        tf.QueueDestroyOk();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(cancelJob, ct);
+        Db.ChangeTracker.Clear();
+
+        tf.Calls.ShouldContain(c => c.Command == "workspace-select-only");
+        tf.Calls.ShouldContain(c => c.Command == "state-list");
+        tf.Calls.ShouldContain(c => c.Command == "destroy");
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.Cancelled);
+        reloadedCloud.ProvisioningError.ShouldBeNull();
+        reloadedCloud.DestroyedAt.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Destroy_failure_under_cap_reschedules_and_does_not_cancel()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (user, cloud, createJob) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.FailedTf,
+            kind: SagaKinds.Create,
+            ct: ct);
+        var cancelJob = await SeedCancelJobAsync(cloud.Id, user.Id, ct);
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", createJob.Id.ToString()));
+
+        var tf = new FakeTerraformRunner();
+        tf.QueueInitOk();
+        tf.QueueHasResources(true);
+        tf.QueueDestroyFailure();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(cancelJob, ct);
+        Db.ChangeTracker.Clear();
+
+        var reloadedCancel = await Db.ProvisioningJobs.SingleAsync(j => j.Id == cancelJob.Id, ct);
+        reloadedCancel.Status.ShouldBe(SagaStatus.Pending);
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        // A failed destroy must NOT be hidden behind a green "cancelled".
+        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.FailedTf);
+        reloadedCloud.DestroyedAt.ShouldBeNull();
+        reloadedCloud.ProvisioningError.ShouldNotBeNull();
+        reloadedCloud.ProvisioningError.ShouldContain("destroy failed");
+    }
+
+    [Fact]
+    public async Task Destroy_failure_over_cap_lands_failed_destroy()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (user, cloud, createJob) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.FailedTf,
+            kind: SagaKinds.Create,
+            ct: ct);
+        var cancelJob = await SeedCancelJobAsync(cloud.Id, user.Id, ct);
+
+        // Four prior failures already recorded: this attempt is the fifth (the cap).
+        var trackedCancel = await Db.ProvisioningJobs.SingleAsync(j => j.Id == cancelJob.Id, ct);
+        trackedCancel.EventsLog.Dispose();
+        trackedCancel.EventsLog = JsonDocument.Parse(
+            "[{\"event\":\"cancel_destroy_failed\"},{\"event\":\"cancel_destroy_failed\"}," +
+            "{\"event\":\"cancel_destroy_failed\"},{\"event\":\"cancel_destroy_failed\"}]");
+        await Db.SaveChangesAsync(ct);
+        Db.ChangeTracker.Clear();
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", createJob.Id.ToString()));
+
+        var tf = new FakeTerraformRunner();
+        tf.QueueInitOk();
+        tf.QueueHasResources(true);
+        tf.QueueDestroyFailure();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(cancelJob, ct);
+        Db.ChangeTracker.Clear();
+
+        var reloadedCancel = await Db.ProvisioningJobs.SingleAsync(j => j.Id == cancelJob.Id, ct);
+        reloadedCancel.Status.ShouldBe(SagaStatus.FailedDestroy);
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.FailedDestroy);
+        reloadedCloud.DestroyedAt.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Missing_step_up_with_live_resources_reschedules()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (user, cloud, createJob) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.FailedTf,
+            kind: SagaKinds.Create,
+            seedUnlock: false,
+            ct: ct);
+        var cancelJob = await SeedCancelJobAsync(cloud.Id, user.Id, ct);
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", createJob.Id.ToString()));
+
+        var tf = new FakeTerraformRunner();
+        tf.QueueInitOk();
+        tf.QueueHasResources(true);
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(cancelJob, ct);
+        Db.ChangeTracker.Clear();
+
+        // No DEK ⇒ a real destroy can't authenticate; retry rather than proceed or fake success.
+        tf.Calls.ShouldNotContain(c => c.Command == "destroy");
+
+        var reloadedCancel = await Db.ProvisioningJobs.SingleAsync(j => j.Id == cancelJob.Id, ct);
+        reloadedCancel.Status.ShouldBe(SagaStatus.Pending);
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.FailedTf);
+        reloadedCloud.DestroyedAt.ShouldBeNull();
     }
 
     private async Task<ProvisioningJob> SeedCancelJobAsync(Guid cloudId, Guid userId, CancellationToken ct)
@@ -249,45 +348,5 @@ public sealed class CancelHandlerTests(PostgresFixture postgres) : DbIntegration
         return new CancelHandler(
             Db, Clock, unlockCache, providerVault, secrets, connections, tf,
             layout, config, NullLogger<CancelHandler>.Instance);
-    }
-
-    private sealed class ThrowingTerraformRunner : global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.ITerraformRunner
-    {
-        public Task<bool> HasResourcesAsync(string workdir, CancellationToken ct) =>
-            Task.FromResult(true);
-
-        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> InitAsync(
-            string workdir, IReadOnlyDictionary<string, string> backendConfig, CancellationToken ct) =>
-            throw new InvalidOperationException("boom: provider unreachable");
-
-        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> SelectOrCreateWorkspaceAsync(
-            string workdir, string workspaceName, CancellationToken ct) =>
-            throw new NotImplementedException();
-
-        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> SelectWorkspaceAsync(
-            string workdir, string workspaceName, CancellationToken ct) =>
-            throw new NotImplementedException();
-
-        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> PlanAsync(
-            string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct) =>
-            throw new NotImplementedException();
-
-        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> ApplyAsync(
-            string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct) =>
-            throw new NotImplementedException();
-
-        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> DestroyAsync(
-            string workdir, IReadOnlyDictionary<string, string> envVars, CancellationToken ct) =>
-            throw new NotImplementedException();
-
-        public Task<JsonDocument> OutputJsonAsync(string workdir, CancellationToken ct) =>
-            throw new NotImplementedException();
-
-        public Task ForceUnlockAsync(string workdir, string lockId, CancellationToken ct) =>
-            Task.CompletedTask;
-
-        public Task<global::ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform.TerraformResult> DeleteWorkspaceAsync(
-            string workdir, string workspaceName, CancellationToken ct) =>
-            throw new NotImplementedException();
     }
 }

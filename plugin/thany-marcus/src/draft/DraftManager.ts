@@ -1,16 +1,43 @@
 import type { TFile, TFolder, Vault, Workspace } from "obsidian";
 import { sha256Hex } from "../sync/AttachmentDownloader";
 import { ensureFolder, joinPath } from "../sync/pathUtils";
+import { hasId3Tags } from "./Id3Sniffer";
+
+export type AttachmentMode = "extract" | "reference" | "metadata";
 
 export interface DraftAttachment {
   clientAttachmentId: string;
   kind: "image" | "voice" | "url" | "file";
+  mode: AttachmentMode;
   filename: string | null;
   mimeType: string | null;
   byteSize: number | null;
   sha256: string | null;
   vaultPath: string | null;
   extra: Record<string, unknown>;
+}
+
+export function classifyKind(mime: string | null): "image" | "voice" | "file" {
+  if (mime?.startsWith("image/")) return "image";
+  if (mime?.startsWith("audio/")) return "voice";
+  return "file";
+}
+
+export function defaultModeFor(
+  kind: "image" | "voice" | "url" | "file",
+  mime: string | null,
+  bytes?: Uint8Array,
+): AttachmentMode {
+  if (kind === "file" && mime?.startsWith("video/")) return "reference";
+  if (kind === "voice" && bytes && hasId3Tags(bytes)) return "reference";
+  return "extract";
+}
+
+export function nextMode(current: AttachmentMode, kind: string): AttachmentMode {
+  if (kind === "url") {
+    return current === "extract" ? "metadata" : current === "metadata" ? "reference" : "extract";
+  }
+  return current === "extract" ? "reference" : "extract";
 }
 
 export interface DraftState {
@@ -66,14 +93,11 @@ export class DraftManager {
       const bytes = new Uint8Array(await this.vault.readBinary(f));
       const sha = await sha256Hex(bytes);
       const mimeType = guessMimeType(f.extension);
-      const kind: "image" | "voice" | "file" = mimeType?.startsWith("image/")
-        ? "image"
-        : mimeType?.startsWith("audio/")
-          ? "voice"
-          : "file";
+      const kind = classifyKind(mimeType);
       state.attachments.push({
         clientAttachmentId: `${kind}-${state.attachments.length + 1}-${shortId()}`,
         kind,
+        mode: defaultModeFor(kind, mimeType, bytes),
         filename: f.name,
         mimeType,
         byteSize: bytes.byteLength,
@@ -131,6 +155,7 @@ export class DraftManager {
     const att: DraftAttachment = {
       clientAttachmentId: `${kind}-${state.attachments.length + 1}-${shortId()}`,
       kind,
+      mode: defaultModeFor(kind, mimeType, new Uint8Array(bytes)),
       filename: safeName,
       mimeType,
       byteSize: bytes.byteLength,
@@ -146,6 +171,7 @@ export class DraftManager {
     const att: DraftAttachment = {
       clientAttachmentId: `url-${state.attachments.length + 1}-${shortId()}`,
       kind: "url",
+      mode: defaultModeFor("url", null),
       filename: null,
       mimeType: null,
       byteSize: null,

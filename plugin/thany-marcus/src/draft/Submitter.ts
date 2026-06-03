@@ -35,6 +35,7 @@ export class Submitter {
     const initAtts: IngestInitAttachmentDto[] = state.attachments.map((a) => ({
       clientAttachmentId: a.clientAttachmentId,
       kind: a.kind,
+      mode: a.mode,
       mimeType: a.mimeType,
       byteSize: a.byteSize,
       sha256: a.sha256,

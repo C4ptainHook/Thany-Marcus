@@ -7,15 +7,10 @@ export const HOURLY_RATES: Record<string, Record<string, number>> = {
     's-4vcpu-8gb':  0.07143,
     's-4vcpu-16gb': 0.11905,
   },
-  hetzner: {
-    'cpx21': 0.0119,
-    'cpx41': 0.0524,
-  },
 };
 
 export const DEFAULT_SKUS: Record<string, string> = {
   digitalocean: 's-4vcpu-8gb',
-  hetzner:      'cpx41',
 };
 
 export interface CostInputs {

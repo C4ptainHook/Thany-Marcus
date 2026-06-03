@@ -40,6 +40,9 @@ public sealed partial class TfApplyingHandler(
         job = await db.ProvisioningJobs.SingleAsync(j => j.Id == jobId, ct);
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
 
+        if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
+            return;
+
         if (cloud.ApplyStartedAt is null)
         {
             cloud.ApplyStartedAt = clock.GetCurrentInstant();
@@ -90,7 +93,7 @@ public sealed partial class TfApplyingHandler(
 
                 var initResult = await tf.InitAsync(workdir, new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["conn_str"] = connStr,
+                    ["conn_str"] = TfPlanningHandler.ToPostgresUrl(connStr),
                 }, ct);
                 EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", initResult.Stdout);
                 if (!initResult.Success)
@@ -176,6 +179,9 @@ public sealed partial class TfApplyingHandler(
                 ["event"] = "apply_succeeded",
                 ["ip"] = cloud.VmIp,
             });
+
+            if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
+                return;
 
             await SagaTransitions.TransitionAsync(
                 db, clock, job, SagaStatus.DnsCreating, Duration.Zero,

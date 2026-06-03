@@ -1,4 +1,4 @@
-export type Provider = 'digitalocean' | 'hetzner' | 'azure';
+export type Provider = 'digitalocean';
 export type JobKind = 'create' | 'destroy';
 export type ProvisioningStatus =
   | 'pending' | 'minting_spaces' | 'tf_planning' | 'tf_applying' | 'dns_creating'
@@ -30,6 +30,7 @@ export interface CloudStatusResponse {
   provisioningStatus: ProvisioningStatus | string;
   succeededAt: string | null;
   destroyedAt: string | null;
+  cancelRequestedAt: string | null;
   currentJob: JobSummary | null;
   recentEvents: EventSummary[];
   priceMonthlyUsd: number | null;

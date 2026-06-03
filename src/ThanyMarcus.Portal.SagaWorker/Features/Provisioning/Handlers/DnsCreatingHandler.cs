@@ -24,6 +24,9 @@ public sealed partial class DnsCreatingHandler(
         job = await db.ProvisioningJobs.SingleAsync(j => j.Id == jobId, ct);
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
 
+        if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
+            return;
+
         if (cloud.DnsStartedAt is null)
         {
             cloud.DnsStartedAt = clock.GetCurrentInstant();
@@ -71,6 +74,9 @@ public sealed partial class DnsCreatingHandler(
             ["subdomain"] = record.Subdomain,
             ["ip"] = record.Ip.ToString(),
         });
+
+        if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
+            return;
 
         await SagaTransitions.TransitionAsync(
             db, clock, job, SagaStatus.AwaitingCloudCallback, SagaTimeouts.AwaitingCloudCallback, ct: ct);

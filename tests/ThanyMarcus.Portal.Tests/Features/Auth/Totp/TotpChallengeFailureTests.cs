@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using OtpNet;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth;
+using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
 using ThanyMarcus.Portal.Tests.Infrastructure;
 
@@ -79,6 +80,14 @@ public sealed class TotpChallengeFailureTests(PostgresFixture postgres) : Factor
             .WithTestAuth(user.Id, totp: TotpClaimValues.NotEnabled)
             .WithClock(Clock)
             .CreateClient();
+
+        (await enableClient.PostAsJsonAsync(
+            new Uri("/api/auth/passphrase/init", UriKind.Relative), new PassphraseInitRequest("hunter2hunter2"), ct))
+            .EnsureSuccessStatusCode();
+        (await enableClient.PostAsJsonAsync(
+            new Uri("/api/auth/unlock", UriKind.Relative), new PassphraseUnlockRequest("hunter2hunter2"), ct))
+            .EnsureSuccessStatusCode();
+
         var init = await enableClient.PostAsync(
             new Uri("/api/auth/totp/enable/init", UriKind.Relative), content: null, ct);
         var initBody = (await init.Content.ReadFromJsonAsync<TotpEnableInitResponse>(ct))!;
