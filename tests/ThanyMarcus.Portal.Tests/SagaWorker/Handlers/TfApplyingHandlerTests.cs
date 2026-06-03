@@ -138,6 +138,30 @@ public sealed class TfApplyingHandlerTests(PostgresFixture postgres) : DbIntegra
         reloaded.PricedAt.ShouldBeNull();
     }
 
+    [Fact]
+    public async Task Cancel_requested_routes_to_rolling_back_tf_without_apply()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (_, cloud, job) = await SagaTestSeed.SeedAsync(Db, Clock, dp, status: SagaStatus.TfApplying, ct: ct);
+
+        var trackedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        trackedCloud.CancelRequestedAt = Clock.GetCurrentInstant();
+        await Db.SaveChangesAsync(ct);
+        Db.ChangeTracker.Clear();
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        var tf = new FakeTerraformRunner();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(job, ct);
+        Db.ChangeTracker.Clear();
+
+        var reloaded = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
+        reloaded.Status.ShouldBe(SagaStatus.RollingBackTf);
+        tf.Calls.ShouldNotContain(c => c.Command == "apply");
+    }
+
     private static void SeedPlanFile(string baseDir, Guid jobId)
     {
         var dir = Path.Combine(baseDir, "jobs", jobId.ToString());

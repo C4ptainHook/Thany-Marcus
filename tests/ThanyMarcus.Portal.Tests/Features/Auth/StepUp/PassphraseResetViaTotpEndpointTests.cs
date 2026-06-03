@@ -118,21 +118,23 @@ public sealed class PassphraseResetViaTotpEndpointTests(PostgresFixture postgres
     }
 
     [Fact]
-    public async Task Reset_via_totp_unavailable_when_totp_enabled_while_locked()
+    public async Task Enabling_totp_while_locked_is_refused_so_no_half_created_recovery()
     {
         var ct = TestContext.Current.CancellationToken;
         var userId = await InsertUserAsync();
         using var client = Client(userId);
 
-        // Passphrase set but never unlocked, so enabling TOTP cannot wrap the DEK.
         (await client.PostAsJsonAsync(InitUri, new PassphraseInitRequest("hunter2hunter2"), ct)).EnsureSuccessStatusCode();
-        var secret = await EnableTotpAsync(client);
 
-        var code = ComputeCode(secret, Clock.GetCurrentInstant());
-        var reset = await client.PostAsJsonAsync(
-            ResetViaTotpUri, new ResetViaTotpRequest(code, "brand-new-pass-9"), ct);
+        var init = (await (await client.PostAsync(EnableInitUri, null, ct))
+            .Content.ReadFromJsonAsync<TotpEnableInitResponse>(ct))!;
+        var code = ComputeCode(init.Secret, Clock.GetCurrentInstant());
+        var verify = await client.PostAsJsonAsync(
+            EnableVerifyUri, new TotpEnableVerifyRequest(init.Secret, code), ct);
 
-        reset.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        verify.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await client.PostAsJsonAsync(UnlockUri, new PassphraseUnlockRequest("hunter2hunter2"), ct))
+            .StatusCode.ShouldBe(HttpStatusCode.NoContent);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System.Text;
+using ThanyMarcus.Cloud.Api.Features.Ingest;
 
 namespace ThanyMarcus.Cloud.Api.Features.Processing.Synthesis;
 
@@ -31,6 +32,22 @@ public static class SynthesisPromptBuilder
 
         foreach (var input in attachmentInputs)
         {
+            if (input.Mode == AttachmentMode.Reference)
+            {
+                continue;
+            }
+
+            if (input.Mode == AttachmentMode.Metadata)
+            {
+                sb.Append("<reference id=\"").Append(input.Id ?? "att")
+                  .Append("\" title=\"").Append(EscapeAttr(input.Title ?? ""))
+                  .Append("\" description=\"").Append(EscapeAttr(input.Description ?? ""))
+                  .Append("\" url=\"").Append(EscapeAttr(input.Url ?? ""))
+                  .AppendLine("\"/>");
+                sb.AppendLine();
+                continue;
+            }
+
             var heading = input.Kind switch
             {
                 "voice" => "Voice transcript:",

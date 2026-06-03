@@ -11,16 +11,21 @@ public sealed class AttachmentConfiguration : IEntityTypeConfiguration<Attachmen
         {
             t.HasCheckConstraint("ck_attachments_kind",
                 "kind IN ('url','image','voice','file')");
+            t.HasCheckConstraint("ck_attachments_mode",
+                "mode IN ('extract','reference','metadata')");
+            t.HasCheckConstraint("ck_attachments_metadata_only_url",
+                "mode <> 'metadata' OR kind = 'url'");
             t.HasCheckConstraint("ck_attachments_status",
                 "status IN ('pending','awaiting_upload','uploaded')");
             t.HasCheckConstraint("ck_attachments_extraction_status",
-                "extraction_status IN ('pending','extracted','extracted_minimal','skipped','failed')");
+                "extraction_status IN ('pending','extracted','extracted_minimal','skipped','referenced','failed')");
         });
         builder.HasKey(a => a.Id);
 
         builder.Property(a => a.NoteId).IsRequired();
         builder.Property(a => a.ClientAttachmentId).IsRequired();
         builder.Property(a => a.Kind).IsRequired();
+        builder.Property(a => a.Mode).IsRequired().HasDefaultValue("extract");
         builder.Property(a => a.StorageProvider).IsRequired();
         builder.Property(a => a.StorageBucket).IsRequired();
         builder.Property(a => a.StorageKey).IsRequired();

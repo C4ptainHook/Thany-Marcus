@@ -27,7 +27,8 @@ public static class IngestEndpoints
              .WithName("PostIngestInit")
              .Produces<IngestInitResponse>(StatusCodes.Status200OK)
              .ProducesProblem(StatusCodes.Status400BadRequest)
-             .ProducesProblem(StatusCodes.Status401Unauthorized);
+             .ProducesProblem(StatusCodes.Status401Unauthorized)
+             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
 
         group.MapPost("/{noteId:guid}/finalize", IngestFinalizeAsync)
              .WithName("PostIngestFinalize")
@@ -78,6 +79,12 @@ public static class IngestEndpoints
         {
             if (!AttachmentKind.IsValid(a.Kind))
                 return Results.Problem($"unknown kind '{a.Kind}'", statusCode: StatusCodes.Status400BadRequest);
+
+            var mode = a.Mode ?? AttachmentMode.Extract;
+            if (!AttachmentMode.IsValid(mode))
+                return Results.Problem($"unknown mode '{a.Mode}'", statusCode: StatusCodes.Status400BadRequest);
+            if (!AttachmentMode.IsValidFor(mode, a.Kind))
+                return Results.UnprocessableEntity(new { error = $"mode '{mode}' not valid for kind '{a.Kind}'" });
 
             if (AttachmentKind.IsBinary(a.Kind))
             {
@@ -152,6 +159,7 @@ public static class IngestEndpoints
                     NoteId             = note.Id,
                     ClientAttachmentId = a.ClientAttachmentId,
                     Kind               = a.Kind,
+                    Mode               = a.Mode ?? AttachmentMode.Extract,
                     StorageProvider    = storage.Provider,
                     StorageBucket      = storage.Bucket,
                     StorageKey         = BuildStorageKey(note.Id, newId, a),

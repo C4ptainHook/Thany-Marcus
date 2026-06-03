@@ -34,6 +34,9 @@ public sealed partial class AwaitingCertHandler(
         job = await db.ProvisioningJobs.SingleAsync(j => j.Id == jobId, ct);
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
 
+        if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
+            return;
+
         if (cloud.CertStartedAt is null)
         {
             cloud.CertStartedAt = clock.GetCurrentInstant();

@@ -33,6 +33,9 @@ public sealed partial class IssuingPluginTokenHandler(
         job = await db.ProvisioningJobs.SingleAsync(j => j.Id == jobId, ct);
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
 
+        if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
+            return;
+
         var adminToken = await adminTokens.GetPlaintextAsync(cloud.Id, ct);
         if (string.IsNullOrEmpty(adminToken))
         {

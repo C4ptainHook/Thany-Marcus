@@ -336,6 +336,42 @@ public sealed class CloudInitTemplateRenderTests
         rendered.ShouldNotMatch(@"CERTBOT_FLAGS=""--staging""\s*$");
     }
 
+    [Fact]
+    public void Mounts_data_volume_and_formats_only_when_empty_before_starting_stack()
+    {
+        var runcmd = RuncmdText();
+        runcmd.ShouldContain(SampleVars.Value["data_device"]);
+        runcmd.ShouldContain("/mnt/thany-data ext4");
+        runcmd.ShouldContain("/etc/fstab");
+        runcmd.ShouldContain("blkid");
+        runcmd.ShouldContain("mkfs.ext4");
+
+        var mountIdx = runcmd.IndexOf("mount /mnt/thany-data", StringComparison.Ordinal);
+        var stackIdx = runcmd.IndexOf("systemctl enable --now thany-cloud.service", StringComparison.Ordinal);
+        mountIdx.ShouldBeGreaterThanOrEqualTo(0);
+        stackIdx.ShouldBeGreaterThan(mountIdx);
+    }
+
+    [Fact]
+    public void Postgres_data_persists_on_mounted_data_volume_not_a_named_root_volume()
+    {
+        var compose = ExtractWriteFile("/opt/thany-cloud/docker-compose.yml");
+        compose.ShouldContain("/mnt/thany-data/postgres:/var/lib/postgresql/data");
+        compose.ShouldNotContain("pg-data");
+    }
+
+    [Fact]
+    public void Registration_is_gated_on_data_volume_mount_success()
+    {
+        var runcmd = RuncmdText();
+        runcmd.ShouldContain("touch /opt/thany-cloud/.data-volume-ok");
+        runcmd.ShouldMatch(@"\[\s*!\s*-f\s+/opt/thany-cloud/\.data-volume-ok\s*\]");
+
+        var sentinelIdx = runcmd.IndexOf("touch /opt/thany-cloud/.data-volume-ok", StringComparison.Ordinal);
+        var certbotIdx  = runcmd.IndexOf("certbot --nginx", StringComparison.Ordinal);
+        certbotIdx.ShouldBeGreaterThan(sentinelIdx);
+    }
+
     private static string ExtractWriteFile(string path)
     {
         var writeFiles = (IEnumerable<object>)Parsed.Value["write_files"];

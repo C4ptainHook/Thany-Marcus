@@ -134,11 +134,19 @@ public sealed partial class SagaWorker : BackgroundService
                 transition_version = transition_version + 1,
                 updated_at         = now()
             WHERE id = (
-              SELECT id FROM provisioning_jobs
-              WHERE status NOT IN ('succeeded','failed_tf','failed_dns','failed_callback','failed_cert','failed_destroy','cancelled','rolled_back')
-                AND next_visible_at <= now()
-                AND (claimed_by IS NULL OR lease_expires_at <= now())
-              ORDER BY next_visible_at
+              SELECT pj.id FROM provisioning_jobs pj
+              WHERE pj.status <> ALL({2})
+                AND pj.next_visible_at <= now()
+                AND (pj.claimed_by IS NULL OR pj.lease_expires_at <= now())
+                AND NOT EXISTS (
+                  SELECT 1 FROM provisioning_jobs sib
+                  WHERE sib.cloud_id = pj.cloud_id
+                    AND sib.id <> pj.id
+                    AND sib.claimed_by IS NOT NULL
+                    AND sib.lease_expires_at > now()
+                )
+                AND pg_try_advisory_xact_lock(hashtext(pj.cloud_id::text)::bigint)
+              ORDER BY pj.next_visible_at
               LIMIT 1
               FOR UPDATE SKIP LOCKED
             )
@@ -146,7 +154,7 @@ public sealed partial class SagaWorker : BackgroundService
             """;
 
         var rows = await db.ProvisioningJobs
-            .FromSqlRaw(sql, workerId, (int)leaseDuration.TotalSeconds)
+            .FromSqlRaw(sql, workerId, (int)leaseDuration.TotalSeconds, SagaStatus.Terminal.ToArray())
             .AsNoTracking()
             .ToListAsync(ct);
         return rows.FirstOrDefault();

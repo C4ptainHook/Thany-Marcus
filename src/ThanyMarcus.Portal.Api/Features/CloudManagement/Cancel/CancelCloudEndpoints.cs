@@ -89,6 +89,8 @@ public static class CancelCloudEndpoints
             };
             db.ProvisioningJobs.Add(job);
 
+            cloud.CancelRequestedAt = now;
+
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
 

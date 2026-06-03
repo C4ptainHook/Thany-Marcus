@@ -276,6 +276,7 @@ builder.Services.AddHostedService<VlmWorker>();
 builder.Services.AddHostedService<DoclingWorker>();
 builder.Services.AddHostedService<ParakeetWorker>();
 builder.Services.AddHostedService<UrlFetcherWorker>();
+builder.Services.AddHostedService<UrlMetadataWorker>();
 builder.Services.AddHostedService<VideoSplitterWorker>();
 
 var dpKeysDir = builder.Configuration["DataProtection:KeyRingPath"]

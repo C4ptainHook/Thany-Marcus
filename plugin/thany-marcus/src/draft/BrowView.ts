@@ -1,5 +1,5 @@
 import { Notice, type MarkdownView, type TFile, type Workspace } from "obsidian";
-import type { DraftManager, DraftState } from "./DraftManager";
+import { type AttachmentMode, type DraftManager, type DraftState, nextMode } from "./DraftManager";
 import { MicRecorder } from "./MicRecorder";
 import { PasteInterceptor } from "./PasteInterceptor";
 import { Submitter } from "./Submitter";
@@ -139,6 +139,18 @@ export class BrowView {
     for (const att of state.attachments) {
       const chip = chips.createDiv({ cls: `tm-brow__chip tm-brow__chip--${att.kind}` });
       chip.createSpan({ cls: "tm-brow__chip-label", text: chipLabel(att) });
+
+      const modeBtn = chip.createEl("button", {
+        cls: `tm-brow__chip-mode tm-brow__chip-mode--${att.mode}`,
+        text: modeIcon(att.mode),
+      });
+      modeBtn.title = modeTooltip(att.mode);
+      modeBtn.setAttr("aria-label", modeTooltip(att.mode));
+      modeBtn.onclick = () => {
+        att.mode = nextMode(att.mode, att.kind);
+        this.render();
+      };
+
       const remove = chip.createEl("button", { cls: "tm-brow__chip-x", text: "×" });
       remove.onclick = async () => {
         await this.drafts.removeAttachment(state, att.clientAttachmentId);
@@ -294,6 +306,18 @@ function chipLabel(att: { kind: string; filename: string | null; extra: Record<s
   if (att.kind === "image") return `img:${att.filename ?? "image"}`;
   if (att.kind === "voice") return `voice:${att.filename ?? "voice"}`;
   return `file:${att.filename ?? "file"}`;
+}
+
+function modeIcon(mode: AttachmentMode): string {
+  if (mode === "reference") return "🔗";
+  if (mode === "metadata") return "📇";
+  return "⚙️";
+}
+
+function modeTooltip(mode: AttachmentMode): string {
+  if (mode === "reference") return "Reference — attached but not processed (click to change)";
+  if (mode === "metadata") return "Metadata — fetch title/description only (click to change)";
+  return "Extract — process content into the note (click to change)";
 }
 
 function formatMs(ms: number): string {

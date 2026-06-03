@@ -11,6 +11,7 @@ public sealed class Attachment : IHasUpdatedAt
     public string ClientAttachmentId { get; init; } = null!;
 
     public string Kind { get; init; } = null!;
+    public string Mode { get; set; } = AttachmentMode.Extract;
     public string StorageProvider { get; init; } = null!;
     public string StorageBucket { get; init; } = null!;
     public string StorageKey { get; init; } = null!;
@@ -49,6 +50,24 @@ public static class AttachmentKind
         kind is Image or Voice or File;
 }
 
+public static class AttachmentMode
+{
+    public const string Extract = "extract";
+    public const string Reference = "reference";
+    public const string Metadata = "metadata";
+
+    public static bool IsValid(string mode) =>
+        mode is Extract or Reference or Metadata;
+
+    public static bool IsValidFor(string mode, string kind) => mode switch
+    {
+        Extract => true,
+        Reference => true,
+        Metadata => kind == AttachmentKind.Url,
+        _ => false,
+    };
+}
+
 public static class AttachmentStatus
 {
     public const string Pending = "pending";
@@ -62,5 +81,6 @@ public static class AttachmentExtractionStatus
     public const string Extracted = "extracted";
     public const string ExtractedMinimal = "extracted_minimal";
     public const string Skipped = "skipped";
+    public const string Referenced = "referenced";
     public const string Failed = "failed";
 }

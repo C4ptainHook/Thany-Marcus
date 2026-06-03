@@ -12,6 +12,11 @@ public sealed class AwaitingCloudCallbackHandler(
 {
     public string Phase => SagaStatus.AwaitingCloudCallback;
 
+    // Cap the idle reschedule so a cancel requested mid-wait is observed within this window,
+    // rather than sleeping out the full callback timeout. The real callback still wakes the
+    // worker immediately via pg_notify.
+    private static readonly Duration CancelPollCadence = Duration.FromSeconds(15);
+
     public async Task HandleAsync(ProvisioningJob job, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(job);
@@ -23,6 +28,10 @@ public sealed class AwaitingCloudCallbackHandler(
             await SagaTransitions.RescheduleAsync(db, clock, job, Duration.Zero, ct);
             return;
         }
+
+        var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
+        if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
+            return;
 
         var now = clock.GetCurrentInstant();
         var phaseStarted = job.PhaseStartedAt ?? now;
@@ -43,6 +52,7 @@ public sealed class AwaitingCloudCallbackHandler(
         }
 
         var remaining = SagaTimeouts.AwaitingCloudCallback - age;
-        await SagaTransitions.RescheduleAsync(db, clock, job, remaining, ct);
+        var delay = remaining < CancelPollCadence ? remaining : CancelPollCadence;
+        await SagaTransitions.RescheduleAsync(db, clock, job, delay, ct);
     }
 }

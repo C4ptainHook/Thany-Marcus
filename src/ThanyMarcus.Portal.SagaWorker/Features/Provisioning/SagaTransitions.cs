@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
@@ -10,6 +11,61 @@ namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 
 public static class SagaTransitions
 {
+    public const string CancelReason = "user_cancelled";
+
+    private static readonly string[] PreApplyPhases =
+        [SagaStatus.Pending, SagaStatus.MintingSpaces, SagaStatus.TfPlanning];
+
+    /// <summary>
+    /// Cooperative cancel: if a cancel was requested on the cloud, route the create saga into
+    /// its own compensation chain instead of marching forward, then return true. Re-reads the
+    /// cancel signal from the database so callers can use it both at handler entry and after a
+    /// long Terraform step (the signal may be set by the cancel endpoint mid-step).
+    /// </summary>
+    public static async Task<bool> TryRouteCancelAsync(
+        PortalDbContext db,
+        IClock clock,
+        ProvisioningJob job,
+        Cloud cloud,
+        string phase,
+        CancellationToken ct = default)
+    {
+        var cancelAt = await db.Clouds
+            .IgnoreQueryFilters()
+            .Where(c => c.Id == cloud.Id)
+            .Select(c => c.CancelRequestedAt)
+            .FirstAsync(ct);
+        if (cancelAt is null)
+        {
+            return false;
+        }
+        cloud.CancelRequestedAt = cancelAt;
+
+        var preApply = Array.IndexOf(PreApplyPhases, phase) >= 0;
+        var route = preApply
+            ? SagaStatus.Cancelled
+            : cloud.Subdomain is not null
+                ? SagaStatus.RollingBackDns
+                : SagaStatus.RollingBackTf;
+
+        EventsLogAppender.Append(job, clock, phase, new JsonObject
+        {
+            ["event"] = "cancel_requested",
+            ["route"] = route,
+            ["rollback_reason"] = CancelReason,
+        });
+
+        if (preApply)
+        {
+            await TransitionToTerminalAsync(db, clock, job, cloud, SagaStatus.Cancelled, ct);
+        }
+        else
+        {
+            await TransitionAsync(db, clock, job, route, Duration.Zero, ct: ct);
+        }
+        return true;
+    }
+
     public static Task TransitionToTerminalAsync(
         PortalDbContext db,
         IClock clock,

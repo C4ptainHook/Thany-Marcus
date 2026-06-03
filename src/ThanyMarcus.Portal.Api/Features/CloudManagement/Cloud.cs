@@ -26,6 +26,7 @@ public sealed class Cloud : IHasUpdatedAt
     public Instant? CertStartedAt { get; set; }
     public Instant? AdminStartedAt { get; set; }
     public Instant? ProvisioningCompletedAt { get; set; }
+    public Instant? CancelRequestedAt { get; set; }
     public string? ProvisioningError { get; set; }
 
     public decimal? PriceMonthlyUsd { get; set; }

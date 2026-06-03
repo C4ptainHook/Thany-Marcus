@@ -56,17 +56,46 @@ public static class SourcesRenderer
         return sb.ToString();
     }
 
-    private static string RenderAttachment(Attachment att) => att.Kind switch
+    private static string RenderAttachment(Attachment att) => att.Mode switch
     {
-        AttachmentKind.Image => RenderImage(att),
-        AttachmentKind.Voice => RenderVoice(att),
-        AttachmentKind.Url   => RenderUrl(att),
-        AttachmentKind.File  => att.MimeType is not null &&
-                                att.MimeType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
-                                    ? RenderVideo(att)
-                                    : RenderFile(att),
-        _ => string.Empty,
+        AttachmentMode.Reference => RenderReference(att),
+        AttachmentMode.Metadata  => RenderUrl(att, includeThumbnail: true),
+        _ => att.Kind switch
+        {
+            AttachmentKind.Image => RenderImage(att),
+            AttachmentKind.Voice => RenderVoice(att),
+            AttachmentKind.Url   => RenderUrl(att),
+            AttachmentKind.File  => att.MimeType is not null &&
+                                    att.MimeType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
+                                        ? RenderVideo(att)
+                                        : RenderFile(att),
+            _ => string.Empty,
+        },
     };
+
+    private static string RenderReference(Attachment att)
+    {
+        var (emoji, label) = ReferenceFace(att);
+        if (att.Kind == AttachmentKind.Url)
+        {
+            var url = att.Url ?? string.Empty;
+            return $"> [!source]- {emoji} {label} — [{Escape(url)}]({url})\n";
+        }
+        var filename = NormaliseFilename(att);
+        return $"> [!source]- {emoji} {label} — ![[{filename}]]\n";
+    }
+
+    private static (string Emoji, string Label) ReferenceFace(Attachment att)
+    {
+        var mime = att.MimeType ?? string.Empty;
+        if (att.Kind == AttachmentKind.Url) return ("🔗", "Reference");
+        if (att.Kind == AttachmentKind.Voice || mime.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+            return ("🎵", "Reference");
+        if (mime.StartsWith("video/", StringComparison.OrdinalIgnoreCase)) return ("📹", "Reference");
+        if (att.Kind == AttachmentKind.Image || mime.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            return ("🖼️", "Reference");
+        return ("📄", "Reference");
+    }
 
     private static string RenderImage(Attachment att)
     {
@@ -120,7 +149,7 @@ public static class SourcesRenderer
         return sb.ToString();
     }
 
-    private static string RenderUrl(Attachment att)
+    private static string RenderUrl(Attachment att, bool includeThumbnail = false)
     {
         var meta = ReadUrlExtra(att);
         var url = meta.CanonicalUrl ?? att.Url ?? string.Empty;
@@ -139,6 +168,11 @@ public static class SourcesRenderer
 
         var sb = new StringBuilder();
         sb.Append(CultureInfo.InvariantCulture, $"> [!source]- URL — [{Escape(heading)}]({url})\n");
+
+        if (includeThumbnail && !string.IsNullOrWhiteSpace(meta.ThumbnailUrl))
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"> ![]({meta.ThumbnailUrl})\n");
+        }
 
         if (!string.IsNullOrWhiteSpace(meta.Description))
         {
@@ -200,6 +234,7 @@ public static class SourcesRenderer
         string? ProviderName,
         string? AuthorName,
         string? Description,
+        string? ThumbnailUrl,
         string? MinimalReason);
 
     private static UrlMeta ReadUrlExtra(Attachment att)
@@ -213,6 +248,7 @@ public static class SourcesRenderer
             ProviderName: GetString(root, "provider_name"),
             AuthorName: GetString(root, "author_name"),
             Description: GetString(root, "description"),
+            ThumbnailUrl: GetString(root, "thumbnail_url"),
             MinimalReason: GetString(root, "minimal_reason"));
     }
 

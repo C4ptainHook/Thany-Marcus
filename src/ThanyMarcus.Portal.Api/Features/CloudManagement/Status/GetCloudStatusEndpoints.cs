@@ -67,6 +67,7 @@ public static class GetCloudStatusEndpoints
             ProvisioningStatus:  cloud.ProvisioningStatus,
             SucceededAt:         cloud.ProvisioningCompletedAt,
             DestroyedAt:         cloud.DestroyedAt,
+            CancelRequestedAt:   cloud.CancelRequestedAt,
             CurrentJob:          job is null ? null : new JobSummary(job.Id, job.Kind, job.Status),
             RecentEvents:        recentEvents,
             PriceMonthlyUsd:     cloud.PriceMonthlyUsd,

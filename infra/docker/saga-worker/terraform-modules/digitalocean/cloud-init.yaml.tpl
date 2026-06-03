@@ -236,7 +236,7 @@ write_files:
             POSTGRES_PASSWORD: $${POSTGRES_PASSWORD}
             POSTGRES_DB: cloud
           volumes:
-            - pg-data:/var/lib/postgresql/data
+            - /mnt/thany-data/postgres:/var/lib/postgresql/data
           networks: [cloud]
           healthcheck:
             test: ["CMD-SHELL", "pg_isready -U cloud -d cloud"]
@@ -336,7 +336,6 @@ write_files:
           mem_limit: 3500m
 
       volumes:
-        pg-data:
         ollama-vision-models:
         ollama-text-models:
         docling-models:
@@ -345,6 +344,30 @@ write_files:
         cloud:
 
 runcmd:
+  - |
+    DATA_DEV="${data_device}"
+    echo "[cloud-init] provisioning data volume at $DATA_DEV"
+    for i in $(seq 1 60); do
+      [ -b "$DATA_DEV" ] && break
+      sleep 2
+    done
+    if [ ! -b "$DATA_DEV" ]; then
+      echo "[cloud-init] FATAL: data volume $DATA_DEV never attached" >&2
+      exit 1
+    fi
+    if ! blkid "$DATA_DEV" >/dev/null 2>&1; then
+      echo "[cloud-init] formatting $DATA_DEV as ext4"
+      mkfs.ext4 -F "$DATA_DEV" || { echo "[cloud-init] FATAL: mkfs failed" >&2; exit 1; }
+    fi
+    mkdir -p /mnt/thany-data
+    grep -q " /mnt/thany-data " /etc/fstab \
+      || echo "$DATA_DEV /mnt/thany-data ext4 defaults,nofail,discard 0 2" >> /etc/fstab
+    mountpoint -q /mnt/thany-data || mount /mnt/thany-data \
+      || { echo "[cloud-init] FATAL: mount of /mnt/thany-data failed" >&2; exit 1; }
+    mkdir -p /mnt/thany-data/postgres
+    touch /opt/thany-cloud/.data-volume-ok
+    echo "[cloud-init] data volume mounted at /mnt/thany-data"
+
   - timedatectl set-timezone ${timezone}
   - ufw default deny incoming
   - ufw default allow outgoing
@@ -453,8 +476,8 @@ runcmd:
   - systemctl enable --now thany-cloud.service
 
   - |
-    if [ ! -f /opt/thany-cloud/.ollama-vision-puller-ok ] || [ ! -f /opt/thany-cloud/.ollama-text-puller-ok ]; then
-      echo "[cloud-init] skipping certbot + registration callback - one or both ollama pullers did not complete; cloud will not register so portal sees failed provisioning" >&2
+    if [ ! -f /opt/thany-cloud/.data-volume-ok ] || [ ! -f /opt/thany-cloud/.ollama-vision-puller-ok ] || [ ! -f /opt/thany-cloud/.ollama-text-puller-ok ]; then
+      echo "[cloud-init] skipping certbot + registration callback - data volume mount or an ollama puller did not complete; cloud will not register so portal sees failed provisioning" >&2
       exit 0
     fi
     set -a

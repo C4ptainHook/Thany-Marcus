@@ -26,6 +26,7 @@ resource "digitalocean_droplet" "cloud" {
 
   user_data = templatefile("${path.module}/cloud-init.yaml.tpl", {
     cloud_id              = var.cloud_id
+    data_device           = "/dev/disk/by-id/scsi-0DO_Volume_${digitalocean_volume.data.name}"
     hostname              = var.hostname
     enrollment_token      = var.enrollment_token
     portal_callback_url   = local.portal_callback_url

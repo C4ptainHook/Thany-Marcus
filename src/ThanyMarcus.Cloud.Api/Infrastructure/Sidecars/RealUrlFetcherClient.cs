@@ -56,7 +56,7 @@ public sealed partial class RealUrlFetcherClient : IUrlFetcherClient
         if (primary == "text" || lower == "application/xhtml+xml" || string.IsNullOrWhiteSpace(contentType))
         {
             var result = await extractor.ExtractAsync(url, ct);
-            var extra = BuildExtraFromExtractor(result);
+            var extra = UrlExtractionExtra.Build(result);
             var extracted = BuildExtractedTextFromResult(result);
             return new UrlFetchOutcome(
                 ExtractedText: extracted,
@@ -211,27 +211,6 @@ public sealed partial class RealUrlFetcherClient : IUrlFetcherClient
         {
             if (owns) await db.Database.CloseConnectionAsync();
         }
-    }
-
-    private static JsonDocument BuildExtraFromExtractor(UrlExtractionResult r)
-    {
-        using var ms = new System.IO.MemoryStream();
-        using (var writer = new Utf8JsonWriter(ms))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("canonical_url", r.CanonicalUrl);
-            writer.WriteString("title", r.Title);
-            writer.WriteString("description", r.Description);
-            writer.WriteString("author_name", r.AuthorName);
-            writer.WriteString("provider_name", r.ProviderName);
-            writer.WriteString("thumbnail_url", r.ThumbnailUrl);
-            writer.WriteNumber("http_status", r.HttpStatus);
-            writer.WriteString("minimal_reason", r.MinimalReason);
-            writer.WriteNull("redirected_to");
-            writer.WriteEndObject();
-        }
-        ms.Position = 0;
-        return JsonDocument.Parse(ms);
     }
 
     private static string BuildExtractedTextFromResult(UrlExtractionResult r)

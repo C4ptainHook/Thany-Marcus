@@ -8,6 +8,7 @@ using OtpNet;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.Auth.Lockout;
+using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.Totp;
 using ThanyMarcus.Portal.Tests.Infrastructure;
 
@@ -225,6 +226,13 @@ public sealed class TotpLockoutTests(PostgresFixture postgres) : FactoryDbTestBa
             .WithTestAuth(userId, totp: TotpClaimValues.NotEnabled)
             .WithClock(Clock)
             .CreateClient();
+
+        (await client.PostAsJsonAsync(
+            new Uri("/api/auth/passphrase/init", UriKind.Relative), new PassphraseInitRequest("hunter2hunter2"), ct))
+            .EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync(
+            new Uri("/api/auth/unlock", UriKind.Relative), new PassphraseUnlockRequest("hunter2hunter2"), ct))
+            .EnsureSuccessStatusCode();
 
         var init = await client.PostAsync(
             new Uri("/api/auth/totp/enable/init", UriKind.Relative), content: null, ct);

@@ -104,12 +104,16 @@ public static class CloudEventsEndpoints
         PortalDbContext db, Guid cloudId, Cloud cloud, CancellationToken ct)
     {
         var job = await db.ProvisioningJobs
-            .Where(j => j.CloudId == cloudId)
+            .Where(j => j.CloudId == cloudId && j.Kind != SagaKinds.Cancel)
             .OrderByDescending(j => j.CreatedAt)
             .Select(j => new { j.Id, j.Status, j.LastError })
             .FirstOrDefaultAsync(ct);
         if (job is null) return null;
-        return new JobStateSnapshot(job.Id, cloudId, job.Status, cloud.Hostname, cloud.VmIp, job.LastError);
+        var cancelRequested = await db.Clouds.IgnoreQueryFilters()
+            .Where(c => c.Id == cloudId)
+            .Select(c => c.CancelRequestedAt != null)
+            .FirstAsync(ct);
+        return new JobStateSnapshot(job.Id, cloudId, job.Status, cloud.Hostname, cloud.VmIp, job.LastError, cancelRequested);
     }
 
     private static async Task WriteSseAsync(HttpResponse response, WizardSseEvent evt, CancellationToken ct)

@@ -112,6 +112,97 @@ public sealed class IngestEndpointsTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Metadata_mode_with_non_url_kind_returns_422()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var rawToken = await SeedPluginTokenAsync(postgres);
+
+        var fakeStore = new FakeArtifactStore();
+        await using var factory = NewFactory(postgres.ConnectionString, fakeStore);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", rawToken);
+
+        var req = new IngestInitRequest(
+            ClientNoteId: Guid.NewGuid().ToString(),
+            CapturedAt:   DateTimeOffset.UtcNow,
+            Body:         "body",
+            Attachments:
+            [
+                new("a-voice", AttachmentKind.Voice, "audio/mpeg", 1024L, "sha", "song.mp3",
+                    System.Text.Json.JsonDocument.Parse("{}").RootElement, AttachmentMode.Metadata),
+            ]);
+
+        var resp = await client.PostAsJsonAsync(new Uri("/api/ingest/init", UriKind.Relative), req, ct);
+
+        resp.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task Missing_mode_defaults_to_extract()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var rawToken = await SeedPluginTokenAsync(postgres);
+
+        var fakeStore = new FakeArtifactStore();
+        await using var factory = NewFactory(postgres.ConnectionString, fakeStore);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", rawToken);
+
+        var req = new IngestInitRequest(
+            ClientNoteId: Guid.NewGuid().ToString(),
+            CapturedAt:   DateTimeOffset.UtcNow,
+            Body:         "body",
+            Attachments:
+            [
+                new("a-url", AttachmentKind.Url, null, null, null, null,
+                    System.Text.Json.JsonDocument.Parse("{\"url\":\"https://example.com\"}").RootElement),
+            ]);
+
+        var resp = await client.PostAsJsonAsync(new Uri("/api/ingest/init", UriKind.Relative), req, ct);
+        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await resp.Content.ReadFromJsonAsync<IngestInitResponse>(ct);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CloudDbContext>();
+        var attachment = await db.Attachments.SingleAsync(a => a.NoteId == body!.NoteId, ct);
+        attachment.Mode.ShouldBe(AttachmentMode.Extract);
+    }
+
+    [Fact]
+    public async Task Reference_mode_is_persisted()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var rawToken = await SeedPluginTokenAsync(postgres);
+
+        var fakeStore = new FakeArtifactStore();
+        await using var factory = NewFactory(postgres.ConnectionString, fakeStore);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", rawToken);
+
+        var req = new IngestInitRequest(
+            ClientNoteId: Guid.NewGuid().ToString(),
+            CapturedAt:   DateTimeOffset.UtcNow,
+            Body:         "body",
+            Attachments:
+            [
+                new("a-voice", AttachmentKind.Voice, "audio/mpeg", 1024L, "sha", "song.mp3",
+                    System.Text.Json.JsonDocument.Parse("{}").RootElement, AttachmentMode.Reference),
+            ]);
+
+        var resp = await client.PostAsJsonAsync(new Uri("/api/ingest/init", UriKind.Relative), req, ct);
+        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await resp.Content.ReadFromJsonAsync<IngestInitResponse>(ct);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CloudDbContext>();
+        var attachment = await db.Attachments.SingleAsync(a => a.NoteId == body!.NoteId, ct);
+        attachment.Mode.ShouldBe(AttachmentMode.Reference);
+    }
+
+    [Fact]
     public async Task Init_is_idempotent_on_clientNoteId()
     {
         var ct = TestContext.Current.CancellationToken;

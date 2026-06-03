@@ -3,6 +3,7 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
 export interface IngestInitAttachmentDto {
   clientAttachmentId: string;
   kind: "image" | "voice" | "url" | "file";
+  mode: "extract" | "reference" | "metadata";
   mimeType: string | null;
   byteSize: number | null;
   sha256: string | null;

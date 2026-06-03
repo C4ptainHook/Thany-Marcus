@@ -86,6 +86,34 @@ public sealed class TfPlanningHandlerTests(PostgresFixture postgres) : DbIntegra
         tf.Calls.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task Cancel_requested_routes_to_cancelled_without_terraform()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (_, cloud, job) = await SagaTestSeed.SeedAsync(Db, Clock, dp, ct: ct);
+
+        var trackedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        trackedCloud.CancelRequestedAt = Clock.GetCurrentInstant();
+        await Db.SaveChangesAsync(ct);
+        Db.ChangeTracker.Clear();
+
+        using var stubModules = StubModulesDir.Create();
+        using var workspaceBase = new TempDir();
+        var tf = new FakeTerraformRunner();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path, stubModules.Path);
+
+        await handler.HandleAsync(job, ct);
+        Db.ChangeTracker.Clear();
+
+        var reloaded = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
+        reloaded.Status.ShouldBe(SagaStatus.Cancelled);
+        tf.Calls.ShouldBeEmpty();
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.Cancelled);
+    }
+
     private TfPlanningHandler BuildHandler(
         IDataProtectionProvider dp,
         FakeTerraformRunner tf,

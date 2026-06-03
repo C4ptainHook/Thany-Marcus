@@ -10,6 +10,7 @@ public sealed record CloudStatusResponse(
     string ProvisioningStatus,
     Instant? SucceededAt,
     Instant? DestroyedAt,
+    Instant? CancelRequestedAt,
     JobSummary? CurrentJob,
     IReadOnlyList<EventSummary> RecentEvents,
     decimal? PriceMonthlyUsd,

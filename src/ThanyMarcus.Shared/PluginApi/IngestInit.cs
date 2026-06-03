@@ -21,7 +21,8 @@ public sealed record IngestInitAttachment(
     [property: JsonPropertyName("byteSize")]           long? ByteSize,
     [property: JsonPropertyName("sha256")]             string? Sha256,
     [property: JsonPropertyName("filename")]           string? Filename,
-    [property: JsonPropertyName("extra")]              JsonElement Extra);
+    [property: JsonPropertyName("extra")]              JsonElement Extra,
+    [property: JsonPropertyName("mode"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mode = null);
 
 public sealed record IngestInitResponse(
     [property: JsonPropertyName("noteId")]  Guid NoteId,
