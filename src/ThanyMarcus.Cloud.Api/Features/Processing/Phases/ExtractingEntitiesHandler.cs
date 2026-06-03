@@ -141,7 +141,11 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
             }
 
             target.MentionCount += 1;
-            if (target.HubNoteId is null && target.MentionCount >= o.HubMaterializeMin)
+            if (target.HubSuppressed)
+            {
+                // User deleted this entity's hub note; honour that until an explicit force-regen.
+            }
+            else if (target.HubNoteId is null && target.MentionCount >= o.HubMaterializeMin)
             {
                 hubSpawnEntityIds.Add(target.Id);
             }

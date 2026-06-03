@@ -51,7 +51,7 @@ public sealed class NoteDeleteEndpointTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task Idempotent_second_delete_returns_404()
+    public async Task Idempotent_second_delete_returns_204()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
@@ -66,7 +66,7 @@ public sealed class NoteDeleteEndpointTests(PostgresFixture postgres)
         first.StatusCode.ShouldBe(HttpStatusCode.NoContent);
 
         var second = await client.DeleteAsync(new Uri($"/api/notes/{noteId}", UriKind.Relative), ct);
-        second.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        second.StatusCode.ShouldBe(HttpStatusCode.NoContent);
     }
 
     [Fact]

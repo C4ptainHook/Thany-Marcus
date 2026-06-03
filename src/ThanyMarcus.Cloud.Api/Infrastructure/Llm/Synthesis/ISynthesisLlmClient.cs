@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 namespace ThanyMarcus.Cloud.Api.Infrastructure.Llm.Synthesis;
 
 public sealed record SynthesisRequest(
@@ -6,7 +8,8 @@ public sealed record SynthesisRequest(
     string? ApiKey,
     int Seed,
     double Temperature,
-    int MaxOutputTokens);
+    int MaxOutputTokens,
+    JsonNode? ResponseSchema = null);
 
 public sealed record SynthesisResponse(
     string Body,

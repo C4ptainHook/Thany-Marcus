@@ -13,6 +13,7 @@ public sealed class Entity : IHasUpdatedAt
     public string? Description { get; set; }
     public Vector? Embedding { get; set; }
     public Guid? HubNoteId { get; set; }
+    public bool HubSuppressed { get; set; }
     public Guid? StubNoteId { get; set; }
     public int MentionCount { get; set; }
     public string Source { get; set; } = null!;

@@ -25,7 +25,6 @@ public sealed class Note : IHasUpdatedAt
     public string? BodyHash { get; set; }
     public Instant? DeletedAt { get; set; }
     public bool IsHub { get; set; }
-    public Guid? ProjectId { get; set; }
     public Guid? HubEntityId { get; set; }
     public long TransitionVersion { get; set; }
 

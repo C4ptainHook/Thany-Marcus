@@ -25,7 +25,7 @@ public sealed class SourcesRendererUrlTests
                 """,
             status: AttachmentExtractionStatus.Extracted);
 
-        var md = SourcesRenderer.Render(userBody: null, attachments: new[] { att });
+        var md = SourcesRenderer.Render(new[] { att });
 
         md.ShouldContain(@"> [!source]- URL — [[YouTube\] Cool Video — Channel](https://www.youtube.com/watch?v=abc)");
         md.ShouldContain("A short caption");
@@ -46,7 +46,7 @@ public sealed class SourcesRendererUrlTests
                 """,
             status: AttachmentExtractionStatus.Extracted);
 
-        var md = SourcesRenderer.Render(userBody: null, attachments: new[] { att });
+        var md = SourcesRenderer.Render(new[] { att });
 
         md.ShouldContain("> [!source]- URL — [Obsidian](https://obsidian.md/)");
         md.ShouldContain("Sharpen your thinking.");
@@ -66,7 +66,7 @@ public sealed class SourcesRendererUrlTests
                 """,
             status: AttachmentExtractionStatus.ExtractedMinimal);
 
-        var md = SourcesRenderer.Render(userBody: null, attachments: new[] { att });
+        var md = SourcesRenderer.Render(new[] { att });
 
         md.ShouldContain("> [!source]- URL — [https://example.com/404](https://example.com/404)");
         md.ShouldContain("URL captured, no preview — http: 404");

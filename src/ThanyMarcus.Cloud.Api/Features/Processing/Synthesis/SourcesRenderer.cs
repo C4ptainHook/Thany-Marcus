@@ -6,16 +6,14 @@ using ThanyMarcus.Cloud.Api.Features.Ingest;
 namespace ThanyMarcus.Cloud.Api.Features.Processing.Synthesis;
 
 /// <summary>
-/// Builds the "## Sources" block that follows the synthesized prose.
+/// Builds the "## Sources" block of attachment extractions.
 /// Visual media (image, video) render as visible embed + italic caption.
-/// Audio, URL, file, and user notes render as collapsed [!source]- callouts.
-/// Order: user notes first if present, then attachments in chronological order.
+/// Audio, URL, and file render as collapsed [!source]- callouts.
+/// Attachments render in chronological order; the user's own text lives under "## Origin", not here.
 /// </summary>
 public static class SourcesRenderer
 {
-    public static string Render(
-        string? userBody,
-        IReadOnlyList<Attachment> attachments)
+    public static string Render(IReadOnlyList<Attachment> attachments)
     {
         ArgumentNullException.ThrowIfNull(attachments);
 
@@ -24,13 +22,6 @@ public static class SourcesRenderer
         sb.AppendLine();
 
         var anyContent = false;
-
-        if (!string.IsNullOrWhiteSpace(userBody))
-        {
-            AppendUserNotesCallout(sb, userBody);
-            sb.AppendLine();
-            anyContent = true;
-        }
 
         var topLevel = attachments
             .Where(a => a.ParentAttachmentId is null)
@@ -203,12 +194,6 @@ public static class SourcesRenderer
             sb.AppendLine("> (no extracted text)");
         }
         return sb.ToString();
-    }
-
-    private static void AppendUserNotesCallout(StringBuilder sb, string body)
-    {
-        sb.AppendLine("> [!source]- User notes");
-        AppendCalloutBody(sb, body);
     }
 
     private static void AppendCalloutBody(StringBuilder sb, string body)

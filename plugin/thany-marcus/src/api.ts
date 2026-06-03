@@ -257,6 +257,139 @@ export class ApiClient {
     }
   }
 
+  /** Idempotent tombstone. 204 (now/already) and 404 (never existed) both count as done. */
+  async tombstoneNote(noteId: string): Promise<void> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/sync/notes/${noteId}`,
+      method: "DELETE",
+      headers: this.authHeader(),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status === 404) return;
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`tombstone ${noteId} → HTTP ${res.status}`);
+    }
+  }
+
+  /** Returns true if the tombstone was revived, false if past the GC window (re-ingest needed). */
+  async reviveNote(noteId: string): Promise<boolean> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/sync/notes/${noteId}/revive`,
+      method: "POST",
+      headers: this.authHeader(),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status === 404) return false;
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`revive ${noteId} → HTTP ${res.status}`);
+    }
+    return true;
+  }
+
+  async moveNote(noteId: string, relativePath: string): Promise<void> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/sync/notes/${noteId}/move`,
+      method: "POST",
+      headers: this.authHeader(),
+      contentType: "application/json",
+      body: JSON.stringify({ relativePath }),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status === 404) return;
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`move ${noteId} → HTTP ${res.status}`);
+    }
+  }
+
+  async statusPull(noteIds: string[]): Promise<{ noteId: string; status: string }[]> {
+    if (noteIds.length === 0) return [];
+    const params = new URLSearchParams({ notes: noteIds.join(",") });
+    const data = await this.json<{ items: { noteId: string; status: string }[] }>({
+      url: `${this.base()}/api/sync/status?${params.toString()}`,
+      method: "GET",
+    });
+    return data.items ?? [];
+  }
+
+  async desiredSet(folder: string): Promise<{ noteId: string; relativePath: string }[]> {
+    const params = new URLSearchParams({ folder });
+    const data = await this.json<{ items: { noteId: string; relativePath: string }[] }>({
+      url: `${this.base()}/api/sync/desired?${params.toString()}`,
+      method: "GET",
+    });
+    return data.items ?? [];
+  }
+
+  async folderDissolve(
+    folder: string,
+    mode: "reroute" | "force_delete",
+    targetFolder?: string,
+  ): Promise<{ affectedCount: number; desired: { noteId: string; relativePath: string }[] }> {
+    return this.json({
+      url: `${this.base()}/api/sync/folders/dissolve`,
+      method: "POST",
+      contentType: "application/json",
+      body: JSON.stringify({ folder, mode, targetFolder: targetFolder ?? null }),
+    });
+  }
+
+  async listFolders(): Promise<string[]> {
+    const data = await this.json<{ folders: string[] }>({
+      url: `${this.base()}/api/sync/folders`,
+      method: "GET",
+    });
+    return data.folders ?? [];
+  }
+
+  async registerFolder(folder: string): Promise<void> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/sync/folders`,
+      method: "POST",
+      headers: this.authHeader(),
+      contentType: "application/json",
+      body: JSON.stringify({ folder }),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`register folder ${folder} → HTTP ${res.status}`);
+    }
+  }
+
+  async unregisterFolder(folder: string): Promise<void> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/sync/folders`,
+      method: "DELETE",
+      headers: this.authHeader(),
+      contentType: "application/json",
+      body: JSON.stringify({ folder }),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status === 404) return;
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`unregister folder ${folder} → HTTP ${res.status}`);
+    }
+  }
+
   async cancelIngest(noteId: string): Promise<{ ok: true } | { ok: false; conflict: true; reason: string }> {
     const res = await requestUrl({
       url: `${this.base()}/api/ingest/${noteId}/cancel`,

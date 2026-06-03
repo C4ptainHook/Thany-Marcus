@@ -117,7 +117,7 @@
         <span class="title">1. Secure your account</span>
       </button>
       <p class="desc">
-        Set a passphrase, then save your Emergency Kit — the one way back if you ever forget it.
+        Set a passphrase, then save your Emergency Kit — your way back if you ever forget it.
       </p>
 
       {#if expanded === 1 && !passphraseSet}
@@ -154,7 +154,7 @@
       </div>
       <p class="desc">
         {#if secured}
-          Pick a provider and region. Authorization happens inline if needed.
+          Pick a region. Authorization happens inline if needed.
         {:else}
           Needs your account secured first.
         {/if}

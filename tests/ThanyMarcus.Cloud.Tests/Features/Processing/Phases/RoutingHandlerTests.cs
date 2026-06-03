@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NodaTime;
 using Shouldly;
+using ThanyMarcus.Cloud.Api.Features.Folders;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.Processing;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
@@ -19,7 +20,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        await SeedNoteInFolderAsync("Acme");
+        await RegisterFolderAsync("Acme");
 
         var (noteId, jobId) = await SeedRoutingJobAsync();
 
@@ -43,12 +44,42 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Registered_folder_with_no_notes_is_a_routable_candidate()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+
+        await RegisterFolderAsync("Acme");
+
+        var (noteId, jobId) = await SeedRoutingJobAsync();
+        var llm = new ConfigurableLlmClient
+        {
+            RouteResponse = () => new RouteDecisionDto("Acme", 0.9, "matches Acme"),
+        };
+        var factory = new ConfigurableLlmClientFactory(llm);
+
+        await using var sp = BuildHost(factory);
+        var job = await LoadJobAsync(jobId);
+        await DispatchAsync(sp, job, ct);
+
+        using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
+        var notesUnderAcme = await probe.Notes
+            .CountAsync(n => n.RelativePath != null && n.RelativePath != $"Acme/{noteId}.md"
+                             && n.RelativePath.StartsWith("Acme/"), ct);
+        notesUnderAcme.ShouldBe(0);
+
+        var note = await probe.Notes.SingleAsync(n => n.Id == noteId, ct);
+        note.RelativePath.ShouldBe($"Acme/{noteId}.md");
+        llm.Calls.ShouldContain(c => c.Name == "route" && c.Version == "v1");
+    }
+
+    [Fact]
     public async Task Below_threshold_confidence_keeps_inbox_path()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        await SeedNoteInFolderAsync("Acme");
+        await RegisterFolderAsync("Acme");
 
         var (noteId, jobId) = await SeedRoutingJobAsync();
         var llm = new ConfigurableLlmClient
@@ -72,7 +103,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        await SeedNoteInFolderAsync("Acme");
+        await RegisterFolderAsync("Acme");
 
         var (noteId, jobId) = await SeedRoutingJobAsync();
         var llm = new ConfigurableLlmClient
@@ -119,10 +150,10 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        await SeedNoteInFolderAsync("_drafts");
-        await SeedNoteInFolderAsync(".trash");
-        await SeedNoteInFolderAsync("Entities");
-        await SeedNoteInFolderAsync("Inbox");
+        await RegisterFolderAsync("_drafts");
+        await RegisterFolderAsync(".trash");
+        await RegisterFolderAsync("Entities");
+        await RegisterFolderAsync("Inbox");
 
         var (noteId, jobId) = await SeedRoutingJobAsync();
         var llm = new ConfigurableLlmClient
@@ -169,7 +200,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        await SeedNoteInFolderAsync("Acme");
+        await RegisterFolderAsync("Acme");
         var (_, jobId) = await SeedRoutingJobAsync();
         var llm = new ConfigurableLlmClient
         {
@@ -205,22 +236,11 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
             services.AddSingleton<ILlmClientFactory>(factory);
         });
 
-    private async Task SeedNoteInFolderAsync(string folder)
+    private async Task RegisterFolderAsync(string folder)
     {
         using var db = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
         var now = SystemClock.Instance.GetCurrentInstant();
-        var noteId = Guid.CreateVersion7();
-        db.Notes.Add(new Note
-        {
-            Id           = noteId,
-            ClientNoteId = Guid.NewGuid().ToString(),
-            CapturedAt   = now,
-            Status       = NoteStatus.Ready,
-            BodyInput    = "seed body",
-            RelativePath = $"{folder}/{noteId}.md",
-            CreatedAt    = now,
-            UpdatedAt    = now,
-        });
+        db.Folders.Add(new Folder { Path = folder, CreatedAt = now, UpdatedAt = now });
         await db.SaveChangesAsync();
     }
 

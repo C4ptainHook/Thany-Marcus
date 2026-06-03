@@ -169,19 +169,16 @@ public sealed class RoutingHandler : IPhaseHandler
     private async Task<List<string>> LoadCandidateFoldersAsync(
         string stubsFolder, int limit, CancellationToken ct)
     {
-        // Top-level folder = first segment of relative_path; skip Inbox + stubs + dot/underscore folders.
-        var rows = await db.Notes
-            .Where(n => n.DeletedAt == null && n.RelativePath != null && n.RelativePath != "")
-            .Select(n => n.RelativePath!)
-            .Distinct()
+        var rows = await db.Folders
+            .Where(f => f.DeletedAt == null && f.Path != "")
+            .Select(f => f.Path)
             .ToListAsync(ct);
 
         var set = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var path in rows)
         {
             var slashIdx = path.IndexOf('/', StringComparison.Ordinal);
-            if (slashIdx <= 0) continue;
-            var folder = path[..slashIdx];
+            var folder = slashIdx < 0 ? path : path[..slashIdx];
             if (folder.Length == 0) continue;
             if (folder.StartsWith('_') || folder.StartsWith('.')) continue;
             if (string.Equals(folder, InboxFolder, StringComparison.Ordinal)) continue;

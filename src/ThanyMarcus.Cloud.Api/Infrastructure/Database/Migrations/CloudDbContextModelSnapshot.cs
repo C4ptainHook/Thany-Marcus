@@ -65,6 +65,12 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("hub_note_id");
 
+                    b.Property<bool>("HubSuppressed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("hub_suppressed");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasColumnType("text")
@@ -257,6 +263,40 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         {
                             t.HasCheckConstraint("ck_entity_suggestions_kind", "kind IN ('person','organization','place','concept','other')");
                         });
+                });
+
+            modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Folders.Folder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Instant>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Instant?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("path");
+
+                    b.Property<Instant>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_folders");
+
+                    b.HasIndex("Path")
+                        .IsUnique()
+                        .HasDatabaseName("ix_folders_path");
+
+                    b.ToTable("folders", (string)null);
                 });
 
             modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Ingest.Attachment", b =>
@@ -465,10 +505,6 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("privacy_mode");
 
-                    b.Property<Guid?>("ProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("project_id");
-
                     b.Property<JsonDocument>("Provenance")
                         .HasColumnType("jsonb")
                         .HasColumnName("provenance");
@@ -538,9 +574,6 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                     b.HasIndex("Kind")
                         .HasDatabaseName("ix_notes_kind")
                         .HasFilter("deleted_at IS NULL");
-
-                    b.HasIndex("ProjectId")
-                        .HasDatabaseName("ix_notes_project");
 
                     b.HasIndex("SynthesisCacheKey")
                         .HasDatabaseName("ix_notes_synthesis_cache_key")
@@ -899,12 +932,6 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasForeignKey("HubEntityId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_notes_entities_hub_entity_id");
-
-                    b.HasOne("ThanyMarcus.Cloud.Api.Features.Entities.Entity", null)
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_notes_entities_project_id");
                 });
 
             modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Processing.ExtractionTask", b =>

@@ -14,6 +14,7 @@ export interface ThanyMarcusSettings {
   customPrompt: string;
   googleApiKey: string;
   desktopNotifications: boolean;
+  deviceId: string;
 }
 
 export const DEFAULT_SETTINGS: ThanyMarcusSettings = {
@@ -28,6 +29,7 @@ export const DEFAULT_SETTINGS: ThanyMarcusSettings = {
   customPrompt: "",
   googleApiKey: "",
   desktopNotifications: true,
+  deviceId: "",
 };
 
 // PREVIEW ONLY — these strings are NOT sent to the cloud. The cloud applies its own preset

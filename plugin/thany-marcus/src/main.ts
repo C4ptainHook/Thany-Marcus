@@ -2,7 +2,9 @@ import {
   MarkdownView,
   Notice,
   Plugin,
+  TFolder,
   WorkspaceLeaf,
+  type TAbstractFile,
   type TFile,
 } from "obsidian";
 import { ApiClient } from "./api";
@@ -18,6 +20,15 @@ import { AttachmentIndex } from "./sync/AttachmentIndex";
 import { EventStream } from "./sync/EventStream";
 import { SyncPullLoop } from "./sync/SyncPullLoop";
 import { Writer } from "./sync/Writer";
+import { IntentJournal, type Intent, type JournalFs } from "./sync/IntentJournal";
+import { IntentQueue, type IntentExecutor } from "./sync/IntentQueue";
+import { NoteIndex } from "./sync/NoteIndex";
+import { VaultEventGuard } from "./sync/VaultEventGuard";
+import { DeletionCoalescer, type CoalescedDeletes } from "./sync/DeletionCoalescer";
+import { planReconciliation } from "./sync/Reconciler";
+import { planFolderReconciliation } from "./sync/FolderReconciler";
+import { FolderDissolveModal, type FolderDissolveChoice } from "./sync/FolderDissolveModal";
+import { ConfirmMassDeleteModal } from "./sync/ConfirmMassDeleteModal";
 import {
   DEFAULT_SETTINGS,
   ThanyMarcusSettingTab,
@@ -27,6 +38,12 @@ import {
 interface PersistedState {
   settings: ThanyMarcusSettings;
   attachmentIndex: Record<string, string[]>;
+  // Disposable caches — rebuildable from the cloud + metadataCache; persisted only so a reopen
+  // shows last-known state instantly.
+  queueSnapshot?: QueueEntry[];
+  manifestIds?: string[];
+  tombstonedIds?: string[];
+  folderManifest?: string[];
 }
 
 export default class ThanyMarcusPlugin extends Plugin {
@@ -48,6 +65,16 @@ export default class ThanyMarcusPlugin extends Plugin {
   private pendingNoteToLeaf = new Map<string, WorkspaceLeaf>();
   private pendingDrafts = new Map<string, DraftState>();
 
+  private readonly noteIndex = new NoteIndex();
+  private readonly guard = new VaultEventGuard();
+  private journal!: IntentJournal;
+  private intents!: IntentQueue;
+  private coalescer!: DeletionCoalescer;
+  private tombstonedIds = new Set<string>();
+  private manifestIds: string[] = [];
+  private folderManifest: string[] = [];
+  private started = false;
+
   async onload(): Promise<void> {
     await this.loadState();
 
@@ -62,7 +89,11 @@ export default class ThanyMarcusPlugin extends Plugin {
 
     this.drafts = new DraftManager(this.app.vault, this.app.workspace, () => this.settings.vaultFolder);
     this.submitter = new Submitter(this.api, this.app.vault, () => this.settings, this.notifier);
-    this.writer = new Writer(this.app.vault, () => this.settings.vaultFolder, this.attachmentIndex);
+    this.writer = new Writer(this.app.vault, () => this.settings.vaultFolder, this.attachmentIndex, this.guard);
+
+    this.journal = new IntentJournal(this.journalFs(), this.stateDir(), this.settings.deviceId);
+    this.intents = new IntentQueue(this.journal, this.intentExecutor());
+    this.coalescer = new DeletionCoalescer((out) => void this.onCoalescedDeletes(out));
 
     this.syncLoop = new SyncPullLoop(
       this.api,
@@ -159,23 +190,11 @@ export default class ThanyMarcusPlugin extends Plugin {
       }),
     );
 
-    this.registerEvent(
-      this.app.vault.on("modify", (f) => {
-        if (!(f as TFile).path) return;
-        const path = (f as TFile).path;
-        if (this.attachmentIndex && this.isSyncedNotePath(path)) {
-          const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-          if (view?.file?.path === path) {
-            new Notice("Cloud sync will overwrite. Push-back not supported in v1.");
-          }
-        }
-      }),
-    );
+    this.registerVaultEvents();
 
-    if (this.settings.cloudUrl && this.settings.token) {
-      this.syncLoop.start();
-      this.events.start();
-    }
+    // Rebuild the path↔ID index from metadataCache, resume the durable queue, and reconcile against
+    // the cloud — only once the vault layout (and frontmatter) is ready.
+    this.app.workspace.onLayoutReady(() => void this.runStartupSequence());
   }
 
   async onunload(): Promise<void> {
@@ -184,6 +203,10 @@ export default class ThanyMarcusPlugin extends Plugin {
     this.toast.stop();
     this.syncLoop.stop();
     this.events.stop();
+    this.intents?.destroy();
+    this.coalescer?.dispose();
+    await this.journal?.compact().catch(() => {});
+    await this.saveState().catch(() => {});
     this.app.workspace.detachLeavesOfType(QUEUE_VIEW_TYPE);
   }
 
@@ -201,15 +224,397 @@ export default class ThanyMarcusPlugin extends Plugin {
     const raw = (await this.loadData()) as PersistedState | null;
     this.settings = { ...DEFAULT_SETTINGS, ...(raw?.settings ?? {}) };
     this.attachmentIndex = AttachmentIndex.fromJson(raw?.attachmentIndex ?? {});
+    this.queueStore.loadSnapshot(raw?.queueSnapshot);
+    this.manifestIds = raw?.manifestIds ?? [];
+    this.tombstonedIds = new Set(raw?.tombstonedIds ?? []);
+    this.folderManifest = raw?.folderManifest ?? [];
+    if (!this.settings.deviceId) {
+      this.settings.deviceId = newDeviceId();
+      await this.saveState();
+    }
   }
 
   private async saveState(): Promise<void> {
     const data: PersistedState = {
       settings: this.settings,
       attachmentIndex: this.attachmentIndex.toJson(),
+      queueSnapshot: this.queueStore.toSnapshot(),
+      manifestIds: this.manifestIds,
+      tombstonedIds: [...this.tombstonedIds],
+      folderManifest: this.folderManifest,
     };
     await this.saveData(data);
   }
+
+  // ── Durable foundation (Pass A) ──────────────────────────────────────────
+
+  private stateDir(): string {
+    return `${this.app.vault.configDir}/plugins/${this.manifest.id}/thany-state`;
+  }
+
+  private journalFs(): JournalFs {
+    const a = this.app.vault.adapter;
+    return {
+      exists: (p) => a.exists(p),
+      read: (p) => a.read(p),
+      write: (p, d) => a.write(p, d),
+      append: (p, d) => a.append(p, d),
+      remove: (p) => a.remove(p),
+      mkdir: (p) => a.mkdir(p),
+    };
+  }
+
+  private registerVaultEvents(): void {
+    this.registerEvent(this.app.vault.on("create", (f) => this.onVaultCreate(f)));
+    this.registerEvent(this.app.vault.on("modify", (f) => this.onVaultModify(f)));
+    this.registerEvent(this.app.vault.on("rename", (f, oldPath) => void this.onVaultRename(f, oldPath)));
+    this.registerEvent(this.app.vault.on("delete", (f) => this.onVaultDelete(f)));
+    this.registerEvent(
+      this.app.metadataCache.on("changed", (file) => this.onMetaChanged(file)),
+    );
+  }
+
+  private async runStartupSequence(): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+
+    this.rebuildNoteIndex();
+
+    try {
+      const pending = await this.journal.load();
+      if (pending.length > 0) this.intents.kick();
+    } catch (e) {
+      console.warn("Thany: intent journal load failed", e);
+    }
+
+    if (this.settings.cloudUrl && this.settings.token) {
+      this.syncLoop.start();
+      this.events.start();
+      void this.reconcileOnStartup();
+      void this.reconcileFoldersOnStartup();
+    }
+
+    this.manifestIds = this.noteIndex.ids();
+    await this.saveState();
+  }
+
+  private rebuildNoteIndex(): void {
+    const files = this.app.vault.getMarkdownFiles();
+    const entries = files
+      .filter((f) => this.isSyncedNotePath(f.path))
+      .map((f) => ({ path: f.path, noteId: this.frontmatterNoteId(f) }));
+    this.noteIndex.rebuild(entries);
+  }
+
+  private frontmatterNoteId(file: TFile): string | null {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as
+      | Record<string, unknown>
+      | undefined;
+    const id = fm?.["thany_note_id"];
+    return typeof id === "string" && id.length > 0 ? id : null;
+  }
+
+  private cloudRelativePath(vaultPath: string): string {
+    const root = (this.settings.vaultFolder || "Thany") + "/";
+    return vaultPath.startsWith(root) ? vaultPath.slice(root.length) : vaultPath;
+  }
+
+  // ── Vault event handlers (Pass A index + Pass B/C intents) ───────────────
+
+  private onVaultCreate(file: TAbstractFile): void {
+    const path = file.path;
+    if (file instanceof TFolder) {
+      if (this.isSyncedFolderPath(path)) void this.registerFolder(path);
+      return;
+    }
+    if (!this.isSyncedNotePath(path)) return;
+    this.noteIndex.onCreateOrModify(path, this.frontmatterNoteId(file as TFile));
+    // Revive is detected in onMetaChanged, where frontmatter is reliably parsed.
+  }
+
+  private onVaultModify(file: TAbstractFile): void {
+    const path = (file as TFile).path;
+    if (!path || !this.isSyncedNotePath(path)) return;
+    this.noteIndex.onCreateOrModify(path, this.frontmatterNoteId(file as TFile));
+    if (this.guard.consume("modify", path)) return;
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view?.file?.path === path) {
+      new Notice("Cloud sync will overwrite. Push-back not supported in v1.");
+    }
+  }
+
+  private onMetaChanged(file: TFile): void {
+    const path = file.path;
+    if (!this.isSyncedNotePath(path)) return;
+    const id = this.frontmatterNoteId(file);
+    this.noteIndex.onCreateOrModify(path, id);
+    if (this.guard.consume("create", path)) return;
+    if (id && this.tombstonedIds.has(id)) {
+      this.tombstonedIds.delete(id);
+      void this.enqueueIntent({ kind: "revive", noteId: id, opId: `revive:${id}`, enqueuedAt: Date.now() });
+    }
+  }
+
+  private async onVaultRename(file: TAbstractFile, oldPath: string): Promise<void> {
+    if (file instanceof TFolder) {
+      await this.onFolderRenamed(oldPath, file.path);
+      return;
+    }
+    const newPath = (file as TFile).path;
+    const wasSynced = this.isSyncedNotePath(oldPath);
+    const isSynced = this.isSyncedNotePath(newPath);
+    if (!wasSynced && !isSynced) return;
+    const id = this.noteIndex.onRename(oldPath, newPath, this.frontmatterNoteId(file as TFile));
+    if (this.guard.consume("rename", newPath)) return;
+    if (id && isSynced) {
+      // rename ≠ delete: tell the cloud where the note lives now, never tombstone.
+      await this.enqueueIntent({
+        kind: "reroute",
+        noteId: id,
+        relativePath: this.cloudRelativePath(newPath),
+        opId: `reroute:${id}:${newPath}`,
+        enqueuedAt: Date.now(),
+      });
+    }
+  }
+
+  private async onFolderRenamed(oldFolder: string, newFolder: string): Promise<void> {
+    const prefix = oldFolder + "/";
+    for (const path of this.noteIndex.paths()) {
+      if (!path.startsWith(prefix)) continue;
+      const newPath = newFolder + "/" + path.slice(prefix.length);
+      const id = this.noteIndex.onRename(path, newPath, null);
+      if (id && this.isSyncedNotePath(newPath)) {
+        await this.enqueueIntent({
+          kind: "reroute",
+          noteId: id,
+          relativePath: this.cloudRelativePath(newPath),
+          opId: `reroute:${id}:${newPath}`,
+          enqueuedAt: Date.now(),
+        });
+      }
+    }
+    if (this.isSyncedFolderPath(oldFolder)) await this.unregisterFolder(oldFolder);
+    if (this.isSyncedFolderPath(newFolder)) await this.registerFolder(newFolder);
+  }
+
+  private onVaultDelete(file: TAbstractFile): void {
+    const path = file.path;
+    if (file instanceof TFolder) {
+      if (this.isSyncedFolderPath(path)) {
+        this.coalescer.folderDeleted(path);
+        void this.unregisterFolder(path);
+      }
+      return;
+    }
+    if (!this.isSyncedNotePath(path)) return;
+    const id = this.noteIndex.onDelete(path);
+    if (this.guard.consume("delete", path)) return;
+    if (!id) return;
+    this.coalescer.noteDeleted(path, id);
+  }
+
+  private async onCoalescedDeletes(out: CoalescedDeletes): Promise<void> {
+    for (const single of out.singles) {
+      this.tombstonedIds.add(single.noteId);
+      await this.enqueueIntent({
+        kind: "tombstone",
+        noteId: single.noteId,
+        opId: `tombstone:${single.noteId}`,
+        enqueuedAt: Date.now(),
+      });
+    }
+    for (const folder of out.folders) {
+      await this.onFolderDeleted(folder.folder, folder.noteIds);
+    }
+    await this.saveState();
+  }
+
+  // ── Folder dissolve (Pass C) ─────────────────────────────────────────────
+
+  private async onFolderDeleted(localFolder: string, bufferedIds: string[]): Promise<void> {
+    const cloudFolder = this.cloudRelativePath(localFolder);
+    const count = bufferedIds.length;
+    if (count === 0) return;
+
+    if (this.app.workspace.layoutReady) {
+      new FolderDissolveModal(this.app, cloudFolder, count, (choice) =>
+        void this.dispatchFolderDissolve(cloudFolder, choice),
+      ).open();
+    } else {
+      // Un-askable (startup / no UI): the safe default is preserve-and-reroute.
+      await this.dispatchFolderDissolve(cloudFolder, "reroute");
+    }
+  }
+
+  private async dispatchFolderDissolve(
+    cloudFolder: string,
+    mode: FolderDissolveChoice,
+  ): Promise<void> {
+    await this.enqueueIntent({
+      kind: "folder_dissolve",
+      folder: cloudFolder,
+      mode,
+      targetFolder: mode === "reroute" ? "Inbox" : undefined,
+      opId: `folder:${mode}:${cloudFolder}`,
+      enqueuedAt: Date.now(),
+    });
+    await this.saveState();
+  }
+
+  private registerFolder(localPath: string): Promise<void> {
+    return this.enqueueFolderRegister(this.cloudRelativePath(localPath));
+  }
+
+  private unregisterFolder(localPath: string): Promise<void> {
+    return this.enqueueFolderUnregister(this.cloudRelativePath(localPath));
+  }
+
+  private enqueueFolderRegister(folder: string): Promise<void> {
+    return this.enqueueIntent({
+      kind: "folder_register",
+      folder,
+      opId: `folder_register:${folder}`,
+      enqueuedAt: Date.now(),
+    });
+  }
+
+  private enqueueFolderUnregister(folder: string): Promise<void> {
+    return this.enqueueIntent({
+      kind: "folder_unregister",
+      folder,
+      opId: `folder_unregister:${folder}`,
+      enqueuedAt: Date.now(),
+    });
+  }
+
+  // ── Intent executor (drives the durable queue) ───────────────────────────
+
+  private intentExecutor(): IntentExecutor {
+    return {
+      tombstone: (noteId) => this.api.tombstoneNote(noteId),
+      revive: async (noteId) => {
+        const revived = await this.api.reviveNote(noteId);
+        if (!revived) {
+          new Notice("Thany: restored locally, but its cloud copy expired — re-submit to re-process.");
+        }
+      },
+      reroute: (noteId, relativePath) => this.api.moveNote(noteId, relativePath),
+      folderDissolve: async (folder, mode, target) => {
+        const res = await this.api.folderDissolve(folder, mode, target);
+        if (mode === "reroute") {
+          // Rerouted notes get updated_at bumped cloud-side → the pull loop re-materialises them
+          // into the target folder. Declarative + resumable: re-running converges.
+          this.syncLoop.trigger();
+          new Notice(`Thany: rerouting ${res.affectedCount} note(s) to ${target ?? "Inbox"}…`);
+        } else {
+          new Notice(`Thany: deleted ${res.affectedCount} note(s) from ${folder}`);
+        }
+      },
+      folderRegister: (folder) => this.api.registerFolder(folder),
+      folderUnregister: (folder) => this.api.unregisterFolder(folder),
+    };
+  }
+
+  private async enqueueIntent(intent: Intent): Promise<void> {
+    if (!this.settings.cloudUrl || !this.settings.token) return;
+    await this.intents.enqueue(intent);
+  }
+
+  // ── Processing-state continuity + reconciliation backstop (Pass B/D) ─────
+
+  private async reconcileOnStartup(): Promise<void> {
+    const ids = this.noteIndex.ids();
+    const cloudStatus = new Map<string, string>();
+    try {
+      const candidates = Array.from(new Set([...ids, ...this.manifestIds]));
+      for (let i = 0; i < candidates.length; i += 200) {
+        const chunk = candidates.slice(i, i + 200);
+        const items = await this.api.statusPull(chunk);
+        for (const it of items) cloudStatus.set(it.noteId, it.status);
+      }
+    } catch (e) {
+      console.warn("Thany: status pull failed", e);
+      return;
+    }
+
+    // Light status dots: reflect last-known cloud status for notes still in the queue.
+    for (const [noteId, status] of cloudStatus) {
+      const entry = this.queueStore.get(noteId);
+      if (entry && !isTerminal(entry.status)) {
+        if (status === "ready") this.queueStore.upsert(noteId, { status: "ready" });
+        else if (status !== "deleted") this.queueStore.upsert(noteId, { status });
+      }
+    }
+
+    const plan = planReconciliation({
+      manifestIds: this.manifestIds,
+      presentIds: new Set(ids),
+      cloudStatus,
+    });
+    if (plan.tombstoneCandidates.length === 0) return;
+
+    if (plan.tripped) {
+      new ConfirmMassDeleteModal(
+        this.app,
+        plan.tombstoneCandidates.map((id) => id),
+        (confirm) => {
+          if (confirm) void this.tombstoneBatch(plan.tombstoneCandidates);
+        },
+      ).open();
+    } else {
+      await this.tombstoneBatch(plan.tombstoneCandidates);
+    }
+  }
+
+  private async tombstoneBatch(noteIds: string[]): Promise<void> {
+    for (const id of noteIds) {
+      this.tombstonedIds.add(id);
+      await this.enqueueIntent({
+        kind: "tombstone",
+        noteId: id,
+        opId: `tombstone:${id}`,
+        enqueuedAt: Date.now(),
+      });
+    }
+    await this.saveState();
+  }
+
+  private currentVaultFolders(): string[] {
+    return this.app.vault
+      .getAllLoadedFiles()
+      .filter((f): f is TFolder => f instanceof TFolder)
+      .map((f) => f.path)
+      .filter((p) => this.isSyncedFolderPath(p))
+      .map((p) => this.cloudRelativePath(p));
+  }
+
+  private async reconcileFoldersOnStartup(): Promise<void> {
+    const vaultFolders = this.currentVaultFolders();
+    let cloudFolders: string[];
+    try {
+      cloudFolders = await this.api.listFolders();
+    } catch (e) {
+      console.warn("Thany: folder list failed", e);
+      return;
+    }
+    const plan = planFolderReconciliation({ vaultFolders, cloudFolders });
+    for (const folder of plan.toRegister) await this.enqueueFolderRegister(folder);
+    for (const folder of plan.toUnregister) await this.enqueueFolderUnregister(folder);
+    this.folderManifest = vaultFolders;
+    await this.saveState();
+  }
+
+  private isSyncedFolderPath(path: string): boolean {
+    const root = this.settings.vaultFolder || "Thany";
+    if (path === root) return false;
+    if (!path.startsWith(`${root}/`)) return false;
+    const firstSegment = path.slice(root.length + 1).split("/", 1)[0];
+    if (firstSegment.startsWith("_") || firstSegment.startsWith(".")) return false;
+    return firstSegment !== "Inbox";
+  }
+
+  // ── Existing behaviour ───────────────────────────────────────────────────
 
   private async openNewDraft(): Promise<void> {
     if (!this.settings.cloudUrl || !this.settings.token) {
@@ -303,6 +708,7 @@ export default class ThanyMarcusPlugin extends Plugin {
   }
 
   private onNoteReady(noteId: string, vaultPath: string): void {
+    this.noteIndex.set(vaultPath, noteId);
     const leaf = this.pendingNoteToLeaf.get(noteId);
     if (leaf) {
       this.pendingNoteToLeaf.delete(noteId);
@@ -314,9 +720,7 @@ export default class ThanyMarcusPlugin extends Plugin {
       void this.drafts.discard(held);
     }
     this.queueStore.pruneCompleted(15 * 60 * 1000);
-    if (this.queueStore.get(noteId) && isTerminal(this.queueStore.get(noteId)!.status)) {
-      // noop — marker for future cleanup hooks
-    }
+    void this.saveState();
   }
 
   private async onNoteCancelled(noteId: string): Promise<void> {
@@ -375,6 +779,7 @@ export default class ThanyMarcusPlugin extends Plugin {
     } else if (status.startsWith("failed")) {
       this.fireDesktopNotification("failed", next, null);
     }
+    void this.saveState();
   }
 
   private fireDesktopNotification(
@@ -473,4 +878,10 @@ function formatTime(d: Date): string {
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return `${s.slice(0, n - 1)}…`;
+}
+
+function newDeviceId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return "dev-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
