@@ -1,10 +1,10 @@
-import { Notice, type MarkdownView, type TFile, type Workspace } from "obsidian";
-import { type AttachmentMode, type DraftManager, type DraftState, nextMode } from "./DraftManager";
+import { Notice, setIcon, type MarkdownView, type TFile, type Workspace } from "obsidian";
+import { type AttachmentMode, type DraftManager, type DraftState } from "./DraftManager";
 import { MicRecorder } from "./MicRecorder";
 import { PasteInterceptor } from "./PasteInterceptor";
 import { Submitter } from "./Submitter";
-import { findUrls } from "./UrlPromoter";
 import { sha256Hex } from "../sync/AttachmentDownloader";
+import { TM_ICON, type ThanyIconId } from "../icons";
 import {
   RelatedNotesPanel,
   type RelatedNotesFetcher,
@@ -17,6 +17,7 @@ export interface BrowHandlers {
 
 export class BrowView {
   private container: HTMLElement | null = null;
+  private attachBar: HTMLElement | null = null;
   private relatedContainer: HTMLElement | null = null;
   private relatedPanel: RelatedNotesPanel | null = null;
   private editorChangeUnsub: (() => void) | null = null;
@@ -24,6 +25,8 @@ export class BrowView {
   private recorder = new MicRecorder();
   private recordingTimer: number | null = null;
   private submitting = false;
+  private attachExpanded = false;
+  private closePopover: (() => void) | null = null;
 
   constructor(
     private readonly drafts: DraftManager,
@@ -32,6 +35,7 @@ export class BrowView {
     private readonly handlers: BrowHandlers,
     private readonly workspace: Workspace,
     private readonly related: RelatedNotesFetcher,
+    private readonly resourceUrl: (vaultPath: string) => string,
   ) {
     this.interceptor = new PasteInterceptor(drafts, () => this.render());
   }
@@ -44,9 +48,14 @@ export class BrowView {
     contentEl.prepend(root);
     this.container = root;
 
+    const attachRoot = document.createElement("div");
+    attachRoot.addClass("tm-attach");
+    root.insertAdjacentElement("afterend", attachRoot);
+    this.attachBar = attachRoot;
+
     const relatedRoot = document.createElement("div");
     relatedRoot.addClass("tm-related");
-    root.insertAdjacentElement("afterend", relatedRoot);
+    attachRoot.insertAdjacentElement("afterend", relatedRoot);
     this.relatedContainer = relatedRoot;
     this.relatedPanel = new RelatedNotesPanel(this.related, relatedRoot, {
       onItemClick: (item) => {
@@ -71,6 +80,7 @@ export class BrowView {
   }
 
   detach(): void {
+    this.closePopover?.();
     this.interceptor.detach();
     this.recorder.cancel();
     if (this.recordingTimer !== null) {
@@ -85,6 +95,8 @@ export class BrowView {
     this.relatedPanel = null;
     this.relatedContainer?.remove();
     this.relatedContainer = null;
+    this.attachBar?.remove();
+    this.attachBar = null;
     this.container?.remove();
     this.container = null;
     this.state = null;
@@ -95,65 +107,41 @@ export class BrowView {
   private view: MarkdownView | null = null;
 
   private render(): void {
+    this.renderStrip();
+    this.renderAttachBar();
+  }
+
+  private renderStrip(): void {
     if (!this.container || !this.state) return;
     this.container.empty();
-    const state = this.state;
     const recording = this.recorder.isRecording();
 
     const left = this.container.createDiv({ cls: "tm-brow__left" });
 
-    const micBtn = left.createEl("button", {
-      cls: `tm-brow__btn tm-brow__btn--mic${recording ? " is-recording" : ""}`,
-      text: recording ? `● ${formatMs(this.recorder.elapsedMs())} stop` : "mic",
-    });
+    left.createDiv({ cls: "tm-brow__mark", text: "Thany-Marcus" });
+
+    const micBtn = this.iconButton(
+      left,
+      TM_ICON.mic,
+      recording ? `${formatMs(this.recorder.elapsedMs())} · stop` : "mic",
+      recording ? "tm-brow__btn--mic is-recording" : "tm-brow__btn--mic",
+    );
     micBtn.onclick = () => void this.toggleMic();
 
-    const attachBtn = left.createEl("button", {
-      cls: "tm-brow__btn",
-      text: "attach",
-    });
+    const attachBtn = this.iconButton(left, TM_ICON.attach, "attach");
     attachBtn.onclick = () => this.openFilePicker();
 
-    const urlBtn = left.createEl("button", {
-      cls: "tm-brow__btn",
-      text: "+ URL",
-    });
-    urlBtn.onclick = () => void this.promoteUrl();
+    const urlBtn = this.iconButton(left, TM_ICON.link, "URL");
+    urlBtn.onclick = () => this.promptUrl();
 
     if (recording) {
-      const cancelBtn = left.createEl("button", {
-        cls: "tm-brow__btn tm-brow__btn--cancel-rec",
-        text: "cancel",
-      });
+      const cancelBtn = this.iconButton(left, TM_ICON.close, "cancel", "tm-brow__btn--cancel-rec");
       cancelBtn.onclick = () => {
         this.recorder.cancel();
         if (this.recordingTimer !== null) {
           window.clearInterval(this.recordingTimer);
           this.recordingTimer = null;
         }
-        this.render();
-      };
-    }
-
-    const chips = this.container.createDiv({ cls: "tm-brow__chips" });
-    for (const att of state.attachments) {
-      const chip = chips.createDiv({ cls: `tm-brow__chip tm-brow__chip--${att.kind}` });
-      chip.createSpan({ cls: "tm-brow__chip-label", text: chipLabel(att) });
-
-      const modeBtn = chip.createEl("button", {
-        cls: `tm-brow__chip-mode tm-brow__chip-mode--${att.mode}`,
-        text: modeIcon(att.mode),
-      });
-      modeBtn.title = modeTooltip(att.mode);
-      modeBtn.setAttr("aria-label", modeTooltip(att.mode));
-      modeBtn.onclick = () => {
-        att.mode = nextMode(att.mode, att.kind);
-        this.render();
-      };
-
-      const remove = chip.createEl("button", { cls: "tm-brow__chip-x", text: "×" });
-      remove.onclick = async () => {
-        await this.drafts.removeAttachment(state, att.clientAttachmentId);
         this.render();
       };
     }
@@ -165,12 +153,115 @@ export class BrowView {
     });
     discardBtn.onclick = () => void this.discard();
 
-    const sendBtn = right.createEl("button", {
-      cls: "tm-brow__btn tm-brow__btn--send mod-cta",
-      text: this.submitting ? "Sending…" : "Send",
-    });
+    const sendBtn = this.iconButton(
+      right,
+      TM_ICON.check,
+      this.submitting ? "Sending…" : "Send",
+      "tm-brow__btn--send mod-cta",
+    );
     sendBtn.disabled = recording || this.submitting;
-    sendBtn.onclick = () => void this.submit();
+    sendBtn.onclick = () => {
+      sendBtn.addClass("is-transmitting");
+      void this.submit();
+    };
+  }
+
+  private renderAttachBar(): void {
+    if (!this.attachBar || !this.state) return;
+    this.attachBar.empty();
+    const attachments = this.state.attachments;
+    if (attachments.length === 0) {
+      this.attachBar.removeClass("is-open");
+      return;
+    }
+    this.attachBar.toggleClass("is-open", this.attachExpanded);
+
+    const summary = this.attachBar.createDiv({ cls: "tm-attach__summary" });
+    setIcon(summary.createSpan({ cls: "tm-attach__summary-icon" }), TM_ICON.attach);
+    summary.createSpan({
+      cls: "tm-attach__summary-label",
+      text: `${attachments.length} attached`,
+    });
+    setIcon(
+      summary.createSpan({ cls: "tm-attach__summary-chevron" }),
+      this.attachExpanded ? TM_ICON.collapse : TM_ICON.expand,
+    );
+    summary.onclick = () => {
+      this.attachExpanded = !this.attachExpanded;
+      this.renderAttachBar();
+    };
+
+    if (!this.attachExpanded) return;
+
+    const film = this.attachBar.createDiv({ cls: "tm-attach__film" });
+    for (const att of attachments) this.renderCard(film, att);
+  }
+
+  private renderCard(film: HTMLElement, att: DraftState["attachments"][number]): void {
+    const state = this.state;
+    if (!state) return;
+    const card = film.createDiv({ cls: `tm-attach__card tm-attach__card--${att.kind}` });
+
+    const preview = card.createDiv({ cls: "tm-attach__preview" });
+    if (att.kind === "image" && att.vaultPath) {
+      const img = preview.createEl("img", { cls: "tm-attach__thumb" });
+      img.src = this.resourceUrl(att.vaultPath);
+      img.alt = att.filename ?? "image";
+    } else if (att.kind === "voice") {
+      setIcon(preview.createSpan({ cls: "tm-attach__preview-icon" }), TM_ICON.voice);
+      if (att.vaultPath) {
+        const play = preview.createEl("button", { cls: "tm-attach__play", text: "▶" });
+        play.onclick = (ev) => {
+          ev.stopPropagation();
+          void new Audio(this.resourceUrl(att.vaultPath!)).play().catch(() => undefined);
+        };
+      }
+    } else if (att.kind === "url") {
+      setIcon(preview.createSpan({ cls: "tm-attach__preview-icon" }), TM_ICON.link);
+    } else {
+      setIcon(preview.createSpan({ cls: "tm-attach__preview-icon" }), TM_ICON.file);
+    }
+
+    const meta = card.createDiv({ cls: "tm-attach__meta" });
+    meta.createDiv({ cls: "tm-attach__name", text: cardTitle(att) });
+    const sub = cardSubtitle(att);
+    if (sub) meta.createDiv({ cls: "tm-attach__sub", text: sub });
+
+    const modes = card.createDiv({ cls: "tm-attach__modes" });
+    for (const m of validModes(att.kind)) {
+      const seg = modes.createEl("button", {
+        cls: `tm-attach__mode${att.mode === m ? " is-active" : ""}`,
+        text: modeLabel(m),
+      });
+      seg.setAttr("aria-label", modeTooltip(m));
+      seg.title = modeTooltip(m);
+      seg.onclick = (ev) => {
+        ev.stopPropagation();
+        att.mode = m;
+        this.renderAttachBar();
+      };
+    }
+
+    const remove = card.createEl("button", { cls: "tm-attach__remove" });
+    setIcon(remove.createSpan({ cls: "tm-attach__remove-icon" }), TM_ICON.close);
+    remove.setAttr("aria-label", "Remove attachment");
+    remove.onclick = async (ev) => {
+      ev.stopPropagation();
+      await this.drafts.removeAttachment(state, att.clientAttachmentId);
+      this.renderAttachBar();
+    };
+  }
+
+  private iconButton(
+    parent: HTMLElement,
+    icon: ThanyIconId,
+    label: string,
+    extraCls = "",
+  ): HTMLButtonElement {
+    const btn = parent.createEl("button", { cls: `tm-brow__btn ${extraCls}`.trim() });
+    setIcon(btn.createSpan({ cls: "tm-brow__btn-icon" }), icon);
+    btn.createSpan({ cls: "tm-brow__btn-label", text: label });
+    return btn;
   }
 
   private openFilePicker(): void {
@@ -197,7 +288,8 @@ export class BrowView {
           sha,
         );
       }
-      this.render();
+      this.attachExpanded = true;
+      this.renderAttachBar();
     };
     input.click();
   }
@@ -219,6 +311,7 @@ export class BrowView {
           mimeType,
           sha,
         );
+        this.attachExpanded = true;
       } catch (e) {
         new Notice(`Thany: mic error — ${(e as Error).message}`);
       }
@@ -231,49 +324,70 @@ export class BrowView {
     }
     try {
       await this.recorder.start();
-      this.recordingTimer = window.setInterval(() => this.render(), 500);
+      this.recordingTimer = window.setInterval(() => this.renderStrip(), 500);
       this.render();
     } catch (e) {
       new Notice(`Thany: mic permission denied — ${(e as Error).message}`);
     }
   }
 
-  private async promoteUrl(): Promise<void> {
-    if (!this.state || !this.view) return;
-    const body = this.view.editor.getValue();
-    const urls = findUrls(body);
-    if (urls.length === 0) {
-      new Notice("Thany: no URLs found in body");
-      return;
-    }
-    const existing = new Set(
-      this.state.attachments
-        .filter((a) => a.kind === "url")
-        .map((a) => String((a.extra as { url?: string }).url ?? "")),
-    );
-    const candidates = urls.filter((u) => !existing.has(u));
-    if (candidates.length === 0) {
-      new Notice("Thany: all body URLs already attached");
-      return;
-    }
-    this.showUrlPicker(candidates);
-  }
-
-  private showUrlPicker(urls: string[]): void {
+  private promptUrl(): void {
     if (!this.container || !this.state) return;
+    this.closePopover?.();
     const popover = this.container.createDiv({ cls: "tm-brow__popover" });
-    popover.createDiv({ cls: "tm-brow__popover-title", text: "Promote URL → attachment" });
-    for (const url of urls) {
-      const row = popover.createEl("button", { cls: "tm-brow__popover-row", text: url });
-      row.onclick = () => {
-        if (!this.state) return;
-        this.drafts.addUrlAttachment(this.state, url);
-        popover.remove();
-        this.render();
-      };
-    }
-    const close = popover.createEl("button", { cls: "tm-brow__popover-close", text: "Cancel" });
-    close.onclick = () => popover.remove();
+    popover.createDiv({ cls: "tm-brow__popover-title", text: "Attach a URL" });
+    const input = popover.createEl("input", {
+      cls: "tm-brow__popover-input",
+      attr: { type: "url", placeholder: "https://…" },
+    });
+
+    const onOutside = (e: MouseEvent) => {
+      if (!popover.contains(e.target as Node)) close();
+    };
+    const close = () => {
+      document.removeEventListener("mousedown", onOutside, true);
+      this.closePopover = null;
+      popover.remove();
+    };
+    this.closePopover = close;
+    window.setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0);
+
+    const submit = () => {
+      if (!this.state) return;
+      const raw = input.value.trim();
+      if (!raw) return;
+      const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+      const existing = new Set(
+        this.state.attachments
+          .filter((a) => a.kind === "url")
+          .map((a) => String((a.extra as { url?: string }).url ?? "")),
+      );
+      close();
+      if (existing.has(url)) {
+        new Notice("Thany: URL already attached");
+        return;
+      }
+      this.drafts.addUrlAttachment(this.state, url);
+      this.attachExpanded = true;
+      this.render();
+    };
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submit();
+      } else if (e.key === "Escape") {
+        close();
+      }
+    });
+
+    const actions = popover.createDiv({ cls: "tm-brow__popover-actions" });
+    const add = actions.createEl("button", { cls: "tm-brow__popover-add", text: "Attach" });
+    add.onclick = submit;
+    const cancel = actions.createEl("button", { cls: "tm-brow__popover-close", text: "Cancel" });
+    cancel.onclick = () => close();
+
+    input.focus();
   }
 
   private async submit(): Promise<void> {
@@ -301,23 +415,46 @@ export class BrowView {
   }
 }
 
-function chipLabel(att: { kind: string; filename: string | null; extra: Record<string, unknown> }): string {
-  if (att.kind === "url") return `url:${String(att.extra.url ?? "").replace(/^https?:\/\//, "")}`;
-  if (att.kind === "image") return `img:${att.filename ?? "image"}`;
-  if (att.kind === "voice") return `voice:${att.filename ?? "voice"}`;
-  return `file:${att.filename ?? "file"}`;
+function validModes(kind: string): AttachmentMode[] {
+  return kind === "url" ? ["extract", "metadata", "reference"] : ["extract", "reference"];
 }
 
-function modeIcon(mode: AttachmentMode): string {
-  if (mode === "reference") return "🔗";
-  if (mode === "metadata") return "📇";
-  return "⚙️";
+function modeLabel(mode: AttachmentMode): string {
+  if (mode === "reference") return "REF";
+  if (mode === "metadata") return "META";
+  return "EXTRACT";
 }
 
 function modeTooltip(mode: AttachmentMode): string {
-  if (mode === "reference") return "Reference — attached but not processed (click to change)";
-  if (mode === "metadata") return "Metadata — fetch title/description only (click to change)";
-  return "Extract — process content into the note (click to change)";
+  if (mode === "reference") return "Reference — attached, not processed into the note";
+  if (mode === "metadata") return "Metadata — fetch title/description only";
+  return "Extract — process the content into the note";
+}
+
+function cardTitle(att: { kind: string; filename: string | null; extra: Record<string, unknown> }): string {
+  if (att.kind === "url") {
+    const url = String(att.extra.url ?? "");
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return url.replace(/^https?:\/\//, "");
+    }
+  }
+  return att.filename ?? att.kind;
+}
+
+function cardSubtitle(att: { kind: string; byteSize: number | null; extra: Record<string, unknown> }): string | null {
+  if (att.kind === "url") {
+    const url = String(att.extra.url ?? "");
+    return url.replace(/^https?:\/\//, "");
+  }
+  return att.byteSize != null ? formatBytes(att.byteSize) : null;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatMs(ms: number): string {

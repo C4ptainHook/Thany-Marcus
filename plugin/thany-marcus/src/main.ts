@@ -4,10 +4,12 @@ import {
   Plugin,
   TFolder,
   WorkspaceLeaf,
+  setIcon,
   type TAbstractFile,
   type TFile,
 } from "obsidian";
 import { ApiClient } from "./api";
+import { TM_ICON, registerThanyIcons, type ThanyIconId } from "./icons";
 import { BrowView } from "./draft/BrowView";
 import { DraftManager, type DraftState } from "./draft/DraftManager";
 import { Submitter } from "./draft/Submitter";
@@ -78,6 +80,9 @@ export default class ThanyMarcusPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadState();
 
+    registerThanyIcons();
+    this.applyChromeClasses();
+
     this.api = new ApiClient(
       () => this.settings.cloudUrl,
       () => this.settings.token,
@@ -137,12 +142,13 @@ export default class ThanyMarcusPlugin extends Plugin {
         {
           listActiveJobs: (includeRecent) => this.api.listActiveJobs(includeRecent),
         },
+        () => void this.openNewDraft(),
       ),
     );
 
     this.addSettingTab(new ThanyMarcusSettingTab(this.app, this));
 
-    this.addRibbonIcon("cloud", "Thany: new draft", () => void this.openNewDraft());
+    this.addRibbonIcon(TM_ICON.mark, "Thany: new draft", () => void this.openNewDraft());
 
     this.addCommand({
       id: "new-draft",
@@ -198,6 +204,7 @@ export default class ThanyMarcusPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
+    document.body.removeClasses(["tm-pixel-chrome", "tm-action-effects"]);
     this.brow?.detach();
     this.brow = null;
     this.toast.stop();
@@ -648,6 +655,7 @@ export default class ThanyMarcusPlugin extends Plugin {
       {
         relatedNotes: (req, signal) => this.api.relatedNotes(req, signal),
       },
+      (vaultPath) => this.app.vault.adapter.getResourcePath(vaultPath),
     );
     this.brow.attach(view, state);
   }
@@ -834,27 +842,58 @@ export default class ThanyMarcusPlugin extends Plugin {
     return path.endsWith(".md");
   }
 
+  applyChromeClasses(): void {
+    document.body.toggleClass("tm-pixel-chrome", this.settings.pixelChrome);
+    document.body.toggleClass("tm-action-effects", this.settings.actionEffects);
+  }
+
   private setStatusBar(state: "idle" | "syncing" | "synced" | "error" | string): void {
     if (!this.statusBarEl) return;
-    let text = "Thany";
+    const el = this.statusBarEl;
+    el.empty();
+    el.addClass("tm-status");
+
+    let icon: ThanyIconId;
+    let label: string;
+    let mood: "idle" | "ok" | "busy" | "error";
+    const inFlight = this.queueStore.list().filter((e) => !isTerminal(e.status)).length;
+
     switch (state) {
       case "idle":
-        text = "Thany: idle";
+        icon = TM_ICON.check;
+        label = "idle";
+        mood = "idle";
         break;
       case "syncing":
-        text = "Thany: syncing…";
+        icon = TM_ICON.sync;
+        label = inFlight > 0 ? `${inFlight} processing` : "syncing";
+        mood = "busy";
         break;
       case "synced":
-        text = `Thany: synced ${formatTime(new Date())}`;
+        icon = inFlight > 0 ? TM_ICON.sync : TM_ICON.check;
+        label = inFlight > 0 ? `${inFlight} processing` : `synced ${formatTime(new Date())}`;
+        mood = inFlight > 0 ? "busy" : "ok";
         break;
       case "error":
-        text = "Thany: error (click to retry)";
+        icon = TM_ICON.alert;
+        label = "error";
+        mood = "error";
         break;
       default:
-        text = `Thany: ${state}`;
+        icon = TM_ICON.sync;
+        label = inFlight > 0 ? `${inFlight} processing` : state;
+        mood = "busy";
     }
-    this.statusBarEl.setText(text);
-    this.statusBarEl.onclick = state === "error" ? () => void this.syncLoop.runNow() : null;
+
+    el.createSpan({ cls: "tm-status__wordmark", text: "Thany-Marcus" });
+    setIcon(el.createSpan({ cls: "tm-status__icon" }), icon);
+    el.createSpan({ cls: "tm-status__label", text: label });
+
+    el.removeClasses(["tm-status--idle", "tm-status--ok", "tm-status--busy", "tm-status--error"]);
+    el.addClass(`tm-status--${mood}`);
+    el.setAttr("aria-label", state === "error" ? "Thany: error — click to retry" : "Thany — click to open");
+    el.onclick =
+      state === "error" ? () => void this.syncLoop.runNow() : () => void this.activateQueueView();
   }
 
   private async activateQueueView(): Promise<void> {

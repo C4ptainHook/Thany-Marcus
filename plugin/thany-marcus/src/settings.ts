@@ -14,6 +14,8 @@ export interface ThanyMarcusSettings {
   customPrompt: string;
   googleApiKey: string;
   desktopNotifications: boolean;
+  pixelChrome: boolean;
+  actionEffects: boolean;
   deviceId: string;
 }
 
@@ -29,6 +31,8 @@ export const DEFAULT_SETTINGS: ThanyMarcusSettings = {
   customPrompt: "",
   googleApiKey: "",
   desktopNotifications: true,
+  pixelChrome: true,
+  actionEffects: true,
   deviceId: "",
 };
 
@@ -242,6 +246,30 @@ export class ThanyMarcusSettingTab extends PluginSettingTab {
       .addToggle((t) =>
         t.setValue(this.plugin.settings.desktopNotifications).onChange(async (v) => {
           this.plugin.settings.desktopNotifications = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    containerEl.createEl("h3", { text: "Appearance" });
+
+    new Setting(containerEl)
+      .setName("Pixel chrome")
+      .setDesc("Brand Thany's own surfaces (composer, hub, status, callouts) with the pixel identity. Your note text is never touched.")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.pixelChrome).onChange(async (v) => {
+          this.plugin.settings.pixelChrome = v;
+          this.plugin.applyChromeClasses();
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Action effects")
+      .setDesc("Brief motion on actions you take (send, attach, phase flip). Honors your system 'reduce motion' setting. No ambient animation.")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.actionEffects).onChange(async (v) => {
+          this.plugin.settings.actionEffects = v;
+          this.plugin.applyChromeClasses();
           await this.plugin.saveSettings();
         }),
       );

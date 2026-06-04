@@ -87,6 +87,20 @@ public sealed class FrontmatterBuilderTests
         dto.Source.ShouldBe("plugin");
     }
 
+    [Fact]
+    public void Synthesis_frontmatter_emits_cssclasses_for_reading_skin_scope()
+    {
+        var note = NewNote();
+
+        var yaml = FrontmatterBuilder.BuildSynthesis(note, Instant.FromUtc(2026, 5, 19, 10, 0));
+
+        yaml.ShouldContain("thany_note_id:");
+        yaml.ShouldContain("thany_locked: true");
+        yaml.ShouldContain("cssclasses:");
+        yaml.ShouldNotContain("css_classes:");
+        yaml.ShouldContain("- thany");
+    }
+
     private static Note NewNote() => new()
     {
         Id           = Guid.Parse("9b3c4f00-0000-0000-0000-000000000001"),

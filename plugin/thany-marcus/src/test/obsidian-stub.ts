@@ -1,6 +1,8 @@
 export const requestUrl = async () => {
   throw new Error("requestUrl not stubbed in tests");
 };
+export const setIcon = (_el: unknown, _id: string) => {};
+export const addIcon = (_id: string, _svg: string) => {};
 export class Notice {
   constructor(_msg?: string) {}
 }

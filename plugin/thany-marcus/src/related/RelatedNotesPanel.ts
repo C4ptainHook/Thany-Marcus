@@ -26,6 +26,7 @@ export class RelatedNotesPanel {
   private debounceTimer: Timer = null;
   private lastFetchedBody: string | null = null;
   private items: RelatedNotesItem[] = [];
+  private expandedKey: string | null = null;
 
   constructor(
     private readonly api: RelatedNotesFetcher,
@@ -97,12 +98,22 @@ export class RelatedNotesPanel {
     }
   }
 
-  private renderEmpty(): void {
+  private renderHeader(count: number | null): void {
     this.container.innerHTML = "";
     const header = document.createElement("div");
     header.className = "tm-related__header";
     header.textContent = "Related thoughts";
+    if (count != null && count > 0) {
+      const badge = document.createElement("span");
+      badge.className = "tm-related__count";
+      badge.textContent = `${count}`;
+      header.appendChild(badge);
+    }
     this.container.appendChild(header);
+  }
+
+  private renderEmpty(): void {
+    this.renderHeader(null);
     const empty = document.createElement("div");
     empty.className = "tm-related__empty";
     empty.textContent = "Related thoughts will appear here as you write.";
@@ -110,11 +121,7 @@ export class RelatedNotesPanel {
   }
 
   private renderError(msg: string): void {
-    this.container.innerHTML = "";
-    const header = document.createElement("div");
-    header.className = "tm-related__header";
-    header.textContent = "Related thoughts";
-    this.container.appendChild(header);
+    this.renderHeader(null);
     const err = document.createElement("div");
     err.className = "tm-related__error";
     err.textContent = `unavailable — ${msg}`;
@@ -122,11 +129,7 @@ export class RelatedNotesPanel {
   }
 
   private renderItems(): void {
-    this.container.innerHTML = "";
-    const header = document.createElement("div");
-    header.className = "tm-related__header";
-    header.textContent = "Related thoughts";
-    this.container.appendChild(header);
+    this.renderHeader(this.items.length);
     if (this.items.length === 0) {
       const empty = document.createElement("div");
       empty.className = "tm-related__empty";
@@ -134,21 +137,38 @@ export class RelatedNotesPanel {
       this.container.appendChild(empty);
       return;
     }
+
+    const pills = document.createElement("div");
+    pills.className = "tm-related__pills";
     for (const item of this.items) {
-      const row = document.createElement("div");
-      row.className = "tm-related__row";
-      row.onclick = () => this.onItemClick(item);
-      const title = document.createElement("div");
-      title.className = "tm-related__title";
-      title.textContent = item.title || item.relativePath;
-      row.appendChild(title);
-      if (item.snippet) {
+      const key = item.relativePath;
+      const pill = document.createElement("button");
+      pill.className = "tm-related__pill" + (this.expandedKey === key ? " is-expanded" : "");
+      pill.textContent = item.title || item.relativePath;
+      pill.onclick = () => {
+        this.expandedKey = this.expandedKey === key ? null : key;
+        this.renderItems();
+      };
+      pills.appendChild(pill);
+    }
+    this.container.appendChild(pills);
+
+    const expanded = this.items.find((i) => i.relativePath === this.expandedKey);
+    if (expanded) {
+      const detail = document.createElement("div");
+      detail.className = "tm-related__detail";
+      if (expanded.snippet) {
         const snippet = document.createElement("div");
         snippet.className = "tm-related__snippet";
-        snippet.textContent = item.snippet;
-        row.appendChild(snippet);
+        snippet.textContent = expanded.snippet;
+        detail.appendChild(snippet);
       }
-      this.container.appendChild(row);
+      const open = document.createElement("button");
+      open.className = "tm-related__open";
+      open.textContent = "Open note";
+      open.onclick = () => this.onItemClick(expanded);
+      detail.appendChild(open);
+      this.container.appendChild(detail);
     }
   }
 }

@@ -48,6 +48,7 @@ public static class FrontmatterBuilder
             ThanyNoteId    = note.Id.ToString(),
             ThanyUpdatedAt = updatedAt.ToString("uuuu-MM-ddTHH:mm:ss'Z'", CultureInfo.InvariantCulture),
             ThanyLocked    = true,
+            CssClasses     = new List<string> { "thany" },
         };
 
         var serializer = new SerializerBuilder()
@@ -73,6 +74,9 @@ public static class FrontmatterBuilder
         public string ThanyNoteId { get; set; } = null!;
         public string ThanyUpdatedAt { get; set; } = null!;
         public bool ThanyLocked { get; set; }
+
+        [YamlMember(Alias = "cssclasses")]
+        public List<string> CssClasses { get; set; } = new();
     }
 }
 
