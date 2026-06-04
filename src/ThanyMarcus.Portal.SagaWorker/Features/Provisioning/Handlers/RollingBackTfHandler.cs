@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
@@ -54,6 +53,16 @@ public sealed partial class RollingBackTfHandler(
             if (!await unlockCache.TryGetAsync(cloud.UserId, dek, ct))
             {
                 LogStepUpMissing(log, job.Id);
+                if (KnownProviders.RequiresCredentials(cloud.Provider))
+                {
+                    EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                    {
+                        ["event"] = "step_up_unlock_missing",
+                    });
+                    job.LastError = "step-up unlock missing; cannot decrypt provider credentials for destroy";
+                    await HandleDestroyFailureAsync(job, cloud, ct);
+                    return;
+                }
             }
             else if (cloud.Provider != DigitalOceanTfEnv.DigitalOceanProvider && cloud.Provider != "stub")
             {
@@ -142,6 +151,17 @@ public sealed partial class RollingBackTfHandler(
                 await SagaTransitions.TransitionToTerminalAsync(
                     db, clock, job, cloud, terminal, ct);
             }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogRollbackThrew(log, ex, cloud.Id);
+            EventsLogAppender.Append(job, clock, Phase, new JsonObject
+            {
+                ["event"] = "rollback_threw",
+                ["error"] = ex.Message,
+            });
+            job.LastError = $"rollback threw: {ex.Message}";
+            await HandleDestroyFailureAsync(job, cloud, ct);
         }
         finally
         {
@@ -300,7 +320,7 @@ public sealed partial class RollingBackTfHandler(
     }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,
-        Message = "RollingBackTfHandler: step-up unlock missing for job {JobId}; destroy will proceed without provider creds (may fail for real providers)")]
+        Message = "RollingBackTfHandler: step-up unlock missing for job {JobId}; real-provider destroy cannot decrypt creds and will retry until unlock or abandon")]
     private static partial void LogStepUpMissing(ILogger logger, Guid jobId);
 
     [LoggerMessage(EventId = 2, Level = LogLevel.Warning,
@@ -314,4 +334,8 @@ public sealed partial class RollingBackTfHandler(
     [LoggerMessage(EventId = 4, Level = LogLevel.Warning,
         Message = "RollingBackTfHandler: DELETE /v2/spaces/keys failed for cloud {CloudId}; continuing")]
     private static partial void LogDoSpacesKeyDeleteFailed(ILogger logger, Exception ex, Guid cloudId);
+
+    [LoggerMessage(EventId = 5, Level = LogLevel.Error,
+        Message = "RollingBackTfHandler: rollback threw for cloud {CloudId}; routing to capped retry")]
+    private static partial void LogRollbackThrew(ILogger logger, Exception ex, Guid cloudId);
 }
