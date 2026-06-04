@@ -79,7 +79,7 @@ public sealed partial class DnsCreatingHandler(
             return;
 
         await SagaTransitions.TransitionAsync(
-            db, clock, job, SagaStatus.AwaitingCloudCallback, SagaTimeouts.AwaitingCloudCallback, ct: ct);
+            db, clock, job, SagaStatus.AwaitingCloudCallback, Duration.Zero, ct: ct);
     }
 
     private static IPAddress? ReadIpFromOutputs(ProvisioningJob job)

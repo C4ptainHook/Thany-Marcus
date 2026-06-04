@@ -7,8 +7,10 @@
 }
 
 :root {
-  --tm-accent: #4285f4;
-  --tm-accent-rgb: 66, 133, 244;
+  --tm-blue: #4285f4;
+  --tm-accent: #6f7ff0;
+  --tm-accent: color-mix(in srgb, var(--interactive-accent) 50%, var(--tm-blue));
+  --tm-accent-rgb: 111, 127, 240;
   --tm-font-pixel: "VT323", "Press Start 2P", ui-monospace, "SF Mono", monospace;
 }
 
@@ -539,6 +541,16 @@ body.tm-pixel-chrome .tm-hub__title {
   font-weight: 400;
   letter-spacing: 1px;
   color: var(--tm-accent);
+}
+
+body.tm-pixel-chrome .tm-brow__mark,
+body.tm-pixel-chrome .tm-hub__title,
+body.tm-pixel-chrome .tm-status__wordmark {
+  background-image: linear-gradient(90deg, var(--interactive-accent), var(--tm-blue));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .tm-hub__new {
