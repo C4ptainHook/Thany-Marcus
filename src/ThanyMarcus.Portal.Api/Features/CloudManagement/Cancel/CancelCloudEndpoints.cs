@@ -6,6 +6,7 @@ using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Portal.Api.Features.CloudManagement.Cancel;
@@ -36,6 +37,7 @@ public static class CancelCloudEndpoints
             CancelCloudRequest body,
             ClaimsPrincipal user,
             PortalDbContext db,
+            ISagaCredentialSource credentials,
             IClock clock,
             CancellationToken ct) =>
         {
@@ -90,6 +92,8 @@ public static class CancelCloudEndpoints
             db.ProvisioningJobs.Add(job);
 
             cloud.CancelRequestedAt = now;
+
+            await credentials.CaptureForSagaAsync(cloud, ct);
 
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);

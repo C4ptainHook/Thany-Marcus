@@ -7,6 +7,7 @@ using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Features.Provisioning.Pricing;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Portal.Api.Features.Admin;
@@ -19,6 +20,7 @@ public static class PricingBackfillEndpoint
             ClaimsPrincipal principal,
             PortalDbContext db,
             IInfraOpUnlockCache unlockCache,
+            IProvisioningProviderRegistry providers,
             IDigitalOceanOAuthConnections connections,
             IDoSizesCatalog catalog,
             IClock clock,
@@ -29,9 +31,14 @@ public static class PricingBackfillEndpoint
 
             var defaultSize = config.GetValue("Provisioning:DefaultSize", "s-1vcpu-1gb")!;
 
+            var pricingProviders = providers.All
+                .Where(p => p.SupportsPricing)
+                .Select(p => p.Key)
+                .ToList();
+
             var clouds = await db.Clouds
                 .Where(c => c.UserId == userId
-                         && c.Provider == "digitalocean"
+                         && pricingProviders.Contains(c.Provider)
                          && c.ProvisioningStatus == SagaStatus.Succeeded
                          && c.PriceMonthlyUsd == null)
                 .ToListAsync(ct);

@@ -39,6 +39,8 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Status;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Features.Provisioning.Pricing;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 
@@ -120,6 +122,9 @@ builder.Services.AddSingleton(new PassphraseValidator(CommonPasswords.Load()));
 builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
 builder.Services.AddHostedService<InfraOpUnlockSweepService>();
 
+builder.Services.AddScoped<ISagaCredentialGrantStore, PostgresSagaCredentialGrantStore>();
+builder.Services.AddScoped<ISagaCredentialSource, SagaCredentialSource>();
+
 builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
 builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
 
@@ -135,6 +140,10 @@ builder.Services.AddHttpClient<IDigitalOceanOAuthClient, DigitalOceanOAuthClient
     .HandleTransientHttpError()
     .WaitAndRetryAsync(3, n => TimeSpan.FromMilliseconds(200 * Math.Pow(5, n - 1))));
 builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
+
+builder.Services.AddScoped<IProvisioningProvider, StubProvisioningProvider>();
+builder.Services.AddScoped<IProvisioningProvider, DigitalOceanProvisioningProvider>();
+builder.Services.AddScoped<IProvisioningProviderRegistry, ProvisioningProviderRegistry>();
 
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient(DoSizesCatalog.HttpClientName, c =>

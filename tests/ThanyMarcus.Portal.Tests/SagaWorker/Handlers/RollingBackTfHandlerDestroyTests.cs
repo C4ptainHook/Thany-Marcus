@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using NodaTime;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
@@ -326,6 +327,79 @@ public sealed class RollingBackTfHandlerDestroyTests(PostgresFixture postgres) :
         tf.DeleteWorkspaceCalls.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task Destroy_runs_on_saga_grant_when_interactive_unlock_expired()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (_, cloud, job) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.RollingBackTf,
+            provider: "digitalocean",
+            kind: SagaKinds.Destroy,
+            seedUnlock: false,
+            ct: ct);
+
+        await TestSagaCredentials.GrantStore(Db, dp, Clock)
+            .PutAsync(cloud.Id, SagaTestSeed.MakeDek(), Clock.GetCurrentInstant() + Duration.FromHours(6), ct);
+        Db.ChangeTracker.Clear();
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", job.Id.ToString()));
+
+        var tf = new FakeTerraformRunner();
+        tf.QueueInitOk();
+        tf.QueueDestroyOk();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(job, ct);
+        Db.ChangeTracker.Clear();
+
+        tf.Calls.ShouldContain(c => c.Command == "destroy");
+
+        var reloadedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
+        reloadedJob.Status.ShouldBe(SagaStatus.RolledBack);
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.DestroyedAt.ShouldNotBeNull();
+
+        (await Db.SagaCredentialGrants.AnyAsync(g => g.CloudId == cloud.Id, ct)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Destroy_with_no_unlock_and_no_grant_bails_without_terraform()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dp = new EphemeralDataProtectionProvider();
+        var (_, cloud, job) = await SagaTestSeed.SeedAsync(
+            Db, Clock, dp,
+            status: SagaStatus.RollingBackTf,
+            provider: "digitalocean",
+            kind: SagaKinds.Destroy,
+            seedUnlock: false,
+            ct: ct);
+        Db.ChangeTracker.Clear();
+
+        using var workspaceBase = new TfPlanningHandlerTests.TempDir();
+        Directory.CreateDirectory(Path.Combine(workspaceBase.Path, "jobs", job.Id.ToString()));
+
+        var tf = new FakeTerraformRunner();
+        tf.QueueInitOk();
+        var handler = BuildHandler(dp, tf, workspaceBase.Path);
+
+        await handler.HandleAsync(job, ct);
+        Db.ChangeTracker.Clear();
+
+        tf.Calls.ShouldNotContain(c => c.Command == "destroy");
+
+        var reloadedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
+        reloadedJob.Status.ShouldBe(SagaStatus.RollingBackTf);
+        reloadedJob.EventsLog.RootElement.GetRawText().ShouldContain("step_up_unlock_missing");
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        reloadedCloud.DestroyedAt.ShouldBeNull();
+    }
+
     private RollingBackTfHandler BuildHandler(IDataProtectionProvider dp, FakeTerraformRunner tf, string workspaceBase)
     {
         var config = new ConfigurationBuilder()
@@ -337,15 +411,12 @@ public sealed class RollingBackTfHandlerDestroyTests(PostgresFixture postgres) :
                 ["ConnectionStrings:Portal"] = Postgres.ConnectionString,
             }).Build();
 
-        var unlockCache = new PostgresInfraOpUnlockCache(Db, dp, Clock);
-        var providerVault = new ProviderTokenVault(Db, Clock);
-        var secrets = new CloudSecretBundle(Db, Clock);
-        var connections = new DigitalOceanOAuthConnections(Db, Clock);
-        var doClient = FakeDoClient;
+        var credentials = TestSagaCredentials.Source(Db, dp, Clock);
+        var providers = TestProvisioningProviders.Registry(Db, Clock, FakeDoClient);
         var layout = new WorkspaceLayout(config, NullLogger<WorkspaceLayout>.Instance);
 
         return new RollingBackTfHandler(
-            Db, Clock, unlockCache, providerVault, secrets, connections, doClient, tf,
+            Db, Clock, credentials, providers, tf,
             layout, config, NullLogger<RollingBackTfHandler>.Instance);
     }
 }

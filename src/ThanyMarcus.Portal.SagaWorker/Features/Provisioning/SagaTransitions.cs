@@ -66,7 +66,7 @@ public static class SagaTransitions
         return true;
     }
 
-    public static Task TransitionToTerminalAsync(
+    public static async Task TransitionToTerminalAsync(
         PortalDbContext db,
         IClock clock,
         ProvisioningJob job,
@@ -79,11 +79,15 @@ public static class SagaTransitions
             throw new ArgumentException(
                 $"'{terminalStatus}' is not a terminal saga status", nameof(terminalStatus));
         }
-        return TransitionAsync(
+        await TransitionAsync(
             db, clock, job, terminalStatus, Duration.Zero,
             cloud: cloud,
             cloudMutation: c => c.ProvisioningStatus = terminalStatus,
             ct: ct);
+
+        await db.SagaCredentialGrants
+            .Where(g => g.CloudId == cloud.Id)
+            .ExecuteDeleteAsync(ct);
     }
 
     public static async Task TransitionAsync(

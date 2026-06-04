@@ -388,8 +388,12 @@ runcmd:
       return 1
     }
     fetch_docker_gpg() {
-      (set -o pipefail; curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg)
+      tmp=$(mktemp) || return 1
+      if curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o "$tmp" \
+         && gpg --dearmor -o /etc/apt/keyrings/docker.gpg < "$tmp"; then
+        rm -f "$tmp"; return 0
+      fi
+      rm -f "$tmp"; return 1
     }
     retry "docker gpg fetch" fetch_docker_gpg || exit 1
     chmod a+r /etc/apt/keyrings/docker.gpg

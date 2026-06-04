@@ -184,14 +184,13 @@ public sealed class TfApplyingHandlerTests(PostgresFixture postgres) : DbIntegra
                 ["ConnectionStrings:Portal"] = Postgres.ConnectionString,
             }).Build();
 
-        var unlockCache = new PostgresInfraOpUnlockCache(Db, dp, Clock);
-        var providerVault = new ProviderTokenVault(Db, Clock);
-        var secrets = new CloudSecretBundle(Db, Clock);
+        var credentials = TestSagaCredentials.Source(Db, dp, Clock);
+        var providers = TestProvisioningProviders.Registry(Db, Clock);
         var connections = new DigitalOceanOAuthConnections(Db, Clock);
         var workspaceLayout = new WorkspaceLayout(config, NullLogger<WorkspaceLayout>.Instance);
 
         return new TfApplyingHandler(
-            Db, Clock, unlockCache, providerVault, secrets, connections, tf,
+            Db, Clock, credentials, providers, connections, tf,
             workspaceLayout, doSizesCatalog ?? new NoopDoSizesCatalog(), config, NullLogger<TfApplyingHandler>.Instance);
     }
 

@@ -339,14 +339,12 @@ public sealed class CancelHandlerTests(PostgresFixture postgres) : DbIntegration
                 ["ConnectionStrings:Portal"] = Postgres.ConnectionString,
             }).Build();
 
-        var unlockCache = new PostgresInfraOpUnlockCache(Db, dp, Clock);
-        var providerVault = new ProviderTokenVault(Db, Clock);
-        var secrets = new CloudSecretBundle(Db, Clock);
-        var connections = new DigitalOceanOAuthConnections(Db, Clock);
+        var credentials = TestSagaCredentials.Source(Db, dp, Clock);
+        var providers = TestProvisioningProviders.Registry(Db, Clock);
         var layout = new WorkspaceLayout(config, NullLogger<WorkspaceLayout>.Instance);
 
         return new CancelHandler(
-            Db, Clock, unlockCache, providerVault, secrets, connections, tf,
+            Db, Clock, credentials, providers, tf,
             layout, config, NullLogger<CancelHandler>.Instance);
     }
 }

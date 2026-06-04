@@ -1,16 +1,12 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using NodaTime;
-using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
-using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
-using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
-using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 
@@ -19,11 +15,8 @@ namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 public sealed partial class RollingBackTfHandler(
     PortalDbContext db,
     IClock clock,
-    IInfraOpUnlockCache unlockCache,
-    IProviderTokenVault providerVault,
-    ICloudSecretBundle secrets,
-    IDigitalOceanOAuthConnections connections,
-    IDigitalOceanOAuthClient doClient,
+    ISagaCredentialSource credentials,
+    IProvisioningProviderRegistry providers,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
     IConfiguration config,
@@ -40,6 +33,7 @@ public sealed partial class RollingBackTfHandler(
         var jobId = job.Id;
         job = await db.ProvisioningJobs.SingleAsync(j => j.Id == jobId, ct);
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
+        var provider = providers.Resolve(cloud.Provider);
 
         var workdir = workspaceLayout.GetJobDir(job.Id);
         if (!Directory.Exists(workdir))
@@ -48,16 +42,21 @@ public sealed partial class RollingBackTfHandler(
         }
 
         var dek = new byte[32];
-        byte[]? providerToken = null;
         try
         {
-            if (!await unlockCache.TryGetAsync(cloud.UserId, dek, ct))
+            if (!await credentials.TryGetDekAsync(cloud, dek, ct))
             {
                 LogStepUpMissing(log, job.Id);
-            }
-            else if (cloud.Provider != DigitalOceanTfEnv.DigitalOceanProvider && cloud.Provider != "stub")
-            {
-                providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
+                if (provider.RequiresCredentials)
+                {
+                    EventsLogAppender.Append(job, clock, Phase, new JsonObject
+                    {
+                        ["event"] = "step_up_unlock_missing",
+                    });
+                    job.LastError = "step-up unlock missing; cannot decrypt provider credentials for destroy";
+                    await HandleDestroyFailureAsync(job, cloud, ct);
+                    return;
+                }
             }
 
             var connStr = config.GetConnectionString("Portal")
@@ -82,7 +81,7 @@ public sealed partial class RollingBackTfHandler(
 
             if (wsResult.Success)
             {
-                var destroyEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
+                var destroyEnv = await BuildEnvAsync(provider, cloud, dek, ct);
                 var destroyResult = await tf.DestroyAsync(workdir, destroyEnv, ct);
                 EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", destroyResult.Stdout);
                 EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", destroyResult.Stderr);
@@ -120,7 +119,7 @@ public sealed partial class RollingBackTfHandler(
 
             if (job.Kind == SagaKinds.Destroy)
             {
-                await CompleteUserDestroyAsync(job, dek, ct);
+                await CompleteUserDestroyAsync(provider, job, dek, ct);
             }
             else
             {
@@ -143,10 +142,20 @@ public sealed partial class RollingBackTfHandler(
                     db, clock, job, cloud, terminal, ct);
             }
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogRollbackThrew(log, ex, cloud.Id);
+            EventsLogAppender.Append(job, clock, Phase, new JsonObject
+            {
+                ["event"] = "rollback_threw",
+                ["error"] = ex.Message,
+            });
+            job.LastError = $"rollback threw: {ex.Message}";
+            await HandleDestroyFailureAsync(job, cloud, ct);
+        }
         finally
         {
             CryptographicOperations.ZeroMemory(dek);
-            if (providerToken is not null) CryptographicOperations.ZeroMemory(providerToken);
         }
     }
 
@@ -177,15 +186,13 @@ public sealed partial class RollingBackTfHandler(
         await SagaTransitions.RescheduleAsync(db, clock, job, RetryDelay, ct);
     }
 
-    private async Task CompleteUserDestroyAsync(ProvisioningJob job, byte[] dek, CancellationToken ct)
+    private async Task CompleteUserDestroyAsync(
+        IProvisioningProvider provider, ProvisioningJob job, byte[] dek, CancellationToken ct)
     {
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
         var now = clock.GetCurrentInstant();
 
-        if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
-        {
-            await BestEffortRevokeDoCredentialsAsync(cloud.UserId, cloud.Id, dek, ct);
-        }
+        await provider.RevokeCredentialsAsync(cloud, dek, ct);
 
         cloud.DestroyedAt        = now;
         cloud.VmIp               = null;
@@ -250,36 +257,8 @@ public sealed partial class RollingBackTfHandler(
         _ => SagaStatus.FailedTf,
     };
 
-    private async Task BestEffortRevokeDoCredentialsAsync(Guid userId, Guid cloudId, byte[] dek, CancellationToken ct)
-    {
-        string? accessToken = null;
-        string? spacesId    = null;
-        try
-        {
-            accessToken = await connections.GetAccessTokenAsync(userId, dek, ct);
-            spacesId    = await secrets.TryGetAsync(cloudId, CloudSecretKind.DoSpacesAccessId, dek, ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogDoRevokeReadFailed(log, ex, cloudId);
-            return;
-        }
-
-        if (accessToken is not null && spacesId is not null)
-        {
-            try { await doClient.DeleteSpacesKeyAsync(accessToken, spacesId, ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                LogDoSpacesKeyDeleteFailed(log, ex, cloudId);
-            }
-        }
-        // NOTE: user-level OAuth token is intentionally NOT revoked here.
-        // Other clouds for the same user still need it; revoke happens only on explicit disconnect.
-        await secrets.DeleteAllForCloudAsync(cloudId, ct);
-    }
-
-    private async Task<Dictionary<string, string>> BuildEnvAsync(
-        Cloud cloud, byte[]? providerToken, byte[] dek, CancellationToken ct)
+    private static async Task<Dictionary<string, string>> BuildEnvAsync(
+        IProvisioningProvider provider, Cloud cloud, byte[] dek, CancellationToken ct)
     {
         var env = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -288,30 +267,19 @@ public sealed partial class RollingBackTfHandler(
             ["TF_VAR_hostname"] = cloud.Hostname,
             ["TF_VAR_enrollment_token"] = string.Empty,
         };
-        if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
-        {
-            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.UserId, cloud.Id, dek, connections, secrets, ct);
-        }
-        else if (providerToken is not null)
-        {
-            env["TF_VAR_provider_token"] = Encoding.UTF8.GetString(providerToken);
-        }
+        await provider.AddProvisioningEnvAsync(env, cloud, dek, ct);
         return env;
     }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning,
-        Message = "RollingBackTfHandler: step-up unlock missing for job {JobId}; destroy will proceed without provider creds (may fail for real providers)")]
+        Message = "RollingBackTfHandler: step-up unlock missing for job {JobId}; real-provider destroy cannot decrypt creds and will retry until unlock or abandon")]
     private static partial void LogStepUpMissing(ILogger logger, Guid jobId);
 
     [LoggerMessage(EventId = 2, Level = LogLevel.Warning,
         Message = "RollingBackTfHandler: terraform workspace delete failed for cloud {CloudId}; saga proceeds (housekeeping only)")]
     private static partial void LogWorkspaceDeleteFailed(ILogger logger, Exception ex, Guid cloudId);
 
-    [LoggerMessage(EventId = 3, Level = LogLevel.Warning,
-        Message = "RollingBackTfHandler: failed to read DO secrets for revoke (cloud {CloudId}); skipping best-effort revoke")]
-    private static partial void LogDoRevokeReadFailed(ILogger logger, Exception ex, Guid cloudId);
-
-    [LoggerMessage(EventId = 4, Level = LogLevel.Warning,
-        Message = "RollingBackTfHandler: DELETE /v2/spaces/keys failed for cloud {CloudId}; continuing")]
-    private static partial void LogDoSpacesKeyDeleteFailed(ILogger logger, Exception ex, Guid cloudId);
+    [LoggerMessage(EventId = 5, Level = LogLevel.Error,
+        Message = "RollingBackTfHandler: rollback threw for cloud {CloudId}; routing to capped retry")]
+    private static partial void LogRollbackThrew(ILogger logger, Exception ex, Guid cloudId);
 }
