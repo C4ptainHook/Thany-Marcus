@@ -8,13 +8,16 @@ public sealed class SynthesisLlmRouter : ISynthesisLlmRouter
 
     private readonly OllamaSynthesisLlmClient ollama;
     private readonly GoogleGeminiClient google;
+    private readonly IConfiguration config;
 
     public SynthesisLlmRouter(
         OllamaSynthesisLlmClient ollama,
-        GoogleGeminiClient google)
+        GoogleGeminiClient google,
+        IConfiguration config)
     {
         this.ollama = ollama;
         this.google = google;
+        this.config = config;
     }
 
     public ISynthesisLlmClient Resolve(string privacyMode, string? publicModel)
@@ -29,5 +32,7 @@ public sealed class SynthesisLlmRouter : ISynthesisLlmRouter
     }
 
     public string ResolveModelTag(string privacyMode, string? publicModel) =>
-        privacyMode == PrivacyModes.Private ? LocalModelTag : publicModel ?? throw new InvalidOperationException("publicModel required");
+        privacyMode == PrivacyModes.Private
+            ? config["IngestSaga:Models:Synthesis:OllamaTag"] ?? LocalModelTag
+            : publicModel ?? throw new InvalidOperationException("publicModel required");
 }

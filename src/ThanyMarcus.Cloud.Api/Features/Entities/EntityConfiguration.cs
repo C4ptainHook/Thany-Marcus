@@ -25,6 +25,7 @@ public sealed class EntityConfiguration : IEntityTypeConfiguration<Entity>
         builder.Property(e => e.Description);
         builder.Property(e => e.Embedding).HasColumnType("vector(256)");
         builder.Property(e => e.HubNoteId);
+        builder.Property(e => e.HubSuppressed).IsRequired().HasDefaultValue(false);
         builder.Property(e => e.StubNoteId);
         builder.Property(e => e.MentionCount).IsRequired().HasDefaultValue(0);
         builder.Property(e => e.Source).IsRequired();

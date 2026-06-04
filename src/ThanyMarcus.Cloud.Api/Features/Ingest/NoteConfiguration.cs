@@ -34,7 +34,6 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note>
         builder.Property(n => n.BodyHash).HasColumnType("text");
         builder.Property(n => n.DeletedAt);
         builder.Property(n => n.IsHub).IsRequired().HasDefaultValue(false);
-        builder.Property(n => n.ProjectId);
         builder.Property(n => n.HubEntityId);
         builder.Property(n => n.TransitionVersion).IsRequired().HasDefaultValue(0L);
 
@@ -68,9 +67,6 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note>
             .HasDatabaseName("ix_notes_updated_at")
             .HasFilter("deleted_at IS NULL OR status = 'ready'");
 
-        builder.HasIndex(n => n.ProjectId)
-            .HasDatabaseName("ix_notes_project");
-
         builder.HasIndex(n => n.HubEntityId)
             .HasDatabaseName("ix_notes_hub_entity")
             .HasFilter("is_hub");
@@ -81,8 +77,6 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note>
             .HasOperators("vector_cosine_ops")
             .HasFilter("deleted_at IS NULL");
 
-        builder.HasOne<Entity>().WithMany().HasForeignKey(n => n.ProjectId)
-            .OnDelete(DeleteBehavior.SetNull);
         builder.HasOne<Entity>().WithMany().HasForeignKey(n => n.HubEntityId)
             .OnDelete(DeleteBehavior.SetNull);
     }

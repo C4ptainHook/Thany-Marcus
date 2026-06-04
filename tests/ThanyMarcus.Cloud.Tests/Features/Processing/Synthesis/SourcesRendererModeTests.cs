@@ -13,7 +13,7 @@ public sealed class SourcesRendererModeTests
     {
         var att = Binary(AttachmentMode.Reference, AttachmentKind.Voice, "song.mp3", "audio/mpeg");
 
-        var md = SourcesRenderer.Render(userBody: null, attachments: new[] { att });
+        var md = SourcesRenderer.Render(new[] { att });
 
         md.ShouldContain("> [!source]- 🎵 Reference — ![[song.mp3]]");
         md.ShouldNotContain("Voice —");
@@ -25,7 +25,7 @@ public sealed class SourcesRendererModeTests
     {
         var att = Binary(AttachmentMode.Reference, AttachmentKind.File, "clip.mp4", "video/mp4");
 
-        var md = SourcesRenderer.Render(userBody: null, attachments: new[] { att });
+        var md = SourcesRenderer.Render(new[] { att });
 
         md.ShouldContain("> [!source]- 📹 Reference — ![[clip.mp4]]");
     }
@@ -51,7 +51,7 @@ public sealed class SourcesRendererModeTests
             UpdatedAt = SystemClock.Instance.GetCurrentInstant(),
         };
 
-        var md = SourcesRenderer.Render(userBody: null, attachments: new[] { att });
+        var md = SourcesRenderer.Render(new[] { att });
 
         md.ShouldContain("> [!source]- 🔗 Reference — [https://example.com/song](https://example.com/song)");
     }
@@ -85,7 +85,7 @@ public sealed class SourcesRendererModeTests
             UpdatedAt = SystemClock.Instance.GetCurrentInstant(),
         };
 
-        var md = SourcesRenderer.Render(userBody: null, attachments: new[] { att });
+        var md = SourcesRenderer.Render(new[] { att });
 
         md.ShouldContain("> [!source]- URL — [Bookmarked](https://example.com/p)");
         md.ShouldContain("> ![](https://cdn/thumb.jpg)");

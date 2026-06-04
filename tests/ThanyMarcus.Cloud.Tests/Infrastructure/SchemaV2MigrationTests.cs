@@ -42,8 +42,8 @@ public sealed class SchemaV2MigrationTests(PostgresFixture fx) : IAsyncLifetime
         var count = await ScalarAsync<long>(
             "SELECT COUNT(*)::bigint FROM information_schema.columns " +
             "WHERE table_name = 'notes' AND column_name IN " +
-            "('embedding','deleted_at','is_hub','project_id','hub_entity_id','transition_version')");
-        count.ShouldBe(6);
+            "('embedding','deleted_at','is_hub','hub_entity_id','transition_version')");
+        count.ShouldBe(5);
     }
 
     [Fact]
@@ -52,6 +52,15 @@ public sealed class SchemaV2MigrationTests(PostgresFixture fx) : IAsyncLifetime
         var count = await ScalarAsync<long>(
             "SELECT COUNT(*)::bigint FROM information_schema.columns " +
             "WHERE table_name = 'notes' AND column_name = 'suggested_project'");
+        count.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task notes_project_id_dropped()
+    {
+        var count = await ScalarAsync<long>(
+            "SELECT COUNT(*)::bigint FROM information_schema.columns " +
+            "WHERE table_name = 'notes' AND column_name = 'project_id'");
         count.ShouldBe(0);
     }
 

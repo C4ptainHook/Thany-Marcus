@@ -17,10 +17,15 @@ namespace ThanyMarcus.Cloud.Api.Features.Processing.Phases;
 
 public sealed partial class SynthesizingHandler : IPhaseHandler
 {
-    public const string SynthesisTemplateVersion = "synthesis-v1";
+    public const string SynthesisTemplateVersion = "synthesis-v2";
     private const int DefaultSeed = 42;
     private const double DefaultTemperature = 0.3;
     private const int DefaultMaxOutputTokens = 2048;
+
+    private const string FailedEssence =
+        "# Synthesis unavailable\n\n"
+        + "The automatic essence could not be generated this time. "
+        + "Your original capture is preserved below under Origin.";
 
     [GeneratedRegex(@"^\s*#\s+(.+?)\s*$", RegexOptions.Multiline)]
     private static partial Regex H1Title();
@@ -104,10 +109,16 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
             ? SynthesisPresetBodies.AppendGuardrailsToCustom(note.SynthesisPromptBody ?? string.Empty)
             : SynthesisPresetBodies.BodyFor(preset);
 
+        var budget = EssenceBudget.For(EssenceBudget.EstimateTokens(note.BodyInput, inputs));
+        var form = FormRouter.Pick(note.BodyInput, inputs);
+        var schema = EssenceSchemas.Build(form, budget);
+
         var prompt = SynthesisPromptBuilder.Build(
             systemBody: systemBody,
             userBody: note.BodyInput,
-            attachmentInputs: inputs);
+            attachmentInputs: inputs,
+            form: form,
+            budget: budget);
 
         var apiKey = privacyMode == PrivacyModes.Public ? apiKeyStore.Take(note.Id) : null;
         var llm = router.Resolve(privacyMode, publicModel);
@@ -117,59 +128,58 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
             ApiKey: apiKey,
             Seed: seed,
             Temperature: DefaultTemperature,
-            MaxOutputTokens: DefaultMaxOutputTokens);
+            MaxOutputTokens: DefaultMaxOutputTokens,
+            ResponseSchema: schema);
 
-        string body;
+        string essence;
         string status;
         string? error = null;
         var sw = Stopwatch.StartNew();
         try
         {
             var response = await llm.CompleteAsync(request, ct);
-            body = response.Body;
+            essence = EssenceRenderer.Render(form, response.Body, budget);
             status = "ok";
         }
-        catch (SynthesisLlmException ex)
+        catch (Exception ex) when (ex is SynthesisLlmException or EssenceParseException)
         {
-            sw.Stop();
-            body = $"*Synthesis failed — see Sources below.*";
+            essence = FailedEssence;
             status = "failed";
             error = ex.Message;
-            await events.AppendAsync(job.Id, BuildEvent(
-                stage: LlmEventStages.Synthesis,
-                modelTag: modelTag,
-                privacyMode: privacyMode,
-                durationMs: sw.ElapsedMilliseconds,
-                decision: "failed",
-                error: ex.Message), ct);
         }
-        if (sw.IsRunning) sw.Stop();
+        sw.Stop();
 
-        if (status == "ok")
-        {
-            await events.AppendAsync(job.Id, BuildEvent(
-                stage: LlmEventStages.Synthesis,
-                modelTag: modelTag,
-                privacyMode: privacyMode,
-                durationMs: sw.ElapsedMilliseconds,
-                decision: "ok",
-                error: null), ct);
-        }
+        await events.AppendAsync(job.Id, BuildEvent(
+            stage: LlmEventStages.Synthesis,
+            modelTag: modelTag,
+            privacyMode: privacyMode,
+            durationMs: sw.ElapsedMilliseconds,
+            decision: status,
+            error: error), ct);
 
-        var sources = SourcesRenderer.Render(note.BodyInput, topLevel);
+        var sources = SourcesRenderer.Render(topLevel);
         var fields = new SynthesisFrontmatterFields(
             PrivacyMode: privacyMode,
             Model: modelTag,
+            Preset: preset,
             PromptVersion: promptVersion,
             Seed: seed,
             SynthesizedAt: now,
             Status: status,
             Error: error);
-        var frontmatter = FrontmatterBuilder.BuildSynthesis(note, topLevel, fields);
-        var finalBody = $"---\n{frontmatter}---\n\n{body.TrimEnd()}\n\n{sources}";
+        var processingDetails = ProcessingDetailsRenderer.Render(fields);
+        var frontmatter = FrontmatterBuilder.BuildSynthesis(note, now);
+        var finalBody = EssenceLayout.Assemble(frontmatter, essence, note.BodyInput, sources, processingDetails);
 
         note.BodyOutput = finalBody;
-        note.RelativePath = ComputeRelativePath(note.RelativePath, note.Id, body);
+        if (status == "ok")
+        {
+            note.RelativePath = ComputeRelativePath(note.RelativePath, note.Id, essence);
+        }
+        else
+        {
+            note.RelativePath ??= $"Inbox/{note.Id}.md";
+        }
         note.UpdatedAt = now;
         job.LastComposeTemplate = SynthesisTemplateVersion;
 
@@ -327,5 +337,5 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
 
     private static LlmEvent BuildEvent(
         string stage, string modelTag, string privacyMode, long durationMs, string? decision, string? error) =>
-        new(stage, "synthesis-v1", modelTag, modelTag, privacyMode, false, durationMs, 0, decision, null, null, error);
+        new(stage, SynthesisTemplateVersion, modelTag, modelTag, privacyMode, false, durationMs, 0, decision, null, null, error);
 }

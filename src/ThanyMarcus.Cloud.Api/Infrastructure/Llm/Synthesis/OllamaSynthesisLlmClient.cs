@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 
 namespace ThanyMarcus.Cloud.Api.Infrastructure.Llm.Synthesis;
@@ -22,22 +24,19 @@ public sealed class OllamaSynthesisLlmClient : ISynthesisLlmClient
         var modelTag = config["IngestSaga:Models:Synthesis:OllamaTag"] ?? LocalModelTag;
         using var http = clientFactory.CreateClient(OllamaClientNames.Text);
 
-        var payload = new
-        {
-            model = modelTag,
-            prompt = req.Prompt,
-            stream = false,
-            think = false,
-            options = new
-            {
-                temperature   = req.Temperature,
-                seed          = req.Seed,
-                num_ctx       = 8192,
-                num_predict   = req.MaxOutputTokens,
-                repeat_penalty = 1.25,
-                repeat_last_n = 256,
-            },
-        };
+        var payload = new OllamaGenerateRequest(
+            Model: modelTag,
+            Prompt: req.Prompt,
+            Stream: false,
+            Think: false,
+            Options: new OllamaOptions(
+                Temperature: req.Temperature,
+                Seed: req.Seed,
+                NumCtx: 8192,
+                NumPredict: req.MaxOutputTokens,
+                RepeatPenalty: 1.25,
+                RepeatLastN: 256),
+            Format: req.ResponseSchema);
 
         using var resp = await http.PostAsJsonAsync("/api/generate", payload, ct);
         if (!resp.IsSuccessStatusCode)
@@ -58,4 +57,21 @@ public sealed class OllamaSynthesisLlmClient : ISynthesisLlmClient
             PromptTokens: 0,
             CompletionTokens: 0);
     }
+
+    private sealed record OllamaGenerateRequest(
+        [property: JsonPropertyName("model")]   string Model,
+        [property: JsonPropertyName("prompt")]  string Prompt,
+        [property: JsonPropertyName("stream")]  bool Stream,
+        [property: JsonPropertyName("think")]   bool Think,
+        [property: JsonPropertyName("options")] OllamaOptions Options,
+        [property: JsonPropertyName("format"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        JsonNode? Format);
+
+    private sealed record OllamaOptions(
+        [property: JsonPropertyName("temperature")]    double Temperature,
+        [property: JsonPropertyName("seed")]           int Seed,
+        [property: JsonPropertyName("num_ctx")]        int NumCtx,
+        [property: JsonPropertyName("num_predict")]    int NumPredict,
+        [property: JsonPropertyName("repeat_penalty")] double RepeatPenalty,
+        [property: JsonPropertyName("repeat_last_n")]  int RepeatLastN);
 }

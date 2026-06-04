@@ -144,6 +144,19 @@ export class QueueStore {
     if (this.entries.delete(noteId)) this.emit();
   }
 
+  /** Snapshot for the disposable last-known-status cache (rebuildable from the cloud on loss). */
+  toSnapshot(): QueueEntry[] {
+    return Array.from(this.entries.values());
+  }
+
+  /** Restore last-known statuses on reopen. Silent — fires no terminal transitions. */
+  loadSnapshot(entries: QueueEntry[] | undefined | null): void {
+    if (!entries) return;
+    for (const e of entries) {
+      if (e && typeof e.noteId === "string") this.entries.set(e.noteId, { ...e });
+    }
+  }
+
   pruneCompleted(maxAgeMs: number): void {
     const cutoff = Date.now() - maxAgeMs;
     let changed = false;

@@ -14,17 +14,17 @@ export interface EntitySuggestionActions {
 export interface EntitySuggestionsPanelOptions {
   pollMs?: number;
   onAccepted?: (entityId: string) => void;
+  onChange?: () => void;
   notify?: (message: string) => void;
 }
 
 export class EntitySuggestionsPanel {
-  private readonly pollMs: number;
   private readonly onAccepted: (entityId: string) => void;
+  private readonly onChange: () => void;
   private readonly notify: (message: string) => void;
 
   private suggestions: EntitySuggestion[] = [];
   private editingId: string | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private abortCtl: AbortController | null = null;
   private readonly onFocus = () => void this.refresh();
 
@@ -33,15 +33,18 @@ export class EntitySuggestionsPanel {
     private readonly container: HTMLElement,
     opts: EntitySuggestionsPanelOptions = {},
   ) {
-    this.pollMs = opts.pollMs ?? 60_000;
     this.onAccepted = opts.onAccepted ?? (() => undefined);
+    this.onChange = opts.onChange ?? (() => undefined);
     this.notify = opts.notify ?? ((m) => console.info("[Thany]", m));
     this.render();
   }
 
+  getCount(): number {
+    return this.suggestions.length;
+  }
+
   start(): void {
     void this.refresh();
-    this.pollTimer = setInterval(() => void this.refresh(), this.pollMs);
     if (typeof window !== "undefined") {
       window.addEventListener("focus", this.onFocus);
     }
@@ -56,6 +59,7 @@ export class EntitySuggestionsPanel {
       if (ctl.signal.aborted) return;
       this.suggestions = items;
       this.render();
+      this.onChange();
     } catch (e) {
       if ((e as { name?: string }).name === "AbortError") return;
       // Polling errors are non-fatal — keep the last good render.
@@ -66,10 +70,6 @@ export class EntitySuggestionsPanel {
   }
 
   dispose(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
     this.abortCtl?.abort();
     this.abortCtl = null;
     if (typeof window !== "undefined") {
@@ -212,6 +212,7 @@ export class EntitySuggestionsPanel {
     this.suggestions = this.suggestions.filter((x) => x.id !== id);
     if (this.editingId === id) this.editingId = null;
     this.render();
+    this.onChange();
   }
 }
 

@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace ThanyMarcus.Cloud.Api.Infrastructure.Llm.Synthesis;
@@ -26,6 +27,7 @@ public sealed class GoogleGeminiClient : ISynthesisLlmClient
         using var http = clientFactory.CreateClient(HttpClientName);
         var url = $"/v1beta/models/{req.Model}:generateContent?key={Uri.EscapeDataString(req.ApiKey)}";
 
+        var constrained = req.ResponseSchema is not null;
         var payload = new GeminiGenerateRequest(
             Contents: new[]
             {
@@ -34,7 +36,9 @@ public sealed class GoogleGeminiClient : ISynthesisLlmClient
             GenerationConfig: new GeminiGenerationConfig(
                 Temperature: req.Temperature,
                 MaxOutputTokens: req.MaxOutputTokens,
-                Seed: req.Seed));
+                Seed: req.Seed,
+                ResponseMimeType: constrained ? "application/json" : null,
+                ResponseSchema: constrained ? GeminiSchemaProjector.Project(req.ResponseSchema!) : null));
 
         using var resp = await http.PostAsJsonAsync(url, payload, ct);
         if (!resp.IsSuccessStatusCode)
@@ -76,7 +80,11 @@ public sealed class GoogleGeminiClient : ISynthesisLlmClient
     private sealed record GeminiGenerationConfig(
         [property: JsonPropertyName("temperature")]      double Temperature,
         [property: JsonPropertyName("maxOutputTokens")]  int MaxOutputTokens,
-        [property: JsonPropertyName("seed")]             int Seed);
+        [property: JsonPropertyName("seed")]             int Seed,
+        [property: JsonPropertyName("responseMimeType"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? ResponseMimeType = null,
+        [property: JsonPropertyName("responseSchema"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        JsonNode? ResponseSchema = null);
 
     private sealed record GeminiGenerateResponse(
         [property: JsonPropertyName("candidates")]    IReadOnlyList<GeminiCandidate>? Candidates,

@@ -3,6 +3,7 @@ import type { SyncPullItem } from "../api";
 import { mapWithConcurrency } from "../concurrency";
 import { AttachmentDownloader } from "./AttachmentDownloader";
 import { AttachmentIndex } from "./AttachmentIndex";
+import type { VaultEventGuard } from "./VaultEventGuard";
 import {
   ensureFolder,
   joinPath,
@@ -24,6 +25,7 @@ export class Writer {
     private readonly vault: Vault,
     private readonly vaultRoot: () => string,
     private readonly index: AttachmentIndex,
+    private readonly guard: VaultEventGuard | null = null,
   ) {
     this.downloader = new AttachmentDownloader(vault);
   }
@@ -87,8 +89,10 @@ export class Writer {
   private async writeFile(path: string, contents: string): Promise<void> {
     const existing = this.vault.getAbstractFileByPath(path);
     if (existing && "stat" in existing) {
+      this.guard?.suppress("modify", path);
       await this.vault.modify(existing as TFile, contents);
     } else {
+      this.guard?.suppress("create", path);
       await this.vault.create(path, contents);
     }
   }
@@ -97,6 +101,7 @@ export class Writer {
     const f = this.vault.getAbstractFileByPath(vaultPath);
     if (f) {
       try {
+        this.guard?.suppress("delete", vaultPath);
         await this.vault.delete(f);
       } catch (e) {
         console.warn("Thany: failed to delete note file", e);
@@ -114,6 +119,7 @@ export class Writer {
     const f = this.vault.getAbstractFileByPath(path);
     if (!f) return;
     try {
+      this.guard?.suppress("delete", path);
       await this.vault.delete(f);
     } catch (e) {
       console.warn("Thany: failed to delete attachment", e);
@@ -125,6 +131,7 @@ export class Writer {
     if (!f || !("children" in f)) return;
     if (f.children.length === 0) {
       try {
+        this.guard?.suppress("delete", path);
         await this.vault.delete(f);
       } catch {
         /* ignore */

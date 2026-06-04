@@ -89,7 +89,7 @@ describe("RelatedNotesPanel", () => {
     expect(container.querySelector(".tm-related__empty")).not.toBeNull();
   });
 
-  it("clicking an item invokes onItemClick", async () => {
+  it("expanding a pill then Open invokes onItemClick", async () => {
     const item: RelatedNotesItem = {
       id: "abc",
       relativePath: "Inbox/foo.md",
@@ -106,9 +106,16 @@ describe("RelatedNotesPanel", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const row = container.querySelector(".tm-related__row") as HTMLElement | null;
-    expect(row).not.toBeNull();
-    row!.click();
+    const pill = container.querySelector(".tm-related__pill") as HTMLElement | null;
+    expect(pill).not.toBeNull();
+    expect(pill!.textContent).toBe("Foo");
+    pill!.click();
+    expect(onClick).not.toHaveBeenCalled();
+    expect(container.querySelector(".tm-related__snippet")?.textContent).toBe("snippet");
+
+    const open = container.querySelector(".tm-related__open") as HTMLElement | null;
+    expect(open).not.toBeNull();
+    open!.click();
     expect(onClick).toHaveBeenCalledWith(item);
   });
 });
