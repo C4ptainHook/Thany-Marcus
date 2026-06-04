@@ -38,7 +38,8 @@ public sealed class MintingSpacesHandlerTests(PostgresFixture postgres) : DbInte
         };
         var handler = new MintingSpacesHandler(
             Db, Clock,
-            new PostgresInfraOpUnlockCache(Db, dp, Clock),
+            TestSagaCredentials.Source(Db, dp, Clock),
+            TestProvisioningProviders.Registry(Db, Clock, fakeDo),
             new CloudSecretBundle(Db, Clock),
             new DigitalOceanOAuthConnections(Db, Clock),
             fakeDo,
@@ -78,7 +79,8 @@ public sealed class MintingSpacesHandlerTests(PostgresFixture postgres) : DbInte
         var fakeDo = new FakeDigitalOceanOAuthClient();
         var handler = new MintingSpacesHandler(
             Db, Clock,
-            new PostgresInfraOpUnlockCache(Db, dp, Clock),
+            TestSagaCredentials.Source(Db, dp, Clock),
+            TestProvisioningProviders.Registry(Db, Clock, fakeDo),
             new CloudSecretBundle(Db, Clock),
             new DigitalOceanOAuthConnections(Db, Clock),
             fakeDo,
@@ -116,7 +118,8 @@ public sealed class MintingSpacesHandlerTests(PostgresFixture postgres) : DbInte
         };
         var handler = new MintingSpacesHandler(
             Db, Clock,
-            new PostgresInfraOpUnlockCache(Db, dp, Clock),
+            TestSagaCredentials.Source(Db, dp, Clock),
+            TestProvisioningProviders.Registry(Db, Clock, fakeDo),
             new CloudSecretBundle(Db, Clock),
             new DigitalOceanOAuthConnections(Db, Clock),
             fakeDo,
@@ -144,7 +147,8 @@ public sealed class MintingSpacesHandlerTests(PostgresFixture postgres) : DbInte
 
         var handler = new MintingSpacesHandler(
             Db, Clock,
-            new PostgresInfraOpUnlockCache(Db, dp, Clock),
+            TestSagaCredentials.Source(Db, dp, Clock),
+            TestProvisioningProviders.Registry(Db, Clock),
             new CloudSecretBundle(Db, Clock),
             new DigitalOceanOAuthConnections(Db, Clock),
             new FakeDigitalOceanOAuthClient(),

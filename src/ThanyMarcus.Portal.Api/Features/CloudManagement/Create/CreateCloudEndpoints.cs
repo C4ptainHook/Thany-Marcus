@@ -7,14 +7,14 @@ using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Portal.Api.Features.CloudManagement.Create;
 
 public static class CreateCloudEndpoints
 {
-    private static readonly string[] SupportedProviders = ["digitalocean"];
-
     public static void MapCreateCloudEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapPost("/api/clouds", async (
@@ -24,20 +24,26 @@ public static class CreateCloudEndpoints
             EnqueueGuard guard,
             HostnameGenerator hostnameGen,
             EnrollmentTokenGenerator tokenGen,
+            IProvisioningProviderRegistry providers,
+            ISagaCredentialSource credentials,
             IDigitalOceanOAuthConnections doConnections,
             IClock clock,
             CancellationToken ct) =>
         {
             var userId = Guid.Parse(user.FindFirstValue(AuthClaimTypes.SubUs)!);
 
-            if (body.Provider != "digitalocean")
-                return Results.BadRequest(new { error = "unsupported_provider", supported = SupportedProviders });
+            if (!providers.TryGet(body.Provider, out var provider) || !provider.UserCreatable)
+                return Results.BadRequest(new
+                {
+                    error = "unsupported_provider",
+                    supported = providers.All.Where(p => p.UserCreatable).Select(p => p.Key),
+                });
             if (!DigitalOceanRegions.IsAllowed(body.Region))
                 return Results.BadRequest(new { error = "invalid_region", region = body.Region });
 
-            if (!await doConnections.IsConnectedAsync(userId, ct))
+            if (provider.RequiresCredentials && !await doConnections.IsConnectedAsync(userId, ct))
                 return Results.Json(
-                    new { error = "connect_required", provider = "digitalocean", start = "/oauth/digitalocean/start" },
+                    new { error = "connect_required", provider = body.Provider, start = "/oauth/digitalocean/start" },
                     statusCode: StatusCodes.Status412PreconditionFailed);
 
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
@@ -61,9 +67,7 @@ public static class CreateCloudEndpoints
             var enrollmentToken = tokenGen.Generate();
             var now = clock.GetCurrentInstant();
 
-            var initialStatus = body.Provider == "digitalocean"
-                ? SagaStatus.MintingSpaces
-                : SagaStatus.TfPlanning;
+            var initialStatus = provider.InitialStatusAfterCreate;
 
             var cloud = new Cloud
             {
@@ -78,6 +82,8 @@ public static class CreateCloudEndpoints
             };
             db.Clouds.Add(cloud);
             await db.SaveChangesAsync(ct);
+
+            await credentials.CaptureForSagaAsync(cloud, ct);
 
             var job = new ProvisioningJob
             {

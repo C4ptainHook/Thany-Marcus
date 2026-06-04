@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
 
 namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 
@@ -21,13 +22,14 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
         var dir = GetJobDir(job.Id);
         Directory.CreateDirectory(dir);
 
-        var modulePath = Path.Combine(modulesDir, cloud.Provider);
+        var tfLayout = ProviderTerraformCatalog.Get(cloud.Provider);
+        var modulePath = Path.Combine(modulesDir, tfLayout.ModuleFolderName);
         if (!Directory.Exists(modulePath))
         {
             throw new InvalidOperationException($"Terraform module not found at {modulePath} (provider={cloud.Provider})");
         }
 
-        var mainTf = RenderMainTf(modulePath, cloud.Provider);
+        var mainTf = RenderMainTf(modulePath, tfLayout);
         await File.WriteAllTextAsync(Path.Combine(dir, "main.tf"), mainTf, ct);
 
         await File.WriteAllTextAsync(
@@ -36,7 +38,7 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
             ct);
 
         string tfvars;
-        if (cloud.Provider == "stub")
+        if (!tfLayout.RequiresCloudInitTfvars)
         {
             tfvars = string.Create(CultureInfo.InvariantCulture, $"""
                 cloud_id = "{cloud.Id}"
@@ -141,97 +143,12 @@ public sealed partial class WorkspaceLayout(IConfiguration config, ILogger<Works
         }
     }
 
-    private static string RenderMainTf(string modulePath, string provider)
+    private static string RenderMainTf(string modulePath, ProviderTerraformLayout tfLayout)
     {
-        var (requiredProviders, providerBlock, extraModuleArgs, extraRootVars) = provider switch
-        {
-            "stub" => (
-                string.Empty,
-                string.Empty,
-                string.Empty,
-                string.Empty),
-            "digitalocean" => (
-                """
-                  required_providers {
-                    digitalocean = {
-                      source  = "digitalocean/digitalocean"
-                      version = "~> 2.0"
-                    }
-                  }
-                """,
-                """
-
-                provider "digitalocean" {
-                  token = var.provider_token
-                }
-                """,
-                """
-
-                  enrollment_token       = var.enrollment_token
-                  ghcr_pat               = var.ghcr_pat
-                  portal_url             = var.portal_url
-                  le_email               = var.le_email
-                  le_acme_ca             = var.le_acme_ca
-                  image_tag              = var.image_tag
-                  admin_user             = var.admin_user
-                  ssh_public_key         = var.ssh_public_key
-                  timezone               = var.timezone
-                  ollama_vision_pull_tag = var.ollama_vision_pull_tag
-                  ollama_text_pull_tag   = var.ollama_text_pull_tag
-                  ollama_text_image_tag  = var.ollama_text_image_tag
-                """,
-                """
-
-                variable "provider_token" {
-                  type      = string
-                  sensitive = true
-                  default   = ""
-                }
-                variable "enrollment_token" {
-                  type      = string
-                  sensitive = true
-                  default   = ""
-                }
-                variable "ghcr_pat" {
-                  type      = string
-                  sensitive = true
-                  default   = ""
-                }
-                variable "portal_url"     { type = string }
-                variable "le_email"       { type = string }
-                variable "le_acme_ca" {
-                  type    = string
-                  default = ""
-                }
-                variable "image_tag"  { type = string }
-                variable "admin_user" {
-                  type    = string
-                  default = "thanyadmin"
-                }
-                variable "ssh_public_key" {
-                  type    = string
-                  default = ""
-                }
-                variable "timezone" {
-                  type    = string
-                  default = "Etc/UTC"
-                }
-                variable "ollama_vision_pull_tag" {
-                  type    = string
-                  default = "qwen3-vl:4b"
-                }
-                variable "ollama_text_pull_tag" {
-                  type    = string
-                  default = "qwen3:1.7b-q4_K_M"
-                }
-                variable "ollama_text_image_tag" {
-                  type    = string
-                  default = "0.24.0"
-                }
-                """),
-            "azure" => throw new NotImplementedException("Azure provider lands in PORTAL-009"),
-            _ => throw new InvalidOperationException($"Unknown provider: {provider}"),
-        };
+        var requiredProviders = tfLayout.RequiredProvidersBlock;
+        var providerBlock     = tfLayout.ProviderBlock;
+        var extraModuleArgs   = tfLayout.ExtraModuleArgs;
+        var extraRootVars     = tfLayout.ExtraRootVars;
 
         return $$"""
             terraform {

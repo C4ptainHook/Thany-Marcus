@@ -1,17 +1,14 @@
 using System.Data;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NodaTime;
-using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
-using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
-using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
-using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 
@@ -20,10 +17,8 @@ namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 public sealed partial class CancelHandler(
     PortalDbContext db,
     IClock clock,
-    IInfraOpUnlockCache unlockCache,
-    IProviderTokenVault providerVault,
-    ICloudSecretBundle secrets,
-    IDigitalOceanOAuthConnections connections,
+    ISagaCredentialSource credentials,
+    IProvisioningProviderRegistry providers,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
     IConfiguration config,
@@ -160,21 +155,17 @@ public sealed partial class CancelHandler(
             return (null, false);
         }
 
+        var provider = providers.Resolve(cloud.Provider);
         var dek = new byte[32];
-        byte[]? providerToken = null;
         try
         {
-            if (!await unlockCache.TryGetAsync(cloud.UserId, dek, ct))
+            if (!await credentials.TryGetDekAsync(cloud, dek, ct))
             {
                 LogStepUpMissing(log, cancelJob.Id);
                 return ("step_up_unlock_missing", true);
             }
-            if (cloud.Provider != DigitalOceanTfEnv.DigitalOceanProvider && cloud.Provider != "stub")
-            {
-                providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
-            }
 
-            var destroyEnv = await BuildEnvAsync(cloud, providerToken, dek, ct);
+            var destroyEnv = await BuildEnvAsync(provider, cloud, dek, ct);
             var destroyResult = await tf.DestroyAsync(workdir, destroyEnv, ct);
             EventsLogAppender.AppendTerraformStream(cancelJob, clock, Phase, "tf_stdout", destroyResult.Stdout);
             EventsLogAppender.AppendTerraformStream(cancelJob, clock, Phase, "tf_stderr", destroyResult.Stderr);
@@ -194,7 +185,6 @@ public sealed partial class CancelHandler(
         finally
         {
             CryptographicOperations.ZeroMemory(dek);
-            if (providerToken is not null) CryptographicOperations.ZeroMemory(providerToken);
         }
     }
 
@@ -229,6 +219,10 @@ public sealed partial class CancelHandler(
         cancelJob.ClaimedBy       = null;
         cancelJob.LeaseExpiresAt  = null;
         cancelJob.UpdatedAt       = now;
+
+        await db.SagaCredentialGrants
+            .Where(g => g.CloudId == cloud.Id)
+            .ExecuteDeleteAsync(ct);
 
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
@@ -288,8 +282,8 @@ public sealed partial class CancelHandler(
             || stderr.Contains("doesn't exist", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<Dictionary<string, string>> BuildEnvAsync(
-        Cloud cloud, byte[]? providerToken, byte[] dek, CancellationToken ct)
+    private static async Task<Dictionary<string, string>> BuildEnvAsync(
+        IProvisioningProvider provider, Cloud cloud, byte[] dek, CancellationToken ct)
     {
         var env = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -298,14 +292,7 @@ public sealed partial class CancelHandler(
             ["TF_VAR_hostname"] = cloud.Hostname,
             ["TF_VAR_enrollment_token"] = string.Empty,
         };
-        if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
-        {
-            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.UserId, cloud.Id, dek, connections, secrets, ct);
-        }
-        else if (providerToken is not null)
-        {
-            env["TF_VAR_provider_token"] = Encoding.UTF8.GetString(providerToken);
-        }
+        await provider.AddProvisioningEnvAsync(env, cloud, dek, ct);
         return env;
     }
 

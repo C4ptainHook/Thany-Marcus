@@ -8,11 +8,13 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 using ThanyMarcus.Portal.Api.Features.Provisioning.Pricing;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
@@ -64,10 +66,16 @@ public static class Program
             .SetApplicationName("ThanyMarcus.Portal");
 
         builder.Services.AddScoped<IInfraOpUnlockCache, PostgresInfraOpUnlockCache>();
+        builder.Services.AddScoped<ISagaCredentialGrantStore, PostgresSagaCredentialGrantStore>();
+        builder.Services.AddScoped<ISagaCredentialSource, SagaCredentialSource>();
         builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
         builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
         builder.Services.AddScoped<IDigitalOceanOAuthConnections, DigitalOceanOAuthConnections>();
         builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
+
+        builder.Services.AddScoped<IProvisioningProvider, StubProvisioningProvider>();
+        builder.Services.AddScoped<IProvisioningProvider, DigitalOceanProvisioningProvider>();
+        builder.Services.AddScoped<IProvisioningProviderRegistry, ProvisioningProviderRegistry>();
 
         builder.Services.AddMemoryCache();
         builder.Services.AddHttpClient(DoSizesCatalog.HttpClientName, c =>
@@ -136,6 +144,7 @@ public static class Program
             c.Timeout = TimeSpan.FromSeconds(pluginTokenOpts.HttpTimeoutSeconds));
 
         builder.Services.AddHostedService<CrashRecoveryService>();
+        builder.Services.AddHostedService<SagaCredentialGrantSweepService>();
         builder.Services.AddHostedService<SagaWorker>();
 
         var host = builder.Build();

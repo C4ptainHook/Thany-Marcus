@@ -3,11 +3,10 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
-using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
-using ThanyMarcus.Portal.Api.Features.CloudManagement;
-using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
@@ -15,7 +14,8 @@ namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 public sealed partial class MintingSpacesHandler(
     PortalDbContext db,
     IClock clock,
-    IInfraOpUnlockCache unlockCache,
+    ISagaCredentialSource credentials,
+    IProvisioningProviderRegistry providers,
     ICloudSecretBundle secrets,
     IDigitalOceanOAuthConnections connections,
     IDigitalOceanOAuthClient doClient,
@@ -30,6 +30,7 @@ public sealed partial class MintingSpacesHandler(
         var jobId = job.Id;
         job = await db.ProvisioningJobs.SingleAsync(j => j.Id == jobId, ct);
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
+        var provider = providers.Resolve(cloud.Provider);
 
         if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
             return;
@@ -37,11 +38,11 @@ public sealed partial class MintingSpacesHandler(
         if (cloud.MintingSpacesStartedAt is null)
             cloud.MintingSpacesStartedAt = clock.GetCurrentInstant();
 
-        if (cloud.Provider != KnownProviders.DigitalOcean)
+        if (!provider.MintsObjectStorageCredentials)
         {
             EventsLogAppender.Append(job, clock, Phase, new JsonObject
             {
-                ["event"] = "skip_non_do",
+                ["event"] = "skip_non_minting_provider",
                 ["provider"] = cloud.Provider,
             });
             await SagaTransitions.TransitionAsync(
@@ -52,7 +53,7 @@ public sealed partial class MintingSpacesHandler(
         var dek = new byte[32];
         try
         {
-            if (!await unlockCache.TryGetAsync(cloud.UserId, dek, ct))
+            if (!await credentials.TryGetDekAsync(cloud, dek, ct))
             {
                 EventsLogAppender.Append(job, clock, Phase, new JsonObject
                 {
