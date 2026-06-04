@@ -1,14 +1,11 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NodaTime;
-using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
-using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
-using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
-using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Portal.SagaWorker.Infrastructure.Terraform;
 
@@ -17,10 +14,8 @@ namespace ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 public sealed partial class TfPlanningHandler(
     PortalDbContext db,
     IClock clock,
-    IInfraOpUnlockCache unlockCache,
-    IProviderTokenVault providerVault,
-    ICloudSecretBundle secrets,
-    IDigitalOceanOAuthConnections connections,
+    ISagaCredentialSource credentials,
+    IProvisioningProviderRegistry providers,
     ITerraformRunner tf,
     WorkspaceLayout workspaceLayout,
     IConfiguration config,
@@ -34,6 +29,7 @@ public sealed partial class TfPlanningHandler(
         var jobId = job.Id;
         job = await db.ProvisioningJobs.SingleAsync(j => j.Id == jobId, ct);
         var cloud = await db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == job.CloudId, ct);
+        var provider = providers.Resolve(cloud.Provider);
 
         if (await SagaTransitions.TryRouteCancelAsync(db, clock, job, cloud, Phase, ct))
             return;
@@ -44,10 +40,9 @@ public sealed partial class TfPlanningHandler(
         }
 
         var dek = new byte[32];
-        byte[]? providerToken = null;
         try
         {
-            if (!await unlockCache.TryGetAsync(cloud.UserId, dek, ct))
+            if (!await credentials.TryGetDekAsync(cloud, dek, ct))
             {
                 LogStepUpExpired(log, job.Id);
                 EventsLogAppender.Append(job, clock, Phase, new JsonObject
@@ -58,23 +53,6 @@ public sealed partial class TfPlanningHandler(
                 await SagaTransitions.TransitionToTerminalAsync(
                     db, clock, job, cloud, SagaStatus.FailedTf, ct);
                 return;
-            }
-
-            if (cloud.Provider != DigitalOceanTfEnv.DigitalOceanProvider && cloud.Provider != "stub")
-            {
-                providerToken = await providerVault.DecryptAsync(cloud.UserId, cloud.Provider, dek, ct);
-                if (providerToken is null)
-                {
-                    EventsLogAppender.Append(job, clock, Phase, new JsonObject
-                    {
-                        ["error"] = "provider_token_not_found",
-                        ["provider"] = cloud.Provider,
-                    });
-                    job.LastError = $"no provider token for {cloud.Provider}";
-                    await SagaTransitions.TransitionToTerminalAsync(
-                        db, clock, job, cloud, SagaStatus.FailedTf, ct);
-                    return;
-                }
             }
 
             var workdir = await workspaceLayout.RenderAsync(job, cloud, ct);
@@ -118,7 +96,7 @@ public sealed partial class TfPlanningHandler(
                 return;
             }
 
-            var planEnv = await BuildEnvAsync(cloud, job, providerToken, dek, ct);
+            var planEnv = await BuildEnvAsync(provider, cloud, job, dek, ct);
             var planResult = await tf.PlanAsync(workdir, planEnv, ct);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stdout", planResult.Stdout);
             EventsLogAppender.AppendTerraformStream(job, clock, Phase, "tf_stderr", planResult.Stderr);
@@ -150,14 +128,13 @@ public sealed partial class TfPlanningHandler(
         finally
         {
             CryptographicOperations.ZeroMemory(dek);
-            if (providerToken is not null) CryptographicOperations.ZeroMemory(providerToken);
         }
     }
 
-    private async Task<Dictionary<string, string>> BuildEnvAsync(
+    private static async Task<Dictionary<string, string>> BuildEnvAsync(
+        IProvisioningProvider provider,
         Api.Features.CloudManagement.Cloud cloud,
         ProvisioningJob job,
-        byte[]? providerToken,
         byte[] dek,
         CancellationToken ct)
     {
@@ -170,14 +147,7 @@ public sealed partial class TfPlanningHandler(
             ["TF_VAR_hostname"] = cloud.Hostname,
             ["TF_VAR_enrollment_token"] = enrollmentToken,
         };
-        if (cloud.Provider == DigitalOceanTfEnv.DigitalOceanProvider)
-        {
-            await DigitalOceanTfEnv.TryAddDoEnvVarsAsync(env, cloud.UserId, cloud.Id, dek, connections, secrets, ct);
-        }
-        else if (providerToken is not null)
-        {
-            env["TF_VAR_provider_token"] = Encoding.UTF8.GetString(providerToken);
-        }
+        await provider.AddProvisioningEnvAsync(env, cloud, dek, ct);
         return env;
     }
 

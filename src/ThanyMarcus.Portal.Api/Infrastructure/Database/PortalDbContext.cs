@@ -6,6 +6,7 @@ using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 
 namespace ThanyMarcus.Portal.Api.Infrastructure.Database;
 
@@ -24,6 +25,7 @@ public sealed class PortalDbContext(DbContextOptions<PortalDbContext> options) :
     public DbSet<CloudSecret> CloudSecrets => Set<CloudSecret>();
     public DbSet<PluginTokenMetadata> PluginTokenMetadata => Set<PluginTokenMetadata>();
     public DbSet<ProvisioningJob> ProvisioningJobs => Set<ProvisioningJob>();
+    public DbSet<SagaCredentialGrant> SagaCredentialGrants => Set<SagaCredentialGrant>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

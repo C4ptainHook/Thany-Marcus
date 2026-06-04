@@ -11,6 +11,8 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
 using ThanyMarcus.Portal.Api.Features.Auth.DigitalOcean;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
+using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens.Sync;
@@ -74,11 +76,16 @@ internal static class SagaHostBuilder
         }
 
         builder.Services.AddSingleton<IInfraOpUnlockCache>(new StubInfraOpUnlockCache());
+        builder.Services.AddScoped<ISagaCredentialGrantStore, PostgresSagaCredentialGrantStore>();
+        builder.Services.AddScoped<ISagaCredentialSource, SagaCredentialSource>();
         builder.Services.AddScoped<IProviderTokenVault, ProviderTokenVault>();
         builder.Services.AddScoped<ICloudSecretBundle, CloudSecretBundle>();
         builder.Services.AddScoped<IDigitalOceanOAuthConnections, DigitalOceanOAuthConnections>();
         builder.Services.AddSingleton<IDigitalOceanOAuthClient, FakeDigitalOceanOAuthClient>();
         builder.Services.AddScoped<ICloudAdminTokenAccessor, CloudAdminTokenAccessor>();
+        builder.Services.AddScoped<IProvisioningProvider, StubProvisioningProvider>();
+        builder.Services.AddScoped<IProvisioningProvider, DigitalOceanProvisioningProvider>();
+        builder.Services.AddScoped<IProvisioningProviderRegistry, ProvisioningProviderRegistry>();
         builder.Services.AddScoped<IProvisioningEventBus, PostgresProvisioningEventBus>();
         builder.Services.AddSingleton(pluginTokenCloudClient ?? new StubPluginTokenCloudClient());
         builder.Services.Configure<PluginTokenSyncOptions>(o => { o.MaxAttempts = 3; o.HttpTimeoutSeconds = 10; });

@@ -6,6 +6,7 @@ using NodaTime;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.Auth.StepUp;
 using ThanyMarcus.Portal.Api.Features.Provisioning;
+using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 
 namespace ThanyMarcus.Portal.Api.Features.CloudManagement.Destroy;
@@ -30,6 +31,7 @@ public static class DestroyCloudEndpoints
             ClaimsPrincipal user,
             PortalDbContext db,
             EnqueueGuard guard,
+            ISagaCredentialSource credentials,
             IClock clock,
             CancellationToken ct) =>
         {
@@ -78,6 +80,8 @@ public static class DestroyCloudEndpoints
 
             cloud.ProvisioningStatus = SagaStatus.Destroying;
             cloud.UpdatedAt = now;
+
+            await credentials.CaptureForSagaAsync(cloud, ct);
 
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
