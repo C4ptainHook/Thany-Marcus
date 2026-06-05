@@ -75,7 +75,7 @@ public sealed class EntitySuggestionsEndpointTests(PostgresFixture postgres)
             var stub = await db.Notes.SingleAsync(n => n.Id == entity.StubNoteId!.Value, ct);
             stub.Kind.ShouldBe(NoteKind.EntityStub);
             stub.Status.ShouldBe(NoteStatus.Ready);
-            stub.RelativePath.ShouldBe("Entities/Michael Jackson.md");
+            stub.RelativePath.ShouldBe("_Entities/Stubs/Michael Jackson.md");
             stub.BodyOutput!.ShouldContain("- Mike");
         }
 
@@ -97,7 +97,7 @@ public sealed class EntitySuggestionsEndpointTests(PostgresFixture postgres)
         var (factory, client) = await BuildAuthedClientAsync();
         await using var f = factory;
 
-        await SeedNoteAtPathAsync("Entities/Michael Jackson.md");
+        await SeedNoteAtPathAsync("_Entities/Stubs/Michael Jackson.md");
         var id = await SeedSuggestionAsync("Michael Jackson", occurrenceCount: 3, distinctNoteCount: 2);
 
         var resp = await client.PostAsync($"/api/entity-suggestions/{id}/accept", null, ct);
@@ -108,6 +108,57 @@ public sealed class EntitySuggestionsEndpointTests(PostgresFixture postgres)
 
         using var probe = NewDb();
         (await probe.Entities.CountAsync(ct)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Accept_with_merge_folds_surface_form_into_target_and_creates_no_new_entity()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var (factory, client) = await BuildAuthedClientAsync();
+        await using var f = factory;
+
+        var targetId = await SeedEntityWithStubAsync("Київ", EntityKind.Place);
+        var id = await SeedSuggestionAsync("Kyiv", occurrenceCount: 3, distinctNoteCount: 2,
+            kind: EntityKind.Place, suggestedMergeEntityId: targetId);
+
+        var resp = await client.PostAsync(
+            $"/api/entity-suggestions/{id}/accept?mergeInto={targetId}", null, ct);
+        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var accepted = await resp.Content.ReadFromJsonAsync<AcceptEntitySuggestionResponse>(ct);
+        accepted!.EntityId.ShouldBe(targetId);
+
+        using var probe = NewDb();
+        // Folded into the existing node — no second entity minted.
+        (await probe.Entities.CountAsync(ct)).ShouldBe(1);
+        var target = await probe.Entities.SingleAsync(e => e.Id == targetId, ct);
+        target.Aliases.ShouldContain("Kyiv");
+        var stub = await probe.Notes.SingleAsync(n => n.Id == target.StubNoteId!.Value, ct);
+        stub.BodyOutput!.ShouldContain("- Kyiv");
+
+        var suggestion = await probe.EntitySuggestions.SingleAsync(s => s.Id == id, ct);
+        suggestion.AcceptedEntityId.ShouldBe(targetId);
+    }
+
+    [Fact]
+    public async Task List_surfaces_merge_proposal_with_target_name()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var (factory, client) = await BuildAuthedClientAsync();
+        await using var f = factory;
+
+        var targetId = await SeedEntityWithStubAsync("Київ", EntityKind.Place);
+        await SeedSuggestionAsync("Kyiv", occurrenceCount: 3, distinctNoteCount: 2,
+            kind: EntityKind.Place, suggestedMergeEntityId: targetId, suggestedMergeDistance: 0.33);
+
+        var body = await client.GetFromJsonAsync<ListEntitySuggestionsResponse>("/api/entity-suggestions", ct);
+        body!.Suggestions.Count.ShouldBe(1);
+        var proposal = body.Suggestions[0].SuggestedMerge;
+        proposal.ShouldNotBeNull();
+        proposal!.EntityId.ShouldBe(targetId);
+        proposal.DisplayName.ShouldBe("Київ");
+        proposal.Distance.ShouldBe(0.33, 0.01);
     }
 
     [Fact]
@@ -216,7 +267,9 @@ public sealed class EntitySuggestionsEndpointTests(PostgresFixture postgres)
     }
 
     private async Task<Guid> SeedSuggestionAsync(
-        string canonical, int occurrenceCount, int distinctNoteCount, string[]? aliases = null)
+        string canonical, int occurrenceCount, int distinctNoteCount, string[]? aliases = null,
+        string kind = EntityKind.Person, Guid? suggestedMergeEntityId = null,
+        double? suggestedMergeDistance = null)
     {
         var now = SystemClock.Instance.GetCurrentInstant();
         var occurrences = Enumerable.Range(0, Math.Max(occurrenceCount, 1))
@@ -232,12 +285,14 @@ public sealed class EntitySuggestionsEndpointTests(PostgresFixture postgres)
         {
             Id = Guid.CreateVersion7(),
             CanonicalText = canonical,
-            Kind = EntityKind.Person,
+            Kind = kind,
             Aliases = aliases ?? [],
             Occurrences = EntitySuggestionOccurrences.Serialize(occurrences),
             OccurrenceCount = occurrenceCount,
             DistinctNoteCount = distinctNoteCount,
             Embedding = new Vector(FakeEmbeddingClient.DeterministicUnitVector(canonical)),
+            SuggestedMergeEntityId = suggestedMergeEntityId,
+            SuggestedMergeDistance = suggestedMergeDistance,
             FirstSeenAt = now,
             LastSeenAt = now,
             CreatedAt = now,
@@ -245,6 +300,41 @@ public sealed class EntitySuggestionsEndpointTests(PostgresFixture postgres)
         db.EntitySuggestions.Add(s);
         await db.SaveChangesAsync();
         return s.Id;
+    }
+
+    private async Task<Guid> SeedEntityWithStubAsync(string canonical, string kind)
+    {
+        var now = SystemClock.Instance.GetCurrentInstant();
+        using var db = NewDb();
+        var entityId = Guid.CreateVersion7();
+        var stub = new Note
+        {
+            Id = Guid.CreateVersion7(),
+            CapturedAt = now,
+            Status = NoteStatus.Ready,
+            Kind = NoteKind.EntityStub,
+            BodyInput = string.Empty,
+            BodyOutput = EntityStubWriter.BuildStubMarkdown(canonical, kind, [], entityId),
+            RelativePath = $"_Entities/Stubs/{canonical}.md",
+            Tags = [],
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.Notes.Add(stub);
+        db.Entities.Add(new Entity
+        {
+            Id = entityId,
+            Kind = kind,
+            CanonicalName = canonical,
+            Source = EntitySource.User,
+            Embedding = new Vector(FakeEmbeddingClient.DeterministicUnitVector(canonical)),
+            StubNoteId = stub.Id,
+            MentionCount = 5,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        return entityId;
     }
 
     private async Task SeedNoteAtPathAsync(string relativePath)

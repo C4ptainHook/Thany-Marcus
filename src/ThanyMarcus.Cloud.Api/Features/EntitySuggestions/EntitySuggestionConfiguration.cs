@@ -32,6 +32,8 @@ public sealed class EntitySuggestionConfiguration : IEntityTypeConfiguration<Ent
         builder.Property(e => e.LastSeenAt).IsRequired();
         builder.Property(e => e.AcceptedAt);
         builder.Property(e => e.AcceptedEntityId);
+        builder.Property(e => e.SuggestedMergeEntityId);
+        builder.Property(e => e.SuggestedMergeDistance);
         builder.Property(e => e.DismissedAt);
         builder.Property(e => e.CreatedAt).IsRequired();
 
@@ -44,6 +46,9 @@ public sealed class EntitySuggestionConfiguration : IEntityTypeConfiguration<Ent
         // that the fluent API can't express; it is created by raw SQL in the migration.
 
         builder.HasOne<Entity>().WithMany().HasForeignKey(e => e.AcceptedEntityId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne<Entity>().WithMany().HasForeignKey(e => e.SuggestedMergeEntityId)
             .OnDelete(DeleteBehavior.SetNull);
     }
 }

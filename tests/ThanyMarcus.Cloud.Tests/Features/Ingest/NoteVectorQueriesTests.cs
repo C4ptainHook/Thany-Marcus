@@ -28,8 +28,7 @@ public sealed class NoteVectorQueriesTests(PostgresFixture postgres)
 
         using var probe = NewDb(postgres.ConnectionString);
         var results = await NoteVectorQueries.NearestAsync(
-            probe, target, k: 3, excludeNoteId: null,
-            excludeCreatedAfter: SystemClock.Instance.GetCurrentInstant(), ct: ct);
+            probe, target, fanout: 3, excludeNoteId: null, ct: ct);
 
         results.Count.ShouldBe(3);
         results[0].Distance.ShouldBeLessThan(results[1].Distance);
@@ -56,14 +55,13 @@ public sealed class NoteVectorQueriesTests(PostgresFixture postgres)
 
         using var probe = NewDb(postgres.ConnectionString);
         var results = await NoteVectorQueries.NearestAsync(
-            probe, target, k: 5, excludeNoteId: null,
-            excludeCreatedAfter: SystemClock.Instance.GetCurrentInstant(), ct: ct);
+            probe, target, fanout: 5, excludeNoteId: null, ct: ct);
 
         results.ShouldNotContain(r => r.Id == deletedId);
     }
 
     [Fact]
-    public async Task Excludes_recent_notes()
+    public async Task Does_not_exclude_recent_notes()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
@@ -82,13 +80,11 @@ public sealed class NoteVectorQueriesTests(PostgresFixture postgres)
             await db.SaveChangesAsync(ct);
         }
 
-        var excludeAfter = SystemClock.Instance.GetCurrentInstant() - Duration.FromHours(1);
         using var probe = NewDb(postgres.ConnectionString);
         var results = await NoteVectorQueries.NearestAsync(
-            probe, target, k: 5, excludeNoteId: null,
-            excludeCreatedAfter: excludeAfter, ct: ct);
+            probe, target, fanout: 5, excludeNoteId: null, ct: ct);
 
-        results.ShouldNotContain(r => r.Id == recentId);
+        results.ShouldContain(r => r.Id == recentId);
         results.ShouldContain(r => r.Id == olderId);
     }
 
@@ -111,8 +107,7 @@ public sealed class NoteVectorQueriesTests(PostgresFixture postgres)
 
         using var probe = NewDb(postgres.ConnectionString);
         var results = await NoteVectorQueries.NearestAsync(
-            probe, target, k: 5, excludeNoteId: selfId,
-            excludeCreatedAfter: SystemClock.Instance.GetCurrentInstant(), ct: ct);
+            probe, target, fanout: 5, excludeNoteId: selfId, ct: ct);
 
         results.ShouldNotContain(r => r.Id == selfId);
     }
@@ -134,10 +129,33 @@ public sealed class NoteVectorQueriesTests(PostgresFixture postgres)
 
         using var probe = NewDb(postgres.ConnectionString);
         var results = await NoteVectorQueries.NearestAsync(
-            probe, target, k: 5, excludeNoteId: null,
-            excludeCreatedAfter: SystemClock.Instance.GetCurrentInstant(), ct: ct);
+            probe, target, fanout: 5, excludeNoteId: null, ct: ct);
 
         results.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Returns_up_to_fanout_candidates_with_embeddings()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var target = UnitVector(seed: 50);
+
+        using (var db = NewDb(postgres.ConnectionString))
+        {
+            for (var i = 0; i < 8; i++)
+            {
+                db.Notes.Add(SeedNote(target, hoursAgo: 24));
+            }
+            await db.SaveChangesAsync(ct);
+        }
+
+        using var probe = NewDb(postgres.ConnectionString);
+        var results = await NoteVectorQueries.NearestAsync(
+            probe, target, fanout: 5, excludeNoteId: null, ct: ct);
+
+        results.Count.ShouldBe(5);
+        results.ShouldAllBe(r => r.Embedding.Length == 256);
     }
 
     private static Note SeedNote(float[] vec, int hoursAgo)

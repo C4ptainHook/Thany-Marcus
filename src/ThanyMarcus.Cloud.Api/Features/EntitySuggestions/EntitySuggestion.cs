@@ -19,6 +19,8 @@ public sealed class EntitySuggestion
     public Instant LastSeenAt { get; set; }
     public Instant? AcceptedAt { get; set; }
     public Guid? AcceptedEntityId { get; set; }
+    public Guid? SuggestedMergeEntityId { get; set; }
+    public double? SuggestedMergeDistance { get; set; }
     public Instant? DismissedAt { get; set; }
     public Instant CreatedAt { get; init; }
 }

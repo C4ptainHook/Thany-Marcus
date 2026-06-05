@@ -27,6 +27,7 @@ function noopExec(over: Partial<IntentExecutor> = {}): IntentExecutor {
     folderDissolve: vi.fn(async () => {}),
     folderRegister: vi.fn(async () => {}),
     folderUnregister: vi.fn(async () => {}),
+    inboxReroute: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -94,6 +95,19 @@ describe("IntentQueue", () => {
 
     expect(exec.folderRegister).toHaveBeenCalledWith("Projects/Foo");
     expect(exec.folderUnregister).toHaveBeenCalledWith("Archive");
+    expect(journal.pending()).toHaveLength(0);
+  });
+
+  it("routes an inbox_reroute intent to the executor", async () => {
+    const fs = new MemFs();
+    const journal = new IntentJournal(fs, "d", "devA");
+    const exec = noopExec();
+    const q = new IntentQueue(journal, exec);
+
+    await q.enqueue({ kind: "inbox_reroute", opId: "inbox_reroute", enqueuedAt: 1 });
+    await q.drain();
+
+    expect(exec.inboxReroute).toHaveBeenCalledTimes(1);
     expect(journal.pending()).toHaveLength(0);
   });
 

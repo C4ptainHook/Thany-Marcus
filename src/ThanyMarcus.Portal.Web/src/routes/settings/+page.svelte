@@ -5,6 +5,7 @@
   import { generateEmergencyKit, emergencyKitStatus, unlockPassphrase } from '$lib/recoveryClient';
   import { apiFetch } from '$lib/http';
   import EmergencyKitModal from '$lib/EmergencyKitModal.svelte';
+  import PluginTokenCard from '$lib/PluginTokenCard.svelte';
   import {
     listPasskeys, registerPasskey, revokePasskey,
     isPasskeySupported, isPasskeyCancellation,
@@ -38,6 +39,7 @@
   let error = $state<string | null>(null);
   let doConnection = $state<DoConnection | null>(null);
   let doDisconnectBusy = $state(false);
+  let cloud = $state<{ cloudId: string; hostname: string; provisioningStatus: string } | null>(null);
 
   const passkeySupported = isPasskeySupported();
   let passkeys = $state<PasskeyInfo[]>([]);
@@ -92,6 +94,15 @@
       doConnection = await r.json();
     } catch {
       doConnection = { connected: false };
+    }
+  }
+
+  async function refreshCloud() {
+    try {
+      const r = await fetch('/api/clouds/me');
+      cloud = r.ok ? await r.json() : null;
+    } catch {
+      cloud = null;
     }
   }
 
@@ -188,6 +199,7 @@
   onMount(async () => {
     await refreshMe();
     await refreshDoConnection();
+    await refreshCloud();
     if (passkeySupported) await refreshPasskeys();
   });
 
@@ -428,6 +440,10 @@
           {/if}
         </p>
       </section>
+    {/if}
+
+    {#if cloud && cloud.provisioningStatus === 'succeeded'}
+      <PluginTokenCard cloudId={cloud.cloudId} cloudHostname={cloud.hostname} />
     {/if}
 
   {/if}

@@ -18,6 +18,7 @@ public sealed class EntityConfiguration : IEntityTypeConfiguration<Entity>
 
         builder.Property(e => e.Kind).IsRequired();
         builder.Property(e => e.CanonicalName).IsRequired();
+        builder.Property(e => e.DisplayName);
         builder.Property(e => e.Aliases)
             .HasColumnType("text[]")
             .IsRequired()

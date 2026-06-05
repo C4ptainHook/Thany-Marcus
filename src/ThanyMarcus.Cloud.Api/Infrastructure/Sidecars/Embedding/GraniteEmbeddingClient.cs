@@ -63,14 +63,13 @@ public sealed partial class GraniteEmbeddingClient : IEmbeddingClient, IDisposab
     private float[] Embed(string text)
     {
         var ids = TokenizeAndTruncate(text);
-        var seqLen = ids.Length;
         var inputs = BuildInputs(ids);
 
         using var results = session.Run(inputs);
         var firstOutput = results[0];
         var lhs = firstOutput.AsTensor<float>();
         var hidden = lhs.Dimensions[2];
-        var pooled = MeanPool(lhs, seqLen, hidden);
+        var pooled = ClsPool(lhs, hidden);
         L2NormalizeInPlace(pooled);
 
         var dim = opts.EmbeddingDim;
@@ -116,18 +115,10 @@ public sealed partial class GraniteEmbeddingClient : IEmbeddingClient, IDisposab
         return list;
     }
 
-    private static float[] MeanPool(Tensor<float> lhs, int seqLen, int hidden)
+    private static float[] ClsPool(Tensor<float> lhs, int hidden)
     {
         var pooled = new float[hidden];
-        if (seqLen == 0) return pooled;
-        for (var t = 0; t < seqLen; t++)
-        {
-            for (var h = 0; h < hidden; h++)
-            {
-                pooled[h] += lhs[0, t, h];
-            }
-        }
-        for (var h = 0; h < hidden; h++) pooled[h] /= seqLen;
+        for (var h = 0; h < hidden; h++) pooled[h] = lhs[0, 0, h];
         return pooled;
     }
 

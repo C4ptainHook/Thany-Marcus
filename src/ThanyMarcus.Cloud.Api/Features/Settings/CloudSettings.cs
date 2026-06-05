@@ -11,6 +11,11 @@ public sealed class CloudSettings : IHasUpdatedAt
     public string LlmMode { get; set; } = LlmModes.Safe;
     public byte[]? EncryptedExternalApiKey { get; set; }
     public string? LlmModel { get; set; }
+
+    public double? RelatedNotesMaxDistanceAuto { get; set; }
+    public int? RelatedNotesAutoNoteCount { get; set; }
+    public int? RelatedNotesAutoEntityCount { get; set; }
+
     public Instant UpdatedAt { get; set; }
 }
 

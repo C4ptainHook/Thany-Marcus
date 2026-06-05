@@ -114,7 +114,7 @@ public sealed class EntitySuggestionAggregatorTests(PostgresFixture postgres)
         using var db = NewDb();
         var agg = new EntitySuggestionAggregator(db, Opts);
         var now = SystemClock.Instance.GetCurrentInstant();
-        await agg.AppendOrCreateAsync(Candidate(canonical, kind), noteId, "surrounding", embedding, now, ct);
+        await agg.AppendOrCreateAsync(Candidate(canonical, kind), noteId, "surrounding", embedding, now, null, ct);
         await db.SaveChangesAsync(ct);
     }
 
@@ -124,8 +124,8 @@ public sealed class EntitySuggestionAggregatorTests(PostgresFixture postgres)
         var agg = new EntitySuggestionAggregator(db, Opts);
         var now = SystemClock.Instance.GetCurrentInstant();
         var cand = Candidate("Michael Jackson", EntityKind.Person);
-        await agg.AppendOrCreateAsync(cand, noteId, "ctx a", Vec("Michael Jackson"), now, ct);
-        await agg.AppendOrCreateAsync(cand, noteId, "ctx b", Vec("Michael Jackson"), now, ct);
+        await agg.AppendOrCreateAsync(cand, noteId, "ctx a", Vec("Michael Jackson"), now, null, ct);
+        await agg.AppendOrCreateAsync(cand, noteId, "ctx b", Vec("Michael Jackson"), now, null, ct);
         await db.SaveChangesAsync(ct);
     }
 

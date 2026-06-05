@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using NodaTime;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
+using ThanyMarcus.Cloud.Api.Features.Settings;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars.Embedding;
@@ -20,7 +20,8 @@ public static partial class RelatedNotesEndpoint
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-    public sealed record RelatedNotesRequest(string? Body, Guid? NoteId, int? K);
+    public sealed record RelatedNotesRequest(
+        string? Body, Guid? NoteId, int? K, Guid? ExcludeNoteId, double? MaxDistance);
 
     public sealed record RelatedNotesItem(
         Guid Id,
@@ -42,8 +43,8 @@ public static partial class RelatedNotesEndpoint
         CloudDbContext db,
         IEmbeddingClient embeddings,
         QueryEmbeddingCache cache,
-        IClock clock,
         IOptions<RelatedNotesOptions> opts,
+        RelatedNotesCalibrationSignal calibrationSignal,
         CancellationToken ct)
     {
         var o = opts.Value;
@@ -59,7 +60,7 @@ public static partial class RelatedNotesEndpoint
         var k = Math.Clamp(req.K ?? o.DefaultK, 1, o.MaxK);
 
         float[] queryVec;
-        Guid? excludeId = null;
+        Guid? excludeId;
 
         if (hasBody)
         {
@@ -71,6 +72,7 @@ public static partial class RelatedNotesEndpoint
                     statusCode: StatusCodes.Status400BadRequest);
             }
             queryVec = await cache.GetOrAddAsync(body, embeddings, ct);
+            excludeId = req.ExcludeNoteId;
         }
         else
         {
@@ -87,14 +89,21 @@ public static partial class RelatedNotesEndpoint
             excludeId = noteId;
         }
 
-        var now = clock.GetCurrentInstant();
-        var excludeAfter = now - Duration.FromHours(o.ExcludeRecentHours);
+        var autoDistance = await db.CloudSettings
+            .Where(s => s.Id == CloudSettings.SingletonId)
+            .Select(s => s.RelatedNotesMaxDistanceAuto)
+            .SingleAsync(ct);
+        var maxDistance = RelatedNotesAutoCalibration.ResolveEffectiveMaxDistance(req.MaxDistance, autoDistance, o);
 
-        var neighbors = await NoteVectorQueries.NearestAsync(
-            db, queryVec, k, excludeId, excludeAfter, ct);
+        var fanout = Math.Max(o.Fanout, k);
+        var candidates = await NoteVectorQueries.NearestAsync(
+            db, queryVec, fanout, excludeId, ct);
 
-        var items = neighbors
-            .Where(n => n.Distance <= o.MaxDistance)
+        var withinThreshold = candidates
+            .Where(n => n.Distance <= maxDistance)
+            .ToList();
+
+        var items = Mmr.Select(queryVec, withinThreshold, k, o.Lambda)
             .Select(n => new RelatedNotesItem(
                 Id: n.Id,
                 RelativePath: n.RelativePath,
@@ -102,6 +111,8 @@ public static partial class RelatedNotesEndpoint
                 Snippet: ExtractSnippet(n.BodyOutput),
                 Distance: n.Distance))
             .ToList();
+
+        if (o.AutoCalibrationEnabled) calibrationSignal.Trigger();
 
         return Results.Ok(new RelatedNotesResponse(items));
     }
