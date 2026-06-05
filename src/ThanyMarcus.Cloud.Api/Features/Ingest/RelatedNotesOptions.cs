@@ -2,9 +2,10 @@ namespace ThanyMarcus.Cloud.Api.Features.Ingest;
 
 public sealed class RelatedNotesOptions
 {
-    public double MaxDistance { get; set; } = 0.7;
-    public double MaxDistanceFloor { get; set; } = 0.4;
-    public double MaxDistanceCeiling { get; set; } = 0.9;
+    public double MaxDistance { get; set; } = 0.15;
+    public double MaxDistanceFloor { get; set; } = 0.10;
+    public double MaxDistanceCeiling { get; set; } = 0.28;
+    public double QueryDocOffset { get; set; } = 0.04;
     public int DefaultK { get; set; } = 5;
     public int MaxK { get; set; } = 20;
     public int MinBodyChars { get; set; } = 30;

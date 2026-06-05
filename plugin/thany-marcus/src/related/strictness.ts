@@ -17,9 +17,9 @@ export const RELATED_STRICTNESS_LABEL: Record<RelatedStrictness, string> = {
 export function strictnessToMaxDistance(s: RelatedStrictness): number | undefined {
   switch (s) {
     case "strict":
-      return 0.55;
+      return 0.12;
     case "loose":
-      return 0.85;
+      return 0.19;
     case "balanced":
       return undefined;
   }

@@ -69,7 +69,8 @@ public sealed partial class RelatedNotesCalibrator
             return CalibrationStatus.WeakSeparation;
         }
 
-        var clamped = Math.Clamp(outcome.Threshold, o.MaxDistanceFloor, o.MaxDistanceCeiling);
+        var queryDocScaled = outcome.Threshold + o.QueryDocOffset;
+        var clamped = Math.Clamp(queryDocScaled, o.MaxDistanceFloor, o.MaxDistanceCeiling);
         var stored = RelatedNotesAutoCalibration.ApplyHysteresis(
             settings.RelatedNotesMaxDistanceAuto, clamped, o.AutoHysteresisMargin);
 

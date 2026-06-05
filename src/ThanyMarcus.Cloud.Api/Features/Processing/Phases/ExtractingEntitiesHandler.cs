@@ -99,7 +99,9 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         foreach (var m in mentions)
         {
             if (m is null) continue;
-            if (m.Confidence >= thresholds.MentionMin) candidates.Add(m);
+            if (m.Confidence < thresholds.MentionMin) continue;
+            if (!EntityNameHeuristic.LooksLikeName(m.CandidateCanonical)) continue;
+            candidates.Add(m);
         }
 
         var newMentions = new List<Mention>();
@@ -151,6 +153,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
 
             var alias = cand.AnchorText?.Trim() ?? "";
             if (alias.Length > 0 &&
+                EntityNameHeuristic.LooksLikeName(alias) &&
                 !target.Aliases.Contains(alias, StringComparer.OrdinalIgnoreCase) &&
                 !string.Equals(target.CanonicalName, alias, StringComparison.OrdinalIgnoreCase) &&
                 !await stubWriter.IsAliasClaimedElsewhereAsync(target.Id, alias, ct))
