@@ -9,6 +9,7 @@ public sealed class Entity : IHasUpdatedAt
     public Guid Id { get; init; } = Guid.CreateVersion7();
     public string Kind { get; set; } = null!;
     public string CanonicalName { get; set; } = null!;
+    public string? DisplayName { get; set; }
     public string[] Aliases { get; set; } = [];
     public string? Description { get; set; }
     public Vector? Embedding { get; set; }

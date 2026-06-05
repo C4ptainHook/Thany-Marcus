@@ -4,41 +4,35 @@ export type NotifyOpts = {
   onClick?: () => void;
 };
 
-let cached: NotificationPermission =
-  typeof Notification !== "undefined" ? Notification.permission : "denied";
-
 export function isSupported(): boolean {
-  return typeof Notification !== "undefined";
+  return typeof Notification !== 'undefined';
+}
+
+export function getPermission(): NotificationPermission {
+  return isSupported() ? Notification.permission : 'denied';
 }
 
 export function isEnabled(): boolean {
-  return cached === "granted";
+  return getPermission() === 'granted';
 }
 
-export async function requestPermission(): Promise<boolean> {
-  if (!isSupported()) return false;
-  if (cached === "granted") return true;
-  if (cached === "denied") return false;
+export async function requestPermission(): Promise<NotificationPermission> {
+  if (!isSupported()) return 'denied';
+  if (Notification.permission !== 'default') return Notification.permission;
   try {
-    const result = await Notification.requestPermission();
-    cached = result;
-    return result === "granted";
+    return await Notification.requestPermission();
   } catch {
-    return false;
+    return 'denied';
   }
 }
 
 export function notify({ title, body, onClick }: NotifyOpts): void {
-  if (!isSupported() || !isEnabled()) return;
+  if (!isEnabled()) return;
   const n = new Notification(title, { body, silent: true });
   if (onClick) {
     n.onclick = () => {
-      try { window.focus(); } catch { /* ignore */ }
+      window.focus();
       onClick();
     };
   }
-}
-
-export function __resetForTests(p: NotificationPermission): void {
-  cached = p;
 }

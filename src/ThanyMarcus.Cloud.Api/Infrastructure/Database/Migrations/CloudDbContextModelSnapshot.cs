@@ -57,6 +57,10 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text")
+                        .HasColumnName("display_name");
+
                     b.Property<Vector>("Embedding")
                         .HasColumnType("vector(256)")
                         .HasColumnName("embedding");
@@ -248,11 +252,22 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnName("occurrences")
                         .HasDefaultValueSql("'[]'::jsonb");
 
+                    b.Property<double?>("SuggestedMergeDistance")
+                        .HasColumnType("double precision")
+                        .HasColumnName("suggested_merge_distance");
+
+                    b.Property<Guid?>("SuggestedMergeEntityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("suggested_merge_entity_id");
+
                     b.HasKey("Id")
                         .HasName("pk_entity_suggestions");
 
                     b.HasIndex("AcceptedEntityId")
                         .HasDatabaseName("ix_entity_suggestions_accepted_entity_id");
+
+                    b.HasIndex("SuggestedMergeEntityId")
+                        .HasDatabaseName("ix_entity_suggestions_suggested_merge_entity_id");
 
                     b.HasIndex("OccurrenceCount", "LastSeenAt")
                         .IsDescending()
@@ -851,6 +866,18 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasColumnType("text")
                         .HasColumnName("llm_model");
 
+                    b.Property<int?>("RelatedNotesAutoEntityCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("related_notes_auto_entity_count");
+
+                    b.Property<int?>("RelatedNotesAutoNoteCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("related_notes_auto_note_count");
+
+                    b.Property<double?>("RelatedNotesMaxDistanceAuto")
+                        .HasColumnType("double precision")
+                        .HasColumnName("related_notes_max_distance_auto");
+
                     b.Property<Instant>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -907,6 +934,12 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasForeignKey("AcceptedEntityId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_entity_suggestions_entities_accepted_entity_id");
+
+                    b.HasOne("ThanyMarcus.Cloud.Api.Features.Entities.Entity", null)
+                        .WithMany()
+                        .HasForeignKey("SuggestedMergeEntityId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_entity_suggestions_entities_suggested_merge_entity_id");
                 });
 
             modelBuilder.Entity("ThanyMarcus.Cloud.Api.Features.Ingest.Attachment", b =>

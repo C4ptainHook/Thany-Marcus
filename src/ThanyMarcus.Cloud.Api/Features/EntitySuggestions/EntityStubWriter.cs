@@ -1,8 +1,10 @@
 using System.Buffers;
+using System.Data;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NodaTime;
+using Npgsql;
 using ThanyMarcus.Cloud.Api.Features.Entities;
 using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
@@ -38,7 +40,7 @@ public sealed class EntityStubWriter
     public string ComputeStubRelativePath(string canonical)
     {
         var folder = opts.CurrentValue.EntitySuggestions.StubsFolder.Trim().Trim('/');
-        if (folder.Length == 0) folder = "Entities";
+        if (folder.Length == 0) folder = "_Entities/Stubs";
         var name = SanitizeFilename(canonical);
         return $"{folder}/{name}.md";
     }
@@ -79,6 +81,51 @@ public sealed class EntityStubWriter
         entity.StubNoteId = note.Id;
         entity.UpdatedAt = now;
         return note;
+    }
+
+    // True when another live entity already owns this surface form (as its canonical name or an
+    // alias) or a literal user note carries it as a basename — cases where Obsidian would resolve
+    // the alias ambiguously. Cross-language aliasing widens this surface, so the guard is
+    // load-bearing: an ambiguous alias resolves to an arbitrary target.
+    public async Task<bool> IsAliasClaimedElsewhereAsync(Guid entityId, string alias, CancellationToken ct)
+    {
+        var trimmed = alias?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0) return false;
+
+        var conn = (NpgsqlConnection)db.Database.GetDbConnection();
+        var opened = false;
+        if (conn.State != ConnectionState.Open)
+        {
+            await conn.OpenAsync(ct);
+            opened = true;
+        }
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT EXISTS (
+                    SELECT 1 FROM entities e
+                     WHERE e.deleted_at IS NULL
+                       AND e.id <> @id
+                       AND (lower(e.canonical_name) = lower(@alias)
+                            OR EXISTS (SELECT 1 FROM unnest(e.aliases) a WHERE lower(a) = lower(@alias)))
+                    UNION ALL
+                    SELECT 1 FROM notes n
+                     WHERE n.deleted_at IS NULL
+                       AND n.is_hub = false
+                       AND n.kind <> 'entity_stub'
+                       AND lower(regexp_replace(coalesce(n.relative_path, ''), '^.*/', '')) = lower(@alias) || '.md'
+                )
+                """;
+            cmd.Parameters.AddWithValue("id", entityId);
+            cmd.Parameters.AddWithValue("alias", trimmed);
+            var result = await cmd.ExecuteScalarAsync(ct);
+            return result is true;
+        }
+        finally
+        {
+            if (opened) await conn.CloseAsync();
+        }
     }
 
     public async Task<Note?> UpdateAliasesAsync(Entity entity, IReadOnlyList<string> newAliases, CancellationToken ct)

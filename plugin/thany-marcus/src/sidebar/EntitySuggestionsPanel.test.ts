@@ -20,6 +20,7 @@ function suggestion(over: Partial<EntitySuggestion> = {}): EntitySuggestion {
       anchorText: "Mike",
       surroundingText: "Mike said hi",
     },
+    suggestedMerge: over.suggestedMerge ?? null,
   };
 }
 
@@ -128,6 +129,48 @@ describe("EntitySuggestionsPanel", () => {
       canonicalText: "Michael Jackson",
       aliases: ["Mike", "MJ", "Jackson"],
     });
+  });
+
+  it("renders a merge button for a cross-language proposal and accepts with the target id", async () => {
+    const accept = vi.fn(async () => ({ ok: true, entityId: "kyiv" }) as AcceptEntitySuggestionResult);
+    const onAccepted = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const panel = new EntitySuggestionsPanel(
+      {
+        list: vi.fn(async () => [
+          suggestion({
+            id: "a",
+            canonicalText: "Kyiv",
+            kind: "place",
+            suggestedMerge: { entityId: "kyiv", displayName: "Київ", kind: "place", distance: 0.33 },
+          }),
+        ]),
+        accept,
+        dismiss: vi.fn(async () => undefined),
+        edit: vi.fn(async () => undefined),
+      },
+      container,
+      { onAccepted },
+    );
+    await panel.refresh();
+
+    const merge = container.querySelector(".tm-suggestions__merge") as HTMLButtonElement;
+    expect(merge).not.toBeNull();
+    expect(merge.textContent).toContain("Київ");
+    merge.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(accept).toHaveBeenCalledWith("a", "kyiv");
+    expect(onAccepted).toHaveBeenCalledWith("kyiv");
+    expect(container.querySelectorAll(".tm-suggestions__row").length).toBe(0);
+  });
+
+  it("no merge button when there is no proposal", async () => {
+    const { panel, container } = newPanel({ list: vi.fn(async () => [suggestion({ id: "a" })]) });
+    await panel.refresh();
+    expect(container.querySelector(".tm-suggestions__merge")).toBeNull();
   });
 
   it("path conflict on Accept keeps the row and notifies", async () => {

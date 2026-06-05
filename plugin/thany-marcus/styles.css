@@ -451,6 +451,11 @@ body.tm-pixel-chrome .tm-related__header {
   margin-bottom: 6px;
 }
 
+.tm-related__actions {
+  display: flex;
+  gap: 6px;
+}
+
 .tm-related__open {
   font-size: 0.78em;
   border: 1px solid var(--tm-accent);
@@ -459,6 +464,44 @@ body.tm-pixel-chrome .tm-related__header {
   border-radius: 4px;
   padding: 2px 8px;
   cursor: pointer;
+}
+
+.tm-related__strictness {
+  display: flex;
+  margin-left: auto;
+  gap: 0;
+}
+
+.tm-related__strictness-btn {
+  font-size: 0.72em;
+  text-transform: none;
+  letter-spacing: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-left-width: 0;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  padding: 1px 7px;
+  cursor: pointer;
+}
+
+.tm-related__strictness-btn:first-child {
+  border-left-width: 1px;
+  border-radius: 4px 0 0 4px;
+}
+
+.tm-related__strictness-btn:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.tm-related__strictness-btn.is-active {
+  background: var(--tm-accent);
+  border-color: var(--tm-accent);
+  color: #fff;
+}
+
+body.tm-pixel-chrome .tm-related__strictness-btn {
+  font-family: var(--tm-font-pixel);
+  font-size: 0.95em;
 }
 
 /* ── Status-bar anchor ─────────────────────────────────────────────────── */
@@ -836,6 +879,17 @@ body.tm-pixel-chrome .tm-suggestions__header {
 .tm-suggestions__accept {
   border-color: var(--tm-accent);
   color: var(--tm-accent);
+}
+
+.tm-suggestions__merge-hint {
+  font-size: 10px;
+  color: var(--tm-accent);
+}
+
+.tm-suggestions__merge {
+  border-color: var(--tm-accent);
+  background: var(--tm-accent);
+  color: var(--background-primary);
 }
 
 /* ── Toasts ────────────────────────────────────────────────────────────── */

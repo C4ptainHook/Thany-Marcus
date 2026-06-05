@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using NodaTime;
 using Npgsql;
 using ThanyMarcus.Cloud.Api.Features.Entities;
@@ -8,6 +9,7 @@ using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Features.Processing;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
+using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 using ThanyMarcus.Shared.PluginApi;
 
 namespace ThanyMarcus.Cloud.Api.Features.Sync;
@@ -66,6 +68,11 @@ public static class SyncMaintenanceEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        group.MapPost("/inbox/reroute", InboxRerouteAsync)
+            .WithName("SyncInboxReroute")
+            .Produces<FolderDissolveResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
     }
 
     private static async Task<IResult> ListFoldersAsync(CloudDbContext db, CancellationToken ct)
@@ -82,10 +89,15 @@ public static class SyncMaintenanceEndpoints
         FolderRef req,
         CloudDbContext db,
         IClock clock,
+        FolderRouter router,
+        IOptionsMonitor<LlmIntelligenceOptions> opts,
+        InboxRerouteSignal rerouteSignal,
         CancellationToken ct)
     {
         var path = (req.Folder ?? "").Trim().Trim('/');
         if (path.Length == 0) return Results.BadRequest();
+
+        var hadCandidates = (await router.LoadCandidatesAsync(opts.CurrentValue.RoutingFoldersMax, ct)).Count > 0;
 
         var now = clock.GetCurrentInstant();
         var id = Guid.CreateVersion7();
@@ -94,7 +106,20 @@ public static class SyncMaintenanceEndpoints
             VALUES ({id}, {path}, {now}, {now})
             ON CONFLICT (path) DO UPDATE SET deleted_at = NULL, updated_at = {now}
             """, ct);
+
+        if (!hadCandidates && FolderRouter.CandidateSegment(path) is not null)
+        {
+            rerouteSignal.Trigger();
+        }
         return Results.NoContent();
+    }
+
+    private static async Task<IResult> InboxRerouteAsync(
+        InboxRerouteService service,
+        CancellationToken ct)
+    {
+        var result = await service.RunAsync(ct);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> UnregisterFolderAsync(

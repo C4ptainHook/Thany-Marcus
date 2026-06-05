@@ -10,6 +10,16 @@ public sealed class LlmIntelligenceOptions
     public int HubMentionWindow { get; init; } = 20;
     public int SurroundingTextChars { get; init; } = 200;
     public int RoutingFoldersMax { get; init; } = 50;
+    public int RerouteMaxBatch { get; init; } = 200;
+    public int RerouteCooldownSeconds { get; init; } = 30;
+
+    // How many sample mention contexts to fold into an entity/candidate embedding alongside the
+    // name. Context is what carries the cross-lingual signal (Київ↔Kyiv) a bare name lacks.
+    public int EmbeddingContextSamples { get; init; } = 3;
+
+    // Margin a challenger surface form must exceed the current DisplayName's mention count by
+    // before the label flips. Decoupled from CanonicalName, so flipping moves nothing in the graph.
+    public int DisplayNameHysteresisMargin { get; init; } = 2;
 }
 
 public sealed class ThresholdsOptions
@@ -20,13 +30,17 @@ public sealed class ThresholdsOptions
     // Max cosine distance for a candidate mention to count as a confident match against an
     // existing entity (curated) or an open suggestion. Replaces the dedup-LLM's alias_of decision.
     public double SuggestionMatchDistance { get; init; } = 0.25;
+
+    // Upper bound of the gray band: a candidate landing between SuggestionMatchDistance and this
+    // is too far to auto-merge but near enough to propose a cross-language merge for user confirm.
+    public double GrayZoneMergeMaxDistance { get; init; } = 0.45;
 }
 
 public sealed class EntitySuggestionsOptions
 {
     public int OccurrenceThreshold { get; init; } = 3;
     public int DistinctNoteThreshold { get; init; } = 2;
-    public string StubsFolder { get; init; } = "Entities";
+    public string StubsFolder { get; init; } = "_Entities/Stubs";
 }
 
 public sealed class PgvectorOptions

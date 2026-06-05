@@ -9,6 +9,7 @@ using ThanyMarcus.Cloud.Api.Features.Ingest;
 using ThanyMarcus.Cloud.Api.Features.Processing;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm;
 using ThanyMarcus.Cloud.Api.Infrastructure.Llm.Prompts;
+using ThanyMarcus.Cloud.Api.Infrastructure.Sidecars;
 using ThanyMarcus.Cloud.Tests.Infrastructure;
 using ThanyMarcus.Cloud.Tests.Infrastructure.Embedding;
 
@@ -99,7 +100,7 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
         await postgres.ResetAsync();
 
         var existingEntityId = Guid.CreateVersion7();
-        await SeedExistingEntityAsync(existingEntityId, "Acme Corp", mentionCount: 2);
+        await SeedExistingEntityAsync(existingEntityId, "Acme Corp", mentionCount: 2, embedding: Axis(0));
 
         var (noteId, jobId) = await SeedJobAsync(IngestJobStatus.ExtractingEntities,
             bodyOutput: "Acme Corp won the contract.");
@@ -114,7 +115,8 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
         };
         var factory = new ConfigurableLlmClientFactory(llm);
 
-        await using var sp = BuildHost(factory);
+        // Candidate embeds onto the same vector as the entity → distance 0 → tight auto-merge.
+        await using var sp = BuildHost(factory, _ => Axis(0));
         var job = await LoadJobAsync(jobId);
         await DispatchAsync(sp, job, ct);
 
@@ -140,6 +142,80 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task GrayZone_match_routes_to_suggestion_with_merge_proposal()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+
+        // Curated Ukrainian place; the English surface form lands in the gray band (0.25–0.45).
+        var kyivId = Guid.CreateVersion7();
+        await SeedExistingEntityAsync(kyivId, "Київ", mentionCount: 5, embedding: Axis(0),
+            kind: EntityKind.Place);
+
+        var (_, jobId) = await SeedJobAsync(IngestJobStatus.ExtractingEntities,
+            bodyOutput: "We flew into Kyiv last spring.");
+
+        var llm = new ConfigurableLlmClient
+        {
+            ExtractResponse = () => new EntityExtractionDto(new[]
+            {
+                new MentionCandidateDto("Kyiv", 13, 17, EntityKind.Place, "Kyiv", EmptyAliases, 0.95),
+            }),
+        };
+        var factory = new ConfigurableLlmClientFactory(llm);
+
+        await using var sp = BuildHost(factory, _ => AtDistance(0.35));
+        var job = await LoadJobAsync(jobId);
+        await DispatchAsync(sp, job, ct);
+
+        using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
+        // No auto-merge: the entity gets no new mention and no new alias.
+        var kyiv = await probe.Entities.SingleAsync(e => e.Id == kyivId, ct);
+        kyiv.MentionCount.ShouldBe(5);
+        kyiv.Aliases.ShouldNotContain("Kyiv");
+
+        var suggestion = await probe.EntitySuggestions.SingleAsync(ct);
+        suggestion.CanonicalText.ShouldBe("Kyiv");
+        suggestion.SuggestedMergeEntityId.ShouldBe(kyivId);
+        suggestion.SuggestedMergeDistance!.Value.ShouldBe(0.35, 0.01);
+    }
+
+    [Fact]
+    public async Task TightMatch_appends_alias_and_syncs_stub_frontmatter()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+
+        // Curated entity that already has a materialized stub — the new surface form must reach it.
+        var kyivId = Guid.CreateVersion7();
+        await SeedExistingEntityAsync(kyivId, "Київ", mentionCount: 1, embedding: Axis(0),
+            kind: EntityKind.Place, withStub: true);
+
+        var (_, jobId) = await SeedJobAsync(IngestJobStatus.ExtractingEntities,
+            bodyOutput: "Знову до Києва.");
+
+        var llm = new ConfigurableLlmClient
+        {
+            ExtractResponse = () => new EntityExtractionDto(new[]
+            {
+                new MentionCandidateDto("Києва", 8, 13, EntityKind.Place, "Київ", EmptyAliases, 0.95),
+            }),
+        };
+        var factory = new ConfigurableLlmClientFactory(llm);
+
+        await using var sp = BuildHost(factory, _ => Axis(0));
+        var job = await LoadJobAsync(jobId);
+        await DispatchAsync(sp, job, ct);
+
+        using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
+        var kyiv = await probe.Entities.SingleAsync(e => e.Id == kyivId, ct);
+        kyiv.Aliases.ShouldContain("Києва");
+
+        var stub = await probe.Notes.SingleAsync(n => n.Id == kyiv.StubNoteId!.Value, ct);
+        stub.BodyOutput!.ShouldContain("- Києва");
+    }
+
+    [Fact]
     public async Task Deleted_note_breaks_loop_without_inserting_anything()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -162,7 +238,7 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
         llm.Calls.ShouldBeEmpty();
     }
 
-    private ServiceProvider BuildHost(ConfigurableLlmClientFactory factory) =>
+    private ServiceProvider BuildHost(ConfigurableLlmClientFactory factory, Func<string, float[]>? embed = null) =>
         ProcessingTestHost.Build(postgres.ConnectionString, customize: services =>
         {
             for (var i = services.Count - 1; i >= 0; i--)
@@ -170,27 +246,69 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
                 var t = services[i].ServiceType;
                 if (t == typeof(ILlmClient) || t == typeof(ILlmClientFactory))
                     services.RemoveAt(i);
+                else if (embed is not null && t == typeof(IEmbeddingClient))
+                    services.RemoveAt(i);
             }
             services.AddSingleton<ILlmClient>(factory.Client);
             services.AddSingleton<ILlmClientFactory>(factory);
+            if (embed is not null)
+                services.AddSingleton<IEmbeddingClient>(new FakeEmbeddingClient(embed));
         });
 
-    private async Task SeedExistingEntityAsync(Guid id, string canonical, int mentionCount)
+    // Unit vector along axis i — a valid, normalised embedding for controlling kNN distance.
+    private static float[] Axis(int i)
+    {
+        var v = new float[FakeEmbeddingClient.Dimensions];
+        v[i] = 1f;
+        return v;
+    }
+
+    // Unit vector at exactly cosine distance d from Axis(0).
+    private static float[] AtDistance(double d)
+    {
+        var v = new float[FakeEmbeddingClient.Dimensions];
+        var a = 1.0 - d;
+        v[0] = (float)a;
+        v[1] = (float)Math.Sqrt(Math.Max(0, 1 - a * a));
+        return v;
+    }
+
+    private async Task SeedExistingEntityAsync(
+        Guid id, string canonical, int mentionCount, float[] embedding,
+        string kind = EntityKind.Organization, bool withStub = false)
     {
         var now = SystemClock.Instance.GetCurrentInstant();
         using var db = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
-        db.Entities.Add(new Entity
+        var entity = new Entity
         {
             Id            = id,
-            Kind          = EntityKind.Organization,
+            Kind          = kind,
             CanonicalName = canonical,
             Source        = EntitySource.User,
             MentionCount  = mentionCount,
-            // Embed the canonical with the same fake embedder the host uses so the kNN distance is 0.
-            Embedding     = new Vector(FakeEmbeddingClient.DeterministicUnitVector(canonical)),
+            Embedding     = new Vector(embedding),
             CreatedAt     = now,
             UpdatedAt     = now,
-        });
+        };
+        db.Entities.Add(entity);
+        if (withStub)
+        {
+            var stub = new Note
+            {
+                Id           = Guid.CreateVersion7(),
+                CapturedAt   = now,
+                Status       = NoteStatus.Ready,
+                Kind         = NoteKind.EntityStub,
+                BodyInput    = string.Empty,
+                BodyOutput   = EntityStubWriter.BuildStubMarkdown(canonical, kind, entity.Aliases, id),
+                RelativePath = $"_Entities/Stubs/{canonical}.md",
+                Tags         = [],
+                CreatedAt    = now,
+                UpdatedAt    = now,
+            };
+            db.Notes.Add(stub);
+            entity.StubNoteId = stub.Id;
+        }
         await db.SaveChangesAsync();
     }
 

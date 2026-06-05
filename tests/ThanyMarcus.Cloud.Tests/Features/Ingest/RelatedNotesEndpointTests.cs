@@ -58,6 +58,43 @@ public sealed class RelatedNotesEndpointTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Body_path_honors_exclude_note_id()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var token = await SeedPluginTokenAsync(postgres);
+        var queryVec = FakeEmbeddingClient.DeterministicUnitVector(BodyDraft);
+        var excludedId = await SeedRelatedNoteAsync(postgres, queryVec, hoursAgo: 24);
+        var keptId = await SeedRelatedNoteAsync(postgres, queryVec, hoursAgo: 24);
+
+        var fake = new FakeEmbeddingClient(FakeEmbeddingClient.DeterministicUnitVector);
+        await using var factory = new CloudApiFactory
+        {
+            ConnectionString = postgres.ConnectionString,
+            CustomizeServices = svc =>
+            {
+                for (var i = svc.Count - 1; i >= 0; i--)
+                {
+                    if (svc[i].ServiceType == typeof(IEmbeddingClient)) svc.RemoveAt(i);
+                }
+                svc.AddSingleton<IEmbeddingClient>(fake);
+            },
+        };
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var resp = await client.PostAsJsonAsync(
+            "/api/notes/related",
+            new { body = BodyDraft, k = 5, excludeNoteId = excludedId },
+            ct);
+        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var payload = await resp.Content.ReadFromJsonAsync<RelatedNotesEndpoint.RelatedNotesResponse>(cancellationToken: ct);
+        payload.ShouldNotBeNull();
+        payload!.Items.ShouldNotContain(i => i.Id == excludedId);
+        payload.Items.ShouldContain(i => i.Id == keptId);
+    }
+
+    [Fact]
     public async Task NoteId_path_uses_stored_embedding_no_embed_call()
     {
         var ct = TestContext.Current.CancellationToken;

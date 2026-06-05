@@ -169,6 +169,12 @@ export default class ThanyMarcusPlugin extends Plugin {
       callback: () => void this.syncLoop.runNow(),
     });
 
+    this.addCommand({
+      id: "refile-inbox",
+      name: "Re-file Inbox",
+      callback: () => void this.refileInbox(),
+    });
+
     this.registerObsidianProtocolHandler("thany-marcus-connect", async (params) => {
       const cloudUrl = params.cloudUrl;
       const token = params.token;
@@ -495,6 +501,18 @@ export default class ThanyMarcusPlugin extends Plugin {
     });
   }
 
+  private async refileInbox(): Promise<void> {
+    if (!this.settings.cloudUrl || !this.settings.token) {
+      new Notice("Thany: connect to your cloud first.");
+      return;
+    }
+    await this.enqueueIntent({
+      kind: "inbox_reroute",
+      opId: "inbox_reroute",
+      enqueuedAt: Date.now(),
+    });
+  }
+
   // ── Intent executor (drives the durable queue) ───────────────────────────
 
   private intentExecutor(): IntentExecutor {
@@ -520,6 +538,11 @@ export default class ThanyMarcusPlugin extends Plugin {
       },
       folderRegister: (folder) => this.api.registerFolder(folder),
       folderUnregister: (folder) => this.api.unregisterFolder(folder),
+      inboxReroute: async () => {
+        const res = await this.api.inboxReroute();
+        this.syncLoop.trigger();
+        new Notice(`Thany: re-filing ${res.affectedCount} note(s)…`);
+      },
     };
   }
 
@@ -651,11 +674,16 @@ export default class ThanyMarcusPlugin extends Plugin {
           this.brow = null;
         },
       },
-      this.app.workspace,
+      this.app,
       {
         relatedNotes: (req, signal) => this.api.relatedNotes(req, signal),
       },
       (vaultPath) => this.app.vault.adapter.getResourcePath(vaultPath),
+      () => this.settings.relatedStrictness,
+      (s) => {
+        this.settings.relatedStrictness = s;
+        void this.saveState();
+      },
     );
     this.brow.attach(view, state);
   }

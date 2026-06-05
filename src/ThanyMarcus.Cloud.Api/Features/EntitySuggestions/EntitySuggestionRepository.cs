@@ -27,12 +27,26 @@ public sealed class EntitySuggestionRepository
             .OrderByDescending(s => s.OccurrenceCount)
             .ThenByDescending(s => s.LastSeenAt)
             .Take(top)
+            .Select(s => new
+            {
+                Suggestion = s,
+                MergeTarget = db.Entities
+                    .Where(e => e.Id == s.SuggestedMergeEntityId && e.DeletedAt == null)
+                    .Select(e => new { e.Id, e.DisplayName, e.CanonicalName, e.Kind })
+                    .FirstOrDefault(),
+            })
             .ToListAsync(ct);
 
-        return rows.Select(ToDto).ToList();
+        return rows.Select(r => ToDto(r.Suggestion, r.MergeTarget is null
+            ? null
+            : new EntitySuggestionMergeProposalDto(
+                r.MergeTarget.Id,
+                r.MergeTarget.DisplayName ?? r.MergeTarget.CanonicalName,
+                r.MergeTarget.Kind,
+                r.Suggestion.SuggestedMergeDistance ?? 0))).ToList();
     }
 
-    public static EntitySuggestionDto ToDto(EntitySuggestion s)
+    public static EntitySuggestionDto ToDto(EntitySuggestion s, EntitySuggestionMergeProposalDto? mergeProposal = null)
     {
         var occurrences = EntitySuggestionOccurrences.Parse(s.Occurrences);
         var sample = occurrences.Count > 0 ? occurrences[^1] : null;
@@ -47,6 +61,7 @@ public sealed class EntitySuggestionRepository
             LastSeenAt: s.LastSeenAt.ToDateTimeOffset(),
             SampleOccurrence: sample is null
                 ? null
-                : new EntitySuggestionOccurrenceDto(sample.NoteId, sample.AnchorText, sample.SurroundingText));
+                : new EntitySuggestionOccurrenceDto(sample.NoteId, sample.AnchorText, sample.SurroundingText),
+            SuggestedMerge: mergeProposal);
     }
 }

@@ -28,5 +28,8 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
+  },
+  "dependencies": {
+    "svelte-sonner": "1.1.1"
   }
 }

@@ -117,6 +117,8 @@ export interface RelatedNotesRequest {
   body?: string;
   noteId?: string;
   k?: number;
+  excludeNoteId?: string;
+  maxDistance?: number;
 }
 
 export interface IngestJobDto {
@@ -140,6 +142,13 @@ export interface EntitySuggestionOccurrence {
   surroundingText: string;
 }
 
+export interface EntitySuggestionMergeProposal {
+  entityId: string;
+  displayName: string;
+  kind: string;
+  distance: number;
+}
+
 export interface EntitySuggestion {
   id: string;
   canonicalText: string;
@@ -150,6 +159,7 @@ export interface EntitySuggestion {
   firstSeenAt: string;
   lastSeenAt: string;
   sampleOccurrence?: EntitySuggestionOccurrence | null;
+  suggestedMerge?: EntitySuggestionMergeProposal | null;
 }
 
 interface ListEntitySuggestionsResponse {
@@ -345,6 +355,18 @@ export class ApiClient {
     });
   }
 
+  async inboxReroute(): Promise<{
+    affectedCount: number;
+    desired: { noteId: string; relativePath: string }[];
+  }> {
+    return this.json({
+      url: `${this.base()}/api/sync/inbox/reroute`,
+      method: "POST",
+      contentType: "application/json",
+      body: "{}",
+    });
+  }
+
   async listFolders(): Promise<string[]> {
     const data = await this.json<{ folders: string[] }>({
       url: `${this.base()}/api/sync/folders`,
@@ -498,9 +520,13 @@ export class ApiClient {
     return data.suggestions ?? [];
   }
 
-  async acceptEntitySuggestion(id: string): Promise<AcceptEntitySuggestionResult> {
+  async acceptEntitySuggestion(
+    id: string,
+    mergeIntoEntityId?: string,
+  ): Promise<AcceptEntitySuggestionResult> {
+    const query = mergeIntoEntityId ? `?mergeInto=${encodeURIComponent(mergeIntoEntityId)}` : "";
     const res = await requestUrl({
-      url: `${this.base()}/api/entity-suggestions/${id}/accept`,
+      url: `${this.base()}/api/entity-suggestions/${id}/accept${query}`,
       method: "POST",
       headers: this.authHeader(),
       throw: false,

@@ -49,8 +49,8 @@ public sealed class EntityStubWriterTests(PostgresFixture postgres)
     {
         using var db = NewDb();
         var w = new EntityStubWriter(db, DefaultOpts, SystemClock.Instance);
-        w.ComputeStubRelativePath("Michael Jackson").ShouldBe("Entities/Michael Jackson.md");
-        w.ComputeStubRelativePath("A/B:C*?\"<>|").ShouldBe("Entities/A B C.md");
+        w.ComputeStubRelativePath("Michael Jackson").ShouldBe("_Entities/Stubs/Michael Jackson.md");
+        w.ComputeStubRelativePath("A/B:C*?\"<>|").ShouldBe("_Entities/Stubs/A B C.md");
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class EntityStubWriterTests(PostgresFixture postgres)
             await db.SaveChangesAsync(ct);
             note.Kind.ShouldBe(NoteKind.EntityStub);
             note.Status.ShouldBe(NoteStatus.Ready);
-            note.RelativePath.ShouldBe("Entities/Michael Jackson.md");
+            note.RelativePath.ShouldBe("_Entities/Stubs/Michael Jackson.md");
             note.BodyOutput!.ShouldContain("- Mike");
         }
 
@@ -131,7 +131,7 @@ public sealed class EntityStubWriterTests(PostgresFixture postgres)
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
-        await SeedNoteAtPathAsync("Entities/Michael Jackson.md");
+        await SeedNoteAtPathAsync("_Entities/Stubs/Michael Jackson.md");
         var entityId = await SeedEntityAsync("Michael Jackson", "person", NoAliases);
 
         using var db = NewDb();
@@ -146,6 +146,38 @@ public sealed class EntityStubWriterTests(PostgresFixture postgres)
     {
         const string content = "---\naliases: []\nthany:kind: person\n---\n\nbody text\n";
         EntityStubWriter.ExtractBodyAfterFrontmatter(content).ShouldBe("\nbody text\n");
+    }
+
+    [Fact]
+    public async Task IsAliasClaimedElsewhere_detects_other_entity_and_literal_note_owners()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+
+        // Another live entity owns "Kyiv" as an alias; a literal user note owns the basename "Foo".
+        var e1 = await SeedEntityAsync("Київ", "place", NoAliases);
+        await SeedEntityAsync("Kyiv City", "place", ["Kyiv"]);
+        await SeedNoteAtPathAsync("Places/Foo.md");
+
+        using var db = NewDb();
+        var w = new EntityStubWriter(db, DefaultOpts, SystemClock.Instance);
+
+        (await w.IsAliasClaimedElsewhereAsync(e1, "Kyiv", ct)).ShouldBeTrue();
+        (await w.IsAliasClaimedElsewhereAsync(e1, "Foo", ct)).ShouldBeTrue();
+        (await w.IsAliasClaimedElsewhereAsync(e1, "Kyyiv", ct)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task IsAliasClaimedElsewhere_excludes_the_entitys_own_claims()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var e = await SeedEntityAsync("Kyiv City", "place", ["Kyiv"]);
+
+        using var db = NewDb();
+        var w = new EntityStubWriter(db, DefaultOpts, SystemClock.Instance);
+        (await w.IsAliasClaimedElsewhereAsync(e, "Kyiv", ct)).ShouldBeFalse();
+        (await w.IsAliasClaimedElsewhereAsync(e, "Kyiv City", ct)).ShouldBeFalse();
     }
 
     private async Task<Guid> SeedEntityAsync(string canonical, string kind, string[] aliases)

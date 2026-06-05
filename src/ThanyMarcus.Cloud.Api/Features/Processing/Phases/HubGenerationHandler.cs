@@ -53,6 +53,10 @@ public sealed class HubGenerationHandler
         var llm = llmFactory.Resolve(settings, out var fellBackToSafe);
         var o = opts.CurrentValue;
 
+        // Refresh the mutable label off accumulated mentions; identity (CanonicalName / file path)
+        // is untouched, so this only changes how the hub reads.
+        await DisplayNameRecomputer.RecomputeAsync(db, entity, o.DisplayNameHysteresisMargin, ct);
+
         var recent = await (
             from m in db.Mentions
             join n in db.Notes on m.NoteId equals n.Id
@@ -77,7 +81,7 @@ public sealed class HubGenerationHandler
         }
 
         var previousBody = ExtractPreviousMarkdown(note.BodyOutput);
-        var entityCtx = new HubEntityContext(entity.Kind, entity.CanonicalName, entity.Aliases);
+        var entityCtx = new HubEntityContext(entity.Kind, entity.DisplayName ?? entity.CanonicalName, entity.Aliases);
         var prompt = PromptBuilder.BuildHubGenerate(entityCtx, contexts, previousBody);
 
         var pid = new PromptId("hub-generate", "v1");

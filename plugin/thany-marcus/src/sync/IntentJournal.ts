@@ -4,7 +4,8 @@ export type IntentKind =
   | "reroute"
   | "folder_dissolve"
   | "folder_register"
-  | "folder_unregister";
+  | "folder_unregister"
+  | "inbox_reroute";
 
 export interface TombstoneIntent {
   opId: string;
@@ -51,13 +52,20 @@ export interface FolderUnregisterIntent {
   enqueuedAt: number;
 }
 
+export interface InboxRerouteIntent {
+  opId: string;
+  kind: "inbox_reroute";
+  enqueuedAt: number;
+}
+
 export type Intent =
   | TombstoneIntent
   | ReviveIntent
   | RerouteIntent
   | FolderDissolveIntent
   | FolderRegisterIntent
-  | FolderUnregisterIntent;
+  | FolderUnregisterIntent
+  | InboxRerouteIntent;
 
 // The only storage Obsidian Mobile flushes reliably. The journal is append-only NDJSON: each line
 // is either an intent or an ack-marker {opId, done:true}. Loading replays the lines and drops acked

@@ -20,6 +20,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
     private readonly ILlmClientFactory llmFactory;
     private readonly IEmbeddingClient embeddings;
     private readonly EntitySuggestionAggregator suggestions;
+    private readonly EntityStubWriter stubWriter;
     private readonly LlmEventAppender events;
     private readonly IIngestEventBus eventBus;
     private readonly IOptionsMonitor<LlmIntelligenceOptions> opts;
@@ -32,6 +33,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         ILlmClientFactory llmFactory,
         IEmbeddingClient embeddings,
         EntitySuggestionAggregator suggestions,
+        EntityStubWriter stubWriter,
         LlmEventAppender events,
         IIngestEventBus eventBus,
         IOptionsMonitor<LlmIntelligenceOptions> opts,
@@ -43,6 +45,7 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         this.llmFactory = llmFactory;
         this.embeddings = embeddings;
         this.suggestions = suggestions;
+        this.stubWriter = stubWriter;
         this.events = events;
         this.eventBus = eventBus;
         this.opts = opts;
@@ -102,13 +105,18 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         var newMentions = new List<Mention>();
         var hubSpawnEntityIds = new HashSet<Guid>();
         var existingHubEntityIds = new HashSet<Guid>();
+        var aliasChangedEntityIds = new HashSet<Guid>();
         var now = clock.GetCurrentInstant();
 
         foreach (var cand in candidates)
         {
             if (note.DeletedAt is not null) break;
 
-            var candVec = await EntityEmbeddingHelper.EmbedCanonicalAsync(embeddings, cand.CandidateCanonical, ct);
+            // Context-rich candidate embedding shares the entity recipe-space, so the gate carries
+            // the cross-lingual signal a bare name lacks (see EntityEmbeddingHelper).
+            var surrounding = ExtractSurrounding(body, cand.StartOffset, cand.EndOffset, o.SurroundingTextChars);
+            var candVec = await EntityEmbeddingHelper.EmbedCandidateAsync(
+                embeddings, cand.CandidateCanonical, surrounding, ct);
             var candEmb = candVec.ToArray();
 
             // kNN against user-curated entities. A confident match (cosine distance within the gate)
@@ -118,26 +126,37 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
             var best = neighbors.Count > 0 ? neighbors[0] : (EntityDistance?)null;
 
             Entity? target = null;
-            if (best is { } match && match.Distance <= thresholds.SuggestionMatchDistance)
+            EntityDistance? mergeProposal = null;
+            if (best is { } match)
             {
-                target = await db.Entities.SingleOrDefaultAsync(
-                    e => e.Id == match.Id && e.DeletedAt == null, ct);
+                if (match.Distance <= thresholds.SuggestionMatchDistance)
+                {
+                    target = await db.Entities.SingleOrDefaultAsync(
+                        e => e.Id == match.Id && e.DeletedAt == null, ct);
+                }
+                else if (match.Distance <= thresholds.GrayZoneMergeMaxDistance)
+                {
+                    // Too far to auto-merge, near enough to be a likely cross-language alias —
+                    // route to the suggestion flow as a merge proposal for the user to confirm.
+                    mergeProposal = match;
+                }
             }
 
             if (target is null)
             {
-                // Not a known entity → accumulate as a suggestion for the user to curate.
-                var surrounding = ExtractSurrounding(body, cand.StartOffset, cand.EndOffset, o.SurroundingTextChars);
-                await suggestions.AppendOrCreateAsync(cand, note.Id, surrounding, candVec, now, ct);
+                // Not a known entity → accumulate as a suggestion (carrying any merge proposal).
+                await suggestions.AppendOrCreateAsync(cand, note.Id, surrounding, candVec, now, mergeProposal, ct);
                 continue;
             }
 
             var alias = cand.AnchorText?.Trim() ?? "";
             if (alias.Length > 0 &&
                 !target.Aliases.Contains(alias, StringComparer.OrdinalIgnoreCase) &&
-                !string.Equals(target.CanonicalName, alias, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(target.CanonicalName, alias, StringComparison.OrdinalIgnoreCase) &&
+                !await stubWriter.IsAliasClaimedElsewhereAsync(target.Id, alias, ct))
             {
                 target.Aliases = target.Aliases.Append(alias).ToArray();
+                aliasChangedEntityIds.Add(target.Id);
             }
 
             target.MentionCount += 1;
@@ -168,6 +187,15 @@ public sealed partial class ExtractingEntitiesHandler : IPhaseHandler
         }
 
         db.Mentions.AddRange(newMentions);
+
+        // Propagate accumulated (incl. cross-language) aliases into each entity's stub frontmatter so
+        // Obsidian's native resolver folds the new surface forms onto the one node. No-op for entities
+        // without a materialized stub — they unify retroactively once they cross the threshold.
+        foreach (var entityId in aliasChangedEntityIds)
+        {
+            var entity = await db.Entities.SingleAsync(e => e.Id == entityId, ct);
+            await stubWriter.UpdateAliasesAsync(entity, entity.Aliases, ct);
+        }
 
         // Hub spawns — for entities whose mention_count just crossed the threshold
         var spawnedHubs = new List<(Guid entityId, Guid noteId)>();
