@@ -22,6 +22,9 @@ public sealed class CloudSettingsConfiguration : IEntityTypeConfiguration<CloudS
         builder.Property(s => s.LlmMode).IsRequired().HasDefaultValue("safe");
         builder.Property(s => s.EncryptedExternalApiKey);
         builder.Property(s => s.LlmModel);
+        builder.Property(s => s.RelatedNotesMaxDistanceAuto);
+        builder.Property(s => s.RelatedNotesAutoNoteCount);
+        builder.Property(s => s.RelatedNotesAutoEntityCount);
         builder.Property(s => s.UpdatedAt).IsRequired();
 
         builder.HasData(new CloudSettings

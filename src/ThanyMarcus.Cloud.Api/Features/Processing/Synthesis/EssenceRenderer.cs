@@ -55,7 +55,7 @@ public static partial class EssenceRenderer
             .Where(s => s.Length > 0)
             .ToList();
         if (sentences.Count == 0) throw new EssenceParseException("prose essence had no sentences");
-        return Compose(essence.Title, essence.Tags, budget, string.Join(' ', sentences));
+        return Compose(essence.Title, essence.Tags, budget, string.Join(' ', sentences), essence.Wikilinks);
     }
 
     private static string RenderBullets(BulletsEssence essence, EssenceBudget budget)
@@ -66,7 +66,7 @@ public static partial class EssenceRenderer
             .ToList();
         if (bullets.Count == 0) throw new EssenceParseException("bullets essence had no bullets");
         var body = string.Join('\n', bullets.Select(b => $"- {b}"));
-        return Compose(essence.Title, essence.Tags, budget, body);
+        return Compose(essence.Title, essence.Tags, budget, body, essence.Wikilinks);
     }
 
     private static string RenderChecklist(ChecklistEssence essence, EssenceBudget budget)
@@ -76,7 +76,7 @@ public static partial class EssenceRenderer
             .ToList();
         if (items.Count == 0) throw new EssenceParseException("checklist essence had no items");
         var body = string.Join('\n', items.Select(i => $"- [{(i.Checked ? "x" : " ")}] {i.Text.Trim()}"));
-        return Compose(essence.Title, essence.Tags, budget, body);
+        return Compose(essence.Title, essence.Tags, budget, body, essence.Wikilinks);
     }
 
     private static string RenderTable(TableEssence essence, EssenceBudget budget)
@@ -100,11 +100,21 @@ public static partial class EssenceRenderer
             while (cells.Count < columns.Count) cells.Add(string.Empty);
             sb.Append("| ").Append(string.Join(" | ", cells)).AppendLine(" |");
         }
-        return Compose(essence.Title, essence.Tags, budget, sb.ToString().TrimEnd());
+        return Compose(essence.Title, essence.Tags, budget, sb.ToString().TrimEnd(), essence.Wikilinks, inlineWeave: false);
     }
 
-    private static string Compose(string? title, IReadOnlyList<string>? tags, EssenceBudget budget, string body)
+    private static string Compose(
+        string? title,
+        IReadOnlyList<string>? tags,
+        EssenceBudget budget,
+        string body,
+        IReadOnlyList<string>? wikilinks,
+        bool inlineWeave = true)
     {
+        var woven = inlineWeave
+            ? WikilinkWeaver.Weave(body, wikilinks, budget.MaxWikilinks)
+            : WikilinkWeaver.AppendRelated(body, wikilinks, budget.MaxWikilinks);
+
         var sb = new StringBuilder();
         sb.Append("# ").AppendLine(NormaliseTitle(title));
 
@@ -112,7 +122,7 @@ public static partial class EssenceRenderer
         if (tagLine.Length > 0) sb.AppendLine(tagLine);
 
         sb.AppendLine();
-        sb.Append(body);
+        sb.Append(woven);
         return sb.ToString();
     }
 

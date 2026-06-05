@@ -227,6 +227,9 @@ builder.Services.Configure<QueryEmbeddingCacheOptions>(
 builder.Services.AddSingleton<QueryEmbeddingCache>();
 builder.Services.Configure<RelatedNotesOptions>(
     builder.Configuration.GetSection("IngestSaga:Retrieval"));
+builder.Services.AddSingleton<RelatedNotesCalibrationSignal>();
+builder.Services.AddScoped<RelatedNotesCalibrator>();
+builder.Services.AddHostedService<RelatedNotesCalibrationWorker>();
 builder.Services.AddScoped<IVlmClient, OllamaVlmClient>();
 builder.Services.AddSingleton<IDoclingClient, DoclingHttpClient>();
 builder.Services.AddSingleton<IParakeetClient, ParakeetHttpClient>();
@@ -270,7 +273,11 @@ builder.Services.AddSingleton<ISynthesisApiKeyStore, InMemorySynthesisApiKeyStor
 builder.Services.AddScoped<CancelHandler>();
 builder.Services.AddScoped<HubGenerationHandler>();
 builder.Services.AddScoped<IngestPhaseDispatcher>();
+builder.Services.AddScoped<FolderRouter>();
 builder.Services.AddScoped<ThanyMarcus.Cloud.Api.Features.Sync.NoteTombstoneService>();
+builder.Services.AddScoped<ThanyMarcus.Cloud.Api.Features.Sync.InboxRerouteService>();
+builder.Services.AddSingleton<ThanyMarcus.Cloud.Api.Features.Sync.InboxRerouteSignal>();
+builder.Services.AddHostedService<ThanyMarcus.Cloud.Api.Features.Sync.InboxRerouteWorker>();
 builder.Services.AddHostedService<JobOrchestratorWorker>();
 builder.Services.AddHostedService<OrphanIngestSweeper>();
 builder.Services.AddHostedService<TombstoneGcSweeper>();

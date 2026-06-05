@@ -102,9 +102,11 @@ public sealed class EmbeddingHandler : IPhaseHandler
         return PhaseHandlerResult.Advanced;
     }
 
+    internal const string EmbedConfigTag = "granite-cls-256-v1";
+
     internal static string ComputeBodyHash(string template, string body)
     {
-        var hashInput = (template ?? "unknown") + "\n" + (body ?? "");
+        var hashInput = EmbedConfigTag + "\n" + (template ?? "unknown") + "\n" + (body ?? "");
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));
         return Convert.ToHexString(bytes);
     }

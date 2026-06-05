@@ -3,7 +3,8 @@
   import { subscribeToEvents } from './sse';
   import { apiFetch, parseProblem } from './http';
   import StatusPill from './StatusPill.svelte';
-  import { notify as desktopNotify } from './notifications/browserNotifier';
+  import { notifyUser } from './notifications/notify';
+  import { requestPermission, getPermission, isSupported as notifySupported } from './notifications/browserNotifier';
   import { PhaseOrder, type PhaseName, type WizardSseEvent } from './types/provisioning';
   import type { CloudStatusResponse } from './types/cloud';
 
@@ -12,8 +13,9 @@
     cloud: CloudStatusResponse;
     mode: Mode;
     onTerminal: () => void;
+    onReady?: () => void;
   };
-  let { cloud, mode, onTerminal }: Props = $props();
+  let { cloud, mode, onTerminal, onReady = () => {} }: Props = $props();
 
   type PhaseState = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -37,6 +39,19 @@
 
   let phases = $state(buildInitial(initial, untrack(() => mode) === 'create' ? PhaseOrder : (DESTROY_PHASES as string[])));
   let terminalMessage = $state<string | null>(null);
+  let succeeded = $state(false);
+
+  let notifyPerm = $state<NotificationPermission | 'unsupported'>('unsupported');
+  let requestingPerm = $state(false);
+
+  async function enableNotifications() {
+    requestingPerm = true;
+    try {
+      notifyPerm = await requestPermission();
+    } finally {
+      requestingPerm = false;
+    }
+  }
 
   let confirming = $state(false);
   let confirmHost = $state('');
@@ -103,13 +118,14 @@
 
   let terminalNotified = false;
   function fireFailedNotification(stage: string | undefined, reason: string | undefined): void {
-    if (mode !== 'create' || terminalNotified) return;
+    if (terminalNotified) return;
     terminalNotified = true;
     const reasonText = (reason ?? '').slice(0, 100);
     const body = stage ? `${stage}: ${reasonText}` : reasonText || 'See dashboard for details';
-    desktopNotify({
-      title: 'Cloud provisioning failed',
+    notifyUser({
+      title: mode === 'create' ? 'Cloud provisioning failed' : 'Cloud deletion failed',
       body,
+      variant: 'error',
       onClick: () => focusCloudTile(initial.cloudId),
     });
   }
@@ -123,6 +139,7 @@
   }
 
   onMount(() => {
+    notifyPerm = notifySupported() ? getPermission() : 'unsupported';
     const close = subscribeToEvents<WizardSseEvent>(`/api/clouds/${initial.cloudId}/events`, {
       phase_started:   (e) => { if (e.type === 'phase_started')   advanceTo(e.phase, 'in_progress'); },
       phase_completed: (e) => { if (e.type === 'phase_completed') advanceTo(e.phase, 'done'); },
@@ -138,14 +155,20 @@
         for (const p of (mode === 'create' ? PhaseOrder : (DESTROY_PHASES as string[]))) update(p, 'done');
         if (mode === 'create' && !terminalNotified) {
           terminalNotified = true;
-          desktopNotify({
+          notifyUser({
             title: 'Cloud ready',
             body: initial.hostname,
+            variant: 'success',
             onClick: () => focusCloudTile(initial.cloudId),
           });
         }
         close();
-        setTimeout(onTerminal, 400);
+        if (mode === 'create') {
+          succeeded = true;
+          onReady();
+        } else {
+          setTimeout(onTerminal, 400);
+        }
       },
       cloud_failed: (e) => {
         if (e.type !== 'cloud_failed') return;
@@ -155,15 +178,25 @@
         setTimeout(onTerminal, 800);
       },
       cloud_rolled_back: () => {
+        if (mode === 'destroy' && !terminalNotified) {
+          terminalNotified = true;
+          notifyUser({
+            title: 'Cloud destroyed',
+            body: initial.hostname,
+            variant: 'info',
+            onClick: () => focusCloudTile(initial.cloudId),
+          });
+        }
         close();
         setTimeout(onTerminal, 400);
       },
       cloud_cancelled: () => {
         if (!terminalNotified) {
           terminalNotified = true;
-          desktopNotify({
+          notifyUser({
             title: 'Provisioning cancelled',
             body: initial.hostname,
+            variant: 'info',
             onClick: () => focusCloudTile(initial.cloudId),
           });
         }
@@ -199,14 +232,34 @@
     <p class="error">{terminalMessage}</p>
   {/if}
 
+  {#snippet permControls(btnLabel: string)}
+    {#if notifyPerm === 'default'}
+      <p class="notify-optin">
+        <button class="btn-secondary" type="button" disabled={requestingPerm} onclick={enableNotifications}>
+          {requestingPerm ? 'Asking…' : btnLabel}
+        </button>
+        <span class="muted">Takes a few minutes — get a desktop alert when it&rsquo;s done, even on another tab.</span>
+      </p>
+    {:else if notifyPerm === 'granted'}
+      <p class="muted notify-status">Desktop alerts on — you&rsquo;ll be pinged when it&rsquo;s done, even on another tab.</p>
+    {:else if notifyPerm === 'denied'}
+      <p class="muted notify-status">Desktop alerts are blocked in your browser — you&rsquo;ll still see the banner here.</p>
+    {/if}
+  {/snippet}
+
   {#if mode === 'create' && !terminalMessage}
-    {#if cancelRequested}
+    {#if succeeded}
+      <p class="success">✓ All phases complete — your cloud is live.</p>
+    {:else if cancelRequested}
       <p class="muted">Cancellation requested — finalizing on the server…</p>
     {:else}
+      {@render permControls('Notify me when it’s ready')}
       <div class="actions">
         <button class="btn-danger" type="button" onclick={startConfirm}>Abort provisioning</button>
       </div>
     {/if}
+  {:else if mode === 'destroy' && !terminalMessage}
+    {@render permControls('Notify me when it’s done')}
   {/if}
 </section>
 
@@ -244,6 +297,16 @@
   .actions {
     display: flex;
     justify-content: flex-end;
+    margin-top: var(--space-4);
+  }
+  .notify-optin {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    align-items: flex-start;
+    margin-top: var(--space-4);
+  }
+  .notify-status {
     margin-top: var(--space-4);
   }
   .cm-backdrop {

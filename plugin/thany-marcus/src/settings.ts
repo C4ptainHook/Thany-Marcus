@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting, requestUrl } from "obsidian";
 import type ThanyMarcusPlugin from "./main";
 import type { PrivacyMode, PublicModel, SynthesisPreset } from "./api";
+import type { RelatedStrictness } from "./related/strictness";
 
 export interface ThanyMarcusSettings {
   cloudUrl: string;
@@ -16,6 +17,7 @@ export interface ThanyMarcusSettings {
   desktopNotifications: boolean;
   pixelChrome: boolean;
   actionEffects: boolean;
+  relatedStrictness: RelatedStrictness;
   deviceId: string;
 }
 
@@ -33,6 +35,7 @@ export const DEFAULT_SETTINGS: ThanyMarcusSettings = {
   desktopNotifications: true,
   pixelChrome: true,
   actionEffects: true,
+  relatedStrictness: "balanced",
   deviceId: "",
 };
 
@@ -248,6 +251,24 @@ export class ThanyMarcusSettingTab extends PluginSettingTab {
           this.plugin.settings.desktopNotifications = v;
           await this.plugin.saveSettings();
         }),
+      );
+
+    new Setting(containerEl)
+      .setName("Related thoughts strictness")
+      .setDesc(
+        "How close a note must be to surface in the composer. Balanced uses the cloud's " +
+        "calibrated default; you can also switch this from the composer panel.",
+      )
+      .addDropdown((d) =>
+        d
+          .addOption("loose", "Loose — surface more")
+          .addOption("balanced", "Balanced")
+          .addOption("strict", "Strict — surface fewer")
+          .setValue(this.plugin.settings.relatedStrictness)
+          .onChange(async (v) => {
+            this.plugin.settings.relatedStrictness = v as RelatedStrictness;
+            await this.plugin.saveSettings();
+          }),
       );
 
     containerEl.createEl("h3", { text: "Appearance" });

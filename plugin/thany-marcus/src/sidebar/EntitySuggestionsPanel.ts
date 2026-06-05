@@ -6,7 +6,7 @@ import type {
 
 export interface EntitySuggestionActions {
   list(signal?: AbortSignal): Promise<EntitySuggestion[]>;
-  accept(id: string): Promise<AcceptEntitySuggestionResult>;
+  accept(id: string, mergeIntoEntityId?: string): Promise<AcceptEntitySuggestionResult>;
   dismiss(id: string): Promise<void>;
   edit(id: string, patch: EditEntitySuggestionRequest): Promise<void>;
 }
@@ -125,7 +125,20 @@ export class EntitySuggestionsPanel {
       row.appendChild(sample);
     }
 
+    // Gray-zone cross-language proposal: likely the same thing as an existing entity in another
+    // language. Offer a one-click merge that folds this surface form into that node's aliases.
+    if (s.suggestedMerge) {
+      const hint = el("div", "tm-suggestions__merge-hint");
+      hint.textContent = `Looks like ${s.suggestedMerge.displayName}`;
+      row.appendChild(hint);
+    }
+
     const actions = el("div", "tm-suggestions__actions");
+    if (s.suggestedMerge) {
+      const merge = s.suggestedMerge;
+      actions.appendChild(button(`Merge into ${merge.displayName}`, "tm-suggestions__merge",
+        () => void this.onAccept(s, merge.entityId)));
+    }
     actions.appendChild(button("Accept", "tm-suggestions__accept", () => void this.onAccept(s)));
     actions.appendChild(button("Edit", "tm-suggestions__edit", () => this.openEdit(s.id)));
     actions.appendChild(button("Dismiss", "tm-suggestions__dismiss", () => void this.onDismiss(s)));
@@ -166,9 +179,11 @@ export class EntitySuggestionsPanel {
     this.render();
   }
 
-  private async onAccept(s: EntitySuggestion): Promise<void> {
+  private async onAccept(s: EntitySuggestion, mergeIntoEntityId?: string): Promise<void> {
     try {
-      const result = await this.actions.accept(s.id);
+      const result = mergeIntoEntityId
+        ? await this.actions.accept(s.id, mergeIntoEntityId)
+        : await this.actions.accept(s.id);
       if (result.ok) {
         this.removeRow(s.id);
         this.onAccepted(result.entityId);

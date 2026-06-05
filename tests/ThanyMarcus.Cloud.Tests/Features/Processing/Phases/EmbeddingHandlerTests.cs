@@ -134,6 +134,17 @@ public sealed class EmbeddingHandlerTests(PostgresFixture postgres)
         StagesOf(after).ShouldContain("embedding_emit");
     }
 
+    [Fact]
+    public void ComputeBodyHash_folds_in_embed_config_tag()
+    {
+        var withTag = EmbeddingHandler.ComputeBodyHash("compose-v1", "some body");
+        var untagged = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes("compose-v1\nsome body")));
+
+        withTag.ShouldNotBe(untagged);
+    }
+
     private ServiceProvider BuildHost(IEmbeddingClient client) =>
         ProcessingTestHost.Build(postgres.ConnectionString, customize: services =>
         {

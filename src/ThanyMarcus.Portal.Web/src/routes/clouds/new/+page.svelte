@@ -3,7 +3,6 @@
   import { goto } from '$app/navigation';
   import { apiFetch, parseProblem } from '$lib/http';
   import { projectedRates } from '$lib/costs';
-  import { requestPermission as requestNotifyPermission } from '$lib/notifications/browserNotifier';
   import type { RegionInfo } from '$lib/types/providerMeta';
   import type { Provider } from '$lib/types/cloud';
 
@@ -63,7 +62,6 @@
     if (!region) return;
     submitting = true;
     submitError = null;
-    void requestNotifyPermission().catch(() => { /* user dismissed; harmless */ });
     try {
       const r = await apiFetch('/api/clouds', {
         method: 'POST',

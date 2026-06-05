@@ -31,6 +31,15 @@
   let passkeyError = $state<string | null>(null);
 
   let healthz = $state<CloudHealthz | null>(null);
+  let connectReady = $state(false);
+  let trackedCloudId: string | null = null;
+  $effect(() => {
+    const id = data.cloud?.cloudId ?? null;
+    if (id !== trackedCloudId) {
+      trackedCloudId = id;
+      connectReady = false;
+    }
+  });
 
   onMount(async () => {
     if (!data.me) {
@@ -124,11 +133,25 @@
 
   {:else if typeof view === 'object' && view.kind === 'in-flight'}
     {#if data.cloud}
-      <ProvisioningInFlight cloud={data.cloud} mode={view.mode} onTerminal={() => invalidateAll()} />
+      <ProvisioningInFlight
+        cloud={data.cloud}
+        mode={view.mode}
+        onReady={() => (connectReady = true)}
+        onTerminal={() => invalidateAll()}
+      />
       {#if view.mode === 'create'}
-        <!-- FORK: task #22's success-view layout owns the surrounding chrome; this reveal is
-             a self-contained slot that listens to the same SSE channel for plugin_token_issued. -->
         <PluginTokenReveal cloudId={data.cloud.cloudId} />
+      {/if}
+      {#if connectReady && view.mode === 'create'}
+        <section class="card continue">
+          <p class="muted">
+            Open Obsidian above to connect, then continue. You can re-issue the token any time from
+            the dashboard or Settings &rarr; Plugin token.
+          </p>
+          <button class="btn btn-primary" type="button" onclick={() => invalidateAll()}>
+            Continue to dashboard
+          </button>
+        </section>
       {/if}
     {/if}
 
@@ -169,6 +192,13 @@
 
 <style>
   .failure { border-color: var(--error); }
+  .continue {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    align-items: flex-start;
+    margin-top: var(--space-3);
+  }
   .signin-actions {
     display: flex;
     flex-wrap: wrap;

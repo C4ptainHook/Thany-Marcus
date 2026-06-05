@@ -88,7 +88,7 @@ public static class SynthesisPromptBuilder
         sb.AppendLine("- \"tags\": 1–6 short topic tags, lowercase, no '#', words joined by '-'.");
         sb.AppendLine("- \"wikilinks\": the core ideas, names, and projects to link, each the bare target text without brackets.");
         sb.AppendLine(FormField(form, units, budget.MaxColumns.ToString(CultureInfo.InvariantCulture)));
-        sb.AppendLine("Weave the wikilink targets inline in the text using [[ ]] (e.g. [[Slack]]).");
+        sb.AppendLine("Mention the wikilink targets naturally in the text; do not add [[ ]] brackets yourself.");
         sb.AppendLine("Distil, do not re-narrate: use at most " + units + " " + UnitNoun(form) + " and never repeat an idea.");
     }
 

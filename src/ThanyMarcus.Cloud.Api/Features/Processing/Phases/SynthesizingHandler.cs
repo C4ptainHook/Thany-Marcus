@@ -18,6 +18,7 @@ namespace ThanyMarcus.Cloud.Api.Features.Processing.Phases;
 public sealed partial class SynthesizingHandler : IPhaseHandler
 {
     public const string SynthesisTemplateVersion = "synthesis-v2";
+    internal const string RenderVersion = "essence-render-v2";
     private const int DefaultSeed = 42;
     private const double DefaultTemperature = 0.3;
     private const int DefaultMaxOutputTokens = 2048;
@@ -289,8 +290,8 @@ public sealed partial class SynthesizingHandler : IPhaseHandler
     {
         var s = string.Format(
             CultureInfo.InvariantCulture,
-            "{0}|{1}|{2}|{3}|{4}",
-            rawHash, modelTag, promptVersion, privacyMode, preset);
+            "{0}|{1}|{2}|{3}|{4}|{5}",
+            rawHash, modelTag, promptVersion, privacyMode, preset, RenderVersion);
         return Sha256(s);
     }
 

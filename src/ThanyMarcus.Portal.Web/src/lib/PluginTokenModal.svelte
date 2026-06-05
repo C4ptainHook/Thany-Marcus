@@ -6,6 +6,8 @@
   };
   let { token, cloudUrl, onClose }: Props = $props();
 
+  const deepLink = $derived(`obsidian://thany-marcus-connect?cloudUrl=${cloudUrl}&token=${token}`);
+
   let copiedToken = $state(false);
   let copiedUrl = $state(false);
   let copiedJson = $state(false);
@@ -61,7 +63,12 @@
     <button type="button" class="btn-secondary" onclick={copyJsonConfig}>
       {copiedJson ? 'Copied JSON' : 'Copy plugin config (JSON)'}
     </button>
-    <button type="button" class="btn-primary" onclick={onClose}>I&rsquo;ve saved it</button>
+    <div class="actions-right">
+      <a class="btn-primary" href={deepLink} title="Opens the Thany-Marcus plugin in Obsidian">
+        Open in Obsidian
+      </a>
+      <button type="button" class="btn-secondary" onclick={onClose}>I&rsquo;ve saved it</button>
+    </div>
   </div>
 </div>
 
@@ -110,8 +117,14 @@
   .actions {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     gap: var(--space-2);
     margin-top: var(--space-5);
+    flex-wrap: wrap;
+  }
+  .actions-right {
+    display: flex;
+    gap: var(--space-2);
   }
   @media (max-width: 600px) {
     .modal {

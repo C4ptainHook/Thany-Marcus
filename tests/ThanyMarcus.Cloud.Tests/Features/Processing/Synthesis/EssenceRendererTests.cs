@@ -91,4 +91,40 @@ public sealed class EssenceRendererTests
         var md = EssenceRenderer.Render(EssenceForm.Prose, json, Budget);
         md.ShouldContain("[[Slack]]");
     }
+
+    [Fact]
+    public void Prose_brackets_array_targets_present_in_clean_prose()
+    {
+        var json = """
+        {"title":"T","tags":["x"],"wikilinks":["Thany-Marcus"],
+         "sentences":["I joined the Thany-Marcus team today."]}
+        """;
+        var md = EssenceRenderer.Render(EssenceForm.Prose, json, Budget);
+        md.ShouldContain("I joined the [[Thany-Marcus]] team today.");
+        md.ShouldNotContain("Related:");
+    }
+
+    [Fact]
+    public void Prose_array_target_absent_from_prose_surfaces_in_a_related_line()
+    {
+        var json = """
+        {"title":"T","tags":["x"],"wikilinks":["Customer Success"],
+         "sentences":["We talked about churn."]}
+        """;
+        var md = EssenceRenderer.Render(EssenceForm.Prose, json, Budget);
+        md.ShouldContain("We talked about churn.");
+        md.ShouldEndWith("Related: [[Customer Success]]");
+    }
+
+    [Fact]
+    public void Table_uses_fallback_line_only_and_leaves_the_table_intact()
+    {
+        var json = """{"title":"T","tags":[],"wikilinks":["Mike"],"columns":["Name","Role"],"rows":[{"cells":["Mike","Eng"]}]}""";
+        var md = EssenceRenderer.Render(EssenceForm.Table, json, Budget);
+
+        md.ShouldContain("| Name | Role |");
+        md.ShouldContain("| Mike | Eng |");
+        md.ShouldNotContain("[[Mike]] |");
+        md.ShouldEndWith("Related: [[Mike]]");
+    }
 }

@@ -16,6 +16,7 @@ export interface IntentExecutor {
   ): Promise<void>;
   folderRegister(folder: string): Promise<void>;
   folderUnregister(folder: string): Promise<void>;
+  inboxReroute(): Promise<void>;
 }
 
 const BASE_BACKOFF_MS = 2_000;
@@ -96,6 +97,8 @@ export class IntentQueue {
         return this.exec.folderRegister(intent.folder);
       case "folder_unregister":
         return this.exec.folderUnregister(intent.folder);
+      case "inbox_reroute":
+        return this.exec.inboxReroute();
     }
   }
 

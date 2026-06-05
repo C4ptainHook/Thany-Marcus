@@ -152,7 +152,7 @@ public sealed class RoutingHandlerTests(PostgresFixture postgres)
 
         await RegisterFolderAsync("_drafts");
         await RegisterFolderAsync(".trash");
-        await RegisterFolderAsync("Entities");
+        await RegisterFolderAsync("_Entities");
         await RegisterFolderAsync("Inbox");
 
         var (noteId, jobId) = await SeedRoutingJobAsync();
