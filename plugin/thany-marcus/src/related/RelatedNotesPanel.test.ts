@@ -274,7 +274,7 @@ describe("RelatedNotesPanel", () => {
 
     expect(onStrictnessChange).toHaveBeenCalledWith("strict");
     expect(fetcher.relatedNotes).toHaveBeenCalledTimes(2);
-    expect(calls[1][0].maxDistance).toBe(0.55);
+    expect(calls[1][0].maxDistance).toBe(0.12);
   });
 
   it("hides the strictness control when onStrictnessChange is absent", () => {

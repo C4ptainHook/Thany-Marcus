@@ -19,6 +19,12 @@ namespace ThanyMarcus.Cloud.Tests.Features.Processing.Phases;
 public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
 {
     private static readonly string[] EmptyAliases = Array.Empty<string>();
+    private static readonly string[] ExpectedRealCanonicals = { "Sarah Chen", "Project Atlas", "OpenAI", "Berlin" };
+    private static readonly string[] BlobAliases =
+    {
+        "She wants the OpenAI integration shipped before the Berlin offsite.",
+        "OpenAI's embeddings API",
+    };
 
     [Fact]
     public async Task Unknown_candidate_creates_a_suggestion_not_an_entity()
@@ -94,6 +100,76 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Garbage_canonical_is_dropped_by_the_name_guard()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+
+        var (noteId, jobId) = await SeedJobAsync(IngestJobStatus.ExtractingEntities,
+            bodyOutput: "Notes on zero stock picking and index funds.");
+
+        var llm = new ConfigurableLlmClient
+        {
+            ExtractResponse = () => new EntityExtractionDto(new[]
+            {
+                new MentionCandidateDto("zero stock picking", 9, 27, EntityKind.Concept,
+                    "zero stock picking", EmptyAliases, 0.95),
+            }),
+        };
+        var factory = new ConfigurableLlmClientFactory(llm);
+
+        await using var sp = BuildHost(factory);
+        var job = await LoadJobAsync(jobId);
+        await DispatchAsync(sp, job, ct);
+
+        using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
+        (await probe.Entities.CountAsync(ct)).ShouldBe(0);
+        (await probe.Mentions.CountAsync(m => m.NoteId == noteId, ct)).ShouldBe(0);
+        (await probe.EntitySuggestions.CountAsync(ct)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Real_entities_surface_separately_while_the_blob_is_dropped()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+
+        var (_, jobId) = await SeedJobAsync(IngestJobStatus.ExtractingEntities,
+            bodyOutput: "Sarah Chen leads Project Atlas; OpenAI ships before the Berlin offsite.");
+
+        var llm = new ConfigurableLlmClient
+        {
+            ExtractResponse = () => new EntityExtractionDto(new[]
+            {
+                new MentionCandidateDto("Sarah Chen", 0, 10, EntityKind.Person, "Sarah Chen", EmptyAliases, 0.95),
+                new MentionCandidateDto("Project Atlas", 17, 30, EntityKind.Organization, "Project Atlas", EmptyAliases, 0.95),
+                new MentionCandidateDto("OpenAI", 32, 38, EntityKind.Organization, "OpenAI", EmptyAliases, 0.95),
+                new MentionCandidateDto("Berlin", 53, 59, EntityKind.Place, "Berlin", EmptyAliases, 0.95),
+                new MentionCandidateDto("stock picking", 0, 5, EntityKind.Concept, "zero stock picking",
+                    BlobAliases, 0.95),
+            }),
+        };
+        var factory = new ConfigurableLlmClientFactory(llm);
+
+        await using var sp = BuildHost(factory, RouteByCanonical);
+        var job = await LoadJobAsync(jobId);
+        await DispatchAsync(sp, job, ct);
+
+        using var probe = JobOrchestratorWorkerTests.NewDbContext(postgres.ConnectionString);
+        var rows = await probe.EntitySuggestions.ToListAsync(ct);
+        rows.Select(r => r.CanonicalText).ShouldBe(ExpectedRealCanonicals, ignoreOrder: true);
+        rows.ShouldNotContain(r => r.CanonicalText == "zero stock picking");
+        rows.SelectMany(r => r.Aliases).ShouldNotContain(a => a.Contains(' ') && a.EndsWith('.'));
+    }
+
+    private static float[] RouteByCanonical(string text) =>
+        text.StartsWith("Sarah", StringComparison.Ordinal) ? Axis(0)
+        : text.StartsWith("Project Atlas", StringComparison.Ordinal) ? Axis(1)
+        : text.StartsWith("OpenAI", StringComparison.Ordinal) ? Axis(2)
+        : text.StartsWith("Berlin", StringComparison.Ordinal) ? Axis(3)
+        : Axis(4);
+
+    [Fact]
     public async Task KnnMatch_against_curated_entity_creates_mention_and_spawns_hub()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -147,7 +223,6 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        // Curated Ukrainian place; the English surface form lands in the gray band (0.25–0.45).
         var kyivId = Guid.CreateVersion7();
         await SeedExistingEntityAsync(kyivId, "Київ", mentionCount: 5, embedding: Axis(0),
             kind: EntityKind.Place);
@@ -164,7 +239,7 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
         };
         var factory = new ConfigurableLlmClientFactory(llm);
 
-        await using var sp = BuildHost(factory, _ => AtDistance(0.35));
+        await using var sp = BuildHost(factory, _ => AtDistance(0.15));
         var job = await LoadJobAsync(jobId);
         await DispatchAsync(sp, job, ct);
 
@@ -177,7 +252,7 @@ public sealed class ExtractingEntitiesHandlerTests(PostgresFixture postgres)
         var suggestion = await probe.EntitySuggestions.SingleAsync(ct);
         suggestion.CanonicalText.ShouldBe("Kyiv");
         suggestion.SuggestedMergeEntityId.ShouldBe(kyivId);
-        suggestion.SuggestedMergeDistance!.Value.ShouldBe(0.35, 0.01);
+        suggestion.SuggestedMergeDistance!.Value.ShouldBe(0.15, 0.01);
     }
 
     [Fact]

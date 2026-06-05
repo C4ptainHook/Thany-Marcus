@@ -29,11 +29,11 @@ public sealed class ThresholdsOptions
 
     // Max cosine distance for a candidate mention to count as a confident match against an
     // existing entity (curated) or an open suggestion. Replaces the dedup-LLM's alias_of decision.
-    public double SuggestionMatchDistance { get; init; } = 0.25;
+    public double SuggestionMatchDistance { get; init; } = 0.11;
 
     // Upper bound of the gray band: a candidate landing between SuggestionMatchDistance and this
     // is too far to auto-merge but near enough to propose a cross-language merge for user confirm.
-    public double GrayZoneMergeMaxDistance { get; init; } = 0.45;
+    public double GrayZoneMergeMaxDistance { get; init; } = 0.18;
 }
 
 public sealed class EntitySuggestionsOptions

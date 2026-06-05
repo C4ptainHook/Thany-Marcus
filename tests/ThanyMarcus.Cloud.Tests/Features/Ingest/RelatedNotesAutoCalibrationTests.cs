@@ -20,6 +20,14 @@ public sealed class RelatedNotesAutoCalibrationTests
         AutoStaleEntityDelta = 15,
     };
 
+    private static RelatedNotesOptions RescaledOpts() => new()
+    {
+        MaxDistance = 0.15,
+        MaxDistanceFloor = 0.10,
+        MaxDistanceCeiling = 0.28,
+        QueryDocOffset = 0.04,
+    };
+
     // ── ResolveEffectiveMaxDistance: override ?? auto ?? fallback, clamped ──
 
     [Fact]
@@ -50,6 +58,41 @@ public sealed class RelatedNotesAutoCalibrationTests
     public void Resolve_clamps_auto_below_floor()
     {
         RelatedNotesAutoCalibration.ResolveEffectiveMaxDistance(null, 0.1, Opts()).ShouldBe(0.4);
+    }
+
+    [Fact]
+    public void Resolve_clamps_request_above_new_ceiling()
+    {
+        RelatedNotesAutoCalibration.ResolveEffectiveMaxDistance(0.7, null, RescaledOpts()).ShouldBe(0.28);
+    }
+
+    [Fact]
+    public void Resolve_clamps_auto_below_new_floor()
+    {
+        RelatedNotesAutoCalibration.ResolveEffectiveMaxDistance(null, 0.05, RescaledOpts()).ShouldBe(0.10);
+    }
+
+    [Fact]
+    public void Resolve_passes_dial_values_through_within_new_range()
+    {
+        var o = RescaledOpts();
+        RelatedNotesAutoCalibration.ResolveEffectiveMaxDistance(0.12, null, o).ShouldBe(0.12);
+        RelatedNotesAutoCalibration.ResolveEffectiveMaxDistance(0.19, null, o).ShouldBe(0.19);
+    }
+
+    [Fact]
+    public void Resolve_passes_auto_within_new_range_through()
+    {
+        RelatedNotesAutoCalibration.ResolveEffectiveMaxDistance(null, 0.15, RescaledOpts()).ShouldBe(0.15);
+    }
+
+    [Fact]
+    public void Default_threshold_excludes_false_positive_but_keeps_genuine_match()
+    {
+        var maxDistance = RelatedNotesAutoCalibration.ResolveEffectiveMaxDistance(null, null, RescaledOpts());
+        maxDistance.ShouldBe(0.15);
+        (0.20 <= maxDistance).ShouldBeFalse();
+        (0.10 <= maxDistance).ShouldBeTrue();
     }
 
     // ── ShouldRecompute: gate + growth-staleness ──

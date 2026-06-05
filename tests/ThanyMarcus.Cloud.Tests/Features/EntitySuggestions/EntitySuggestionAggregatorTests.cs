@@ -109,13 +109,103 @@ public sealed class EntitySuggestionAggregatorTests(PostgresFixture postgres)
         rows.Count.ShouldBe(2);
     }
 
-    private async Task RunAsync(string canonical, string kind, Guid noteId, Vector embedding, CancellationToken ct)
+    [Fact]
+    public async Task Sentence_anchor_is_retained_in_occurrence_but_not_aliased()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var note1 = Guid.CreateVersion7();
+        var note2 = Guid.CreateVersion7();
+        const string Sentence = "She mentioned Kyiv at the spring offsite.";
+
+        await RunAsync("Kyiv", EntityKind.Place, note1, Vec("Kyiv"), ct);
+        await RunWithAnchorAsync("Kyiv", Sentence, EntityKind.Place, note2, Vec("Kyiv"), ct);
+
+        using var probe = NewDb();
+        var row = await probe.EntitySuggestions.SingleAsync(ct);
+        row.OccurrenceCount.ShouldBe(2);
+        row.Aliases.ShouldNotContain(Sentence);
+        EntitySuggestionOccurrences.Parse(row.Occurrences).ShouldContain(o => o.AnchorText == Sentence);
+    }
+
+    [Fact]
+    public async Task Clean_cross_language_surface_form_is_aliased()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var note1 = Guid.CreateVersion7();
+        var note2 = Guid.CreateVersion7();
+
+        await RunAsync("Kyiv", EntityKind.Place, note1, Vec("Kyiv"), ct);
+        await RunWithAnchorAsync("Kyiv", "Київ", EntityKind.Place, note2, Vec("Kyiv"), ct);
+
+        using var probe = NewDb();
+        var row = await probe.EntitySuggestions.SingleAsync(ct);
+        row.Aliases.ShouldContain("Київ");
+    }
+
+    [Fact]
+    public async Task Candidate_beyond_match_gate_creates_separate_row()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var note1 = Guid.CreateVersion7();
+        var note2 = Guid.CreateVersion7();
+
+        await RunAsync("Alpha", EntityKind.Place, note1, AxisVec(0), ct);
+        await RunAsync("Beta", EntityKind.Place, note2, AtDistanceVec(0.2), ct);
+
+        using var probe = NewDb();
+        (await probe.EntitySuggestions.CountAsync(ct)).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Same_entity_surface_form_within_gate_merges()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        var note1 = Guid.CreateVersion7();
+        var note2 = Guid.CreateVersion7();
+
+        await RunAsync("Alpha", EntityKind.Place, note1, AxisVec(0), ct);
+        await RunWithAnchorAsync("Alfa", "Alfa", EntityKind.Place, note2, AtDistanceVec(0.05), ct);
+
+        using var probe = NewDb();
+        var rows = await probe.EntitySuggestions.ToListAsync(ct);
+        rows.Count.ShouldBe(1);
+        rows[0].Aliases.ShouldContain("Alfa");
+    }
+
+    private async Task RunAsync(string canonical, string kind, Guid noteId, Vector embedding, CancellationToken ct) =>
+        await RunWithAnchorAsync(canonical, canonical, kind, noteId, embedding, ct);
+
+    private async Task RunWithAnchorAsync(
+        string canonical, string anchor, string kind, Guid noteId, Vector embedding, CancellationToken ct)
     {
         using var db = NewDb();
         var agg = new EntitySuggestionAggregator(db, Opts);
         var now = SystemClock.Instance.GetCurrentInstant();
-        await agg.AppendOrCreateAsync(Candidate(canonical, kind), noteId, "surrounding", embedding, now, null, ct);
+        var cand = new MentionCandidateDto(
+            AnchorText: anchor, StartOffset: 0, EndOffset: anchor.Length,
+            CandidateKind: kind, CandidateCanonical: canonical, Aliases: NoAliases, Confidence: 0.9);
+        await agg.AppendOrCreateAsync(cand, noteId, "surrounding", embedding, now, null, ct);
         await db.SaveChangesAsync(ct);
+    }
+
+    private static Vector AxisVec(int i)
+    {
+        var v = new float[FakeEmbeddingClient.Dimensions];
+        v[i] = 1f;
+        return new Vector(v);
+    }
+
+    private static Vector AtDistanceVec(double d)
+    {
+        var v = new float[FakeEmbeddingClient.Dimensions];
+        var a = 1.0 - d;
+        v[0] = (float)a;
+        v[1] = (float)Math.Sqrt(Math.Max(0, 1 - a * a));
+        return new Vector(v);
     }
 
     private async Task RunTwiceSameNoteAsync(Guid noteId, CancellationToken ct)

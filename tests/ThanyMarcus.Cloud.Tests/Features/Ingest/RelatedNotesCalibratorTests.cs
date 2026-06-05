@@ -78,6 +78,36 @@ public sealed class RelatedNotesCalibratorTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Persisted_auto_adds_query_doc_offset_to_doc_doc_youden()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await postgres.ResetAsync();
+        await ClearCalibrationFieldsAsync();
+
+        var cluster = FakeEmbeddingClient.DeterministicUnitVector("cluster");
+        var n1 = await SeedNoteAsync(cluster);
+        var n2 = await SeedNoteAsync(cluster);
+        var n3 = await SeedNoteAsync(cluster);
+        await SeedNoteAsync(FakeEmbeddingClient.DeterministicUnitVector("alpha"));
+        await SeedNoteAsync(FakeEmbeddingClient.DeterministicUnitVector("beta"));
+        await SeedEntityWithMentionsAsync(n1, n2, n3);
+
+        var o = LowGateOptions();
+        o.MaxDistanceFloor = 0.0;
+        o.QueryDocOffset = 0.04;
+        using (var db = NewDb(postgres.ConnectionString))
+        {
+            var calibrator = new RelatedNotesCalibrator(
+                db, Options.Create(o), SystemClock.Instance, NullLogger<RelatedNotesCalibrator>.Instance);
+            (await calibrator.RunAsync(ct)).ShouldBe(CalibrationStatus.Recalibrated);
+        }
+
+        using var probe = NewDb(postgres.ConnectionString);
+        var s = await probe.CloudSettings.SingleAsync(x => x.Id == CloudSettings.SingletonId, ct);
+        s.RelatedNotesMaxDistanceAuto!.Value.ShouldBe(0.04, 1e-9);
+    }
+
+    [Fact]
     public async Task Records_counts_but_leaves_auto_null_when_graph_too_sparse()
     {
         var ct = TestContext.Current.CancellationToken;

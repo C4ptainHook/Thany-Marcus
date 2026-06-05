@@ -33,14 +33,28 @@ public static class PromptTemplates
         """;
 
     public const string ExtractV1 = """
-        You are an entity extraction assistant. Identify named entities mentioned
-        in the note body below. For each mention, return:
-          - the surface anchor text exactly as it appears
-          - the start and end character offsets in the body (0-based, end-exclusive)
+        You are an entity extraction assistant. Extract ONLY proper-noun named
+        entities from the note body below: specific people, organizations,
+        places, and named products or projects.
+
+        Do NOT extract generic noun phrases, activities, topics, or descriptions.
+        For example, do NOT extract "index funds", "monthly contributions",
+        "stock picking", or "note-taking" — these are not named entities.
+
+        For each mention, return:
+          - anchor_text: the 1-4 word span where the name appears, exactly as
+            written. It is the NAME only, never the surrounding sentence.
+            In "She wants the OpenAI integration shipped", the anchor is
+            "OpenAI" — not the whole sentence.
+          - the start and end character offsets of that span (0-based, end-exclusive)
           - the entity kind (one of: person, organization, place, concept, other)
           - a canonical name (the entity's normalized form)
-          - aliases (other surface forms that refer to the same entity)
+          - aliases (other proper-noun surface forms of the same entity, e.g.
+            "Київ" for "Kyiv"; never a sentence or description)
           - confidence (0.0-1.0) of the extraction
+
+        Use "concept" only for named concepts (e.g. Zettelkasten, Bauhaus), never
+        common-noun topics. Avoid "other"; prefer not extracting over a vague kind.
 
         Be conservative. Prefer few high-quality mentions to many noisy ones.
         Never invent entities not present in the body.
