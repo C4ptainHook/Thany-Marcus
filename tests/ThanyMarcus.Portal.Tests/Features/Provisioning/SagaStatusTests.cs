@@ -41,6 +41,9 @@ public sealed class SagaStatusTests
             SagaStatus.FailedMintingSpaces,
             SagaStatus.Cancelled,
             SagaStatus.RolledBack,
+            SagaStatus.MigrateSucceeded,
+            SagaStatus.FailedMigrate,
+            SagaStatus.MigrateRolledBack,
         }, ignoreOrder: true);
     }
 
