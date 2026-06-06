@@ -154,9 +154,9 @@ public sealed class IssuingPluginTokenHandlerTests(PostgresFixture postgres) : D
             Db, Clock, dpp, status: SagaStatus.IssuingPluginToken, ct: ct);
         if (withEncryptedAdminToken)
         {
-            var trackedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+            var trackedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
             var protector = dpp.CreateProtector(CloudAdminTokenAccessor.DataProtectionPurpose);
-            trackedCloud.EncryptedCloudAdminToken = protector.Protect(Encoding.UTF8.GetBytes(AdminToken));
+            trackedJob.AdminTokenCiphertext = protector.Protect(Encoding.UTF8.GetBytes(AdminToken));
             await Db.SaveChangesAsync(ct);
         }
         Db.ChangeTracker.Clear();

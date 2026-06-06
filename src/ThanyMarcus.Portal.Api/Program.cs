@@ -30,6 +30,7 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.Callback;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Cancel;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Create;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Destroy;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Migrate;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.PluginTokens.Sync;
@@ -41,6 +42,7 @@ using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Features.Provisioning.Pricing;
 using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
 using ThanyMarcus.Portal.Api.Features.Provisioning.SagaCredentials;
+using ThanyMarcus.Portal.Api.Features.Releases;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
 
@@ -164,6 +166,9 @@ var pluginTokenSyncOpts = builder.Configuration
     .Get<PluginTokenSyncOptions>() ?? new PluginTokenSyncOptions();
 builder.Services.AddHttpClient(PortalToCloudPluginTokenClient.HttpClientName, c =>
     c.Timeout = TimeSpan.FromSeconds(pluginTokenSyncOpts.HttpTimeoutSeconds));
+
+builder.Services.Configure<ReleaseFeedOptions>(
+    builder.Configuration.GetSection(ReleaseFeedOptions.SectionName));
 
 builder.Services.AddScoped<EnqueueGuard>();
 builder.Services.AddSingleton<EnrollmentTokenGenerator>();
@@ -308,10 +313,13 @@ app.MapProviderMetaEndpoints();
 app.MapCloudCallbackEndpoints();
 app.MapDestroyCloudEndpoints();
 app.MapCancelCloudEndpoints();
+app.MapMigrateCloudEndpoints();
 app.MapPluginTokenEndpoints();
 app.MapRetryPluginTokenEndpoint();
 app.MapCaptchaEndpoints();
 app.MapPricingBackfillEndpoint();
+app.MapReleaseRegistrationEndpoint();
+app.MapReleaseFeedEndpoints();
 
 app.MapFallbackToFile("index.html");
 

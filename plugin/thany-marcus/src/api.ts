@@ -1,4 +1,11 @@
 import { requestUrl, type RequestUrlParam } from "obsidian";
+import type {
+  ApplyUpdateResponse,
+  CloudHealth,
+  CloudUpdateStatus,
+  RedeemRecoveryResponse,
+  ReleaseDescriptor,
+} from "./update/updateTypes";
 
 export interface IngestInitAttachmentDto {
   clientAttachmentId: string;
@@ -111,6 +118,7 @@ export interface RelatedNotesItem {
 
 interface RelatedNotesResponse {
   items: RelatedNotesItem[];
+  reindexing?: boolean;
 }
 
 export interface RelatedNotesRequest {
@@ -471,6 +479,97 @@ export class ApiClient {
     }
     const data = (await res.json()) as RelatedNotesResponse;
     return data.items ?? [];
+  }
+
+  async cloudVersion(): Promise<string | null> {
+    const res = await requestUrl({ url: `${this.base()}/admin/health`, method: "GET", throw: false });
+    if (res.status < 200 || res.status >= 300) return null;
+    return (res.json as CloudHealth).current_version ?? null;
+  }
+
+  async latestRelease(portalUrl: string): Promise<ReleaseDescriptor | null> {
+    const base = portalUrl.replace(/\/+$/, "");
+    const res = await requestUrl({ url: `${base}/api/releases/latest`, method: "GET", throw: false });
+    if (res.status === 404) return null;
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`GET ${base}/api/releases/latest → HTTP ${res.status}`);
+    }
+    return res.json as ReleaseDescriptor;
+  }
+
+  async applyUpdate(bundle: ReleaseDescriptor): Promise<ApplyUpdateResponse> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/update/apply`,
+      method: "POST",
+      headers: this.authHeader(),
+      contentType: "application/json",
+      body: JSON.stringify(bundle),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status === 202 || res.status === 409 || res.status === 400) {
+      return res.json as ApplyUpdateResponse;
+    }
+    throw new Error(`POST /api/update/apply → HTTP ${res.status}`);
+  }
+
+  async updateStatus(): Promise<CloudUpdateStatus> {
+    return this.json<CloudUpdateStatus>({ url: `${this.base()}/api/update/status`, method: "GET" });
+  }
+
+  async provisionRecoveryCode(): Promise<string | null> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/recovery-code`,
+      method: "POST",
+      headers: this.authHeader(),
+      throw: false,
+    });
+    if (res.status === 409) return null;
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`POST /api/recovery-code → HTTP ${res.status}`);
+    }
+    return (res.json as { recovery_code: string }).recovery_code;
+  }
+
+  async redeemRecovery(cloudUrl: string, recoveryCode: string): Promise<RedeemRecoveryResponse | null> {
+    const base = cloudUrl.replace(/\/+$/, "");
+    const res = await requestUrl({
+      url: `${base}/api/recovery/redeem`,
+      method: "POST",
+      contentType: "application/json",
+      body: JSON.stringify({ recovery_code: recoveryCode }),
+      throw: false,
+    });
+    if (res.status === 401 || res.status === 429) return null;
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`POST /api/recovery/redeem → HTTP ${res.status}`);
+    }
+    return res.json as RedeemRecoveryResponse;
+  }
+
+  async rotatePluginToken(tokenHashBase64: string, label: string): Promise<void> {
+    const res = await requestUrl({
+      url: `${this.base()}/api/plugin-tokens/rotate`,
+      method: "POST",
+      headers: this.authHeader(),
+      contentType: "application/json",
+      body: JSON.stringify({ token_hash: tokenHashBase64, label }),
+      throw: false,
+    });
+    if (res.status === 401) {
+      this.onAuthFailure();
+      throw new TokenRevokedError();
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`POST /api/plugin-tokens/rotate → HTTP ${res.status}`);
+    }
   }
 
   async listActiveJobs(includeRecent = true): Promise<ListJobsResponse> {

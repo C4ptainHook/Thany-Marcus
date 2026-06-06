@@ -181,12 +181,13 @@ public sealed class CloudCallbackEndpointTests(PostgresFixture postgres) : Facto
         reloadedJob.Status.ShouldBe(SagaStatus.AwaitingCert);
         reloadedJob.EventsLog.RootElement.GetRawText().ShouldContain("cloud_registered");
 
-        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
-        reloadedCloud.EncryptedCloudAdminToken.ShouldNotBeNull();
+        reloadedJob.AdminTokenCiphertext.ShouldNotBeNull();
         var dpp = Factory.Services.GetRequiredService<IDataProtectionProvider>();
         var protector = dpp.CreateProtector(CloudAdminTokenAccessor.DataProtectionPurpose);
-        var plaintext = Encoding.UTF8.GetString(protector.Unprotect(reloadedCloud.EncryptedCloudAdminToken!));
+        var plaintext = Encoding.UTF8.GetString(protector.Unprotect(reloadedJob.AdminTokenCiphertext!));
         plaintext.ShouldBe("the-admin-token");
+
+        var reloadedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
         reloadedCloud.AdminStartedAt.ShouldNotBeNull();
     }
 

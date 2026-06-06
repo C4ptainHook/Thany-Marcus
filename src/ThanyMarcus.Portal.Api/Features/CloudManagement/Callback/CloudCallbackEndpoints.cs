@@ -66,7 +66,7 @@ public static class CloudCallbackEndpoints
 
             var now = clock.GetCurrentInstant();
             var protector = dpp.CreateProtector(CloudAdminTokenAccessor.DataProtectionPurpose);
-            cloud.EncryptedCloudAdminToken =
+            job.AdminTokenCiphertext =
                 protector.Protect(Encoding.UTF8.GetBytes(body.CloudAdminToken));
             cloud.AdminStartedAt = now;
             job.Status = SagaStatus.AwaitingCert;

@@ -25,6 +25,9 @@ public sealed class CloudSettingsConfiguration : IEntityTypeConfiguration<CloudS
         builder.Property(s => s.RelatedNotesMaxDistanceAuto);
         builder.Property(s => s.RelatedNotesAutoNoteCount);
         builder.Property(s => s.RelatedNotesAutoEntityCount);
+        builder.Property(s => s.BootstrapConsumedAt);
+        builder.Property(s => s.RecoveryAnchorHash);
+        builder.Property(s => s.ReindexInProgress).IsRequired().HasDefaultValue(false);
         builder.Property(s => s.UpdatedAt).IsRequired();
 
         builder.HasData(new CloudSettings

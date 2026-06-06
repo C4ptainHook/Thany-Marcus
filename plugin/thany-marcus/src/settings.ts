@@ -1,11 +1,13 @@
 import { App, Notice, PluginSettingTab, Setting, requestUrl } from "obsidian";
 import type ThanyMarcusPlugin from "./main";
+import { detectUpdate } from "./update/detectUpdate";
 import type { PrivacyMode, PublicModel, SynthesisPreset } from "./api";
 import type { RelatedStrictness } from "./related/strictness";
 
 export interface ThanyMarcusSettings {
   cloudUrl: string;
   token: string;
+  portalUrl: string;
   vaultFolder: string;
   recordMimeType: string;
   syncCursor: string | null;
@@ -24,6 +26,7 @@ export interface ThanyMarcusSettings {
 export const DEFAULT_SETTINGS: ThanyMarcusSettings = {
   cloudUrl: "",
   token: "",
+  portalUrl: "https://portal.thany.click",
   vaultFolder: "Thany",
   recordMimeType: "audio/webm;codecs=opus",
   syncCursor: null,
@@ -123,6 +126,119 @@ export class ThanyMarcusSettingTab extends PluginSettingTab {
             new Notice("Thany: connection OK");
           } catch (e) {
             new Notice(`Thany: connection failed — ${(e as Error).message}`);
+          }
+        }),
+      );
+
+    containerEl.createEl("h3", { text: "Cloud updates" });
+
+    new Setting(containerEl)
+      .setName("Portal URL")
+      .setDesc("Where the public release feed lives. Used only to check for new cloud versions.")
+      .addText((t) =>
+        t
+          .setPlaceholder("https://portal.thany.click")
+          .setValue(this.plugin.settings.portalUrl)
+          .onChange(async (v) => {
+            this.plugin.settings.portalUrl = v.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Check for updates")
+      .setDesc("Compares your cloud's version against the release feed.")
+      .addButton((b) =>
+        b.setButtonText("Check").onClick(async () => {
+          try {
+            const current = await this.plugin.api.cloudVersion();
+            if (current === null) {
+              new Notice("Thany: could not read your cloud's version.");
+              return;
+            }
+            const latest = await this.plugin.api.latestRelease(this.plugin.settings.portalUrl);
+            const verdict = detectUpdate(current, latest);
+            if (!verdict.available) {
+              new Notice(`Thany: up to date (v${current}).`);
+              return;
+            }
+            if (verdict.strategy === "in-place") {
+              const res = await this.plugin.api.applyUpdate(latest!);
+              new Notice(
+                res.accepted
+                  ? `Thany: updating to v${verdict.targetVersion} in place. ${verdict.costText}`
+                  : `Thany: update not started — ${res.message}.`,
+              );
+            } else {
+              const portal = this.plugin.settings.portalUrl.replace(/\/+$/, "");
+              window.open(`${portal}/clouds?migrate=${encodeURIComponent(verdict.targetVersion ?? "")}`);
+              new Notice(`Thany: v${verdict.targetVersion} needs a re-provision. Continue in the portal.`);
+            }
+          } catch (e) {
+            new Notice(`Thany: update check failed — ${(e as Error).message}`);
+          }
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Update status")
+      .setDesc("Shows the cloud's current in-place update phase.")
+      .addButton((b) =>
+        b.setButtonText("Refresh").onClick(async () => {
+          try {
+            const status = await this.plugin.api.updateStatus();
+            const target = status.target_version ? ` → v${status.target_version}` : "";
+            new Notice(`Thany update: ${status.phase}${target}${status.message ? ` — ${status.message}` : ""}`);
+          } catch (e) {
+            new Notice(`Thany: status failed — ${(e as Error).message}`);
+          }
+        }),
+      );
+
+    containerEl.createEl("h3", { text: "Recovery" });
+
+    new Setting(containerEl)
+      .setName("Save recovery code")
+      .setDesc("Shown once. Store it like an Emergency Kit — it is the only way to recover access if you lose this device.")
+      .addButton((b) =>
+        b.setButtonText("Reveal").onClick(async () => {
+          try {
+            const code = await this.plugin.api.provisionRecoveryCode();
+            new Notice(
+              code === null
+                ? "Thany: a recovery code was already issued for this cloud."
+                : `Thany recovery code (save now): ${code}`,
+              code === null ? 6000 : 0,
+            );
+          } catch (e) {
+            new Notice(`Thany: could not issue a recovery code — ${(e as Error).message}`);
+          }
+        }),
+      );
+
+    const recovery = { code: "" };
+    new Setting(containerEl)
+      .setName("Recover access")
+      .setDesc("On a fresh device: set the Cloud URL above, paste your recovery code, then recover.")
+      .addText((t) => t.setPlaceholder("tmr_...").onChange((v) => { recovery.code = v.trim(); }))
+      .addButton((b) =>
+        b.setButtonText("Recover").onClick(async () => {
+          if (!this.plugin.settings.cloudUrl || !recovery.code) {
+            new Notice("Thany: set the Cloud URL and paste a recovery code first.");
+            return;
+          }
+          try {
+            const result = await this.plugin.api.redeemRecovery(this.plugin.settings.cloudUrl, recovery.code);
+            if (result === null) {
+              new Notice("Thany: recovery code rejected (or too many attempts — wait and retry).");
+              return;
+            }
+            this.plugin.settings.token = result.token;
+            await this.plugin.saveSettings();
+            new Notice(`Thany: access recovered. New recovery code (save now): ${result.recovery_code}`, 0);
+            this.display();
+          } catch (e) {
+            new Notice(`Thany: recovery failed — ${(e as Error).message}`);
           }
         }),
       );

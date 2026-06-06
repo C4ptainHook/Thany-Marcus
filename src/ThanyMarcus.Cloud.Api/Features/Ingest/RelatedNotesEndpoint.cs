@@ -30,7 +30,7 @@ public static partial class RelatedNotesEndpoint
         string Snippet,
         double Distance);
 
-    public sealed record RelatedNotesResponse(IReadOnlyList<RelatedNotesItem> Items);
+    public sealed record RelatedNotesResponse(IReadOnlyList<RelatedNotesItem> Items, bool Reindexing = false);
 
     [GeneratedRegex(@"^\s*#\s+(.+?)\s*$", RegexOptions.Multiline)]
     private static partial Regex H1Title();
@@ -45,6 +45,7 @@ public static partial class RelatedNotesEndpoint
         QueryEmbeddingCache cache,
         IOptions<RelatedNotesOptions> opts,
         RelatedNotesCalibrationSignal calibrationSignal,
+        ReindexGate reindexGate,
         CancellationToken ct)
     {
         var o = opts.Value;
@@ -55,6 +56,11 @@ public static partial class RelatedNotesEndpoint
             return Results.Problem(
                 detail: "Provide exactly one of body or noteId.",
                 statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (await reindexGate.IsReindexingAsync(ct))
+        {
+            return Results.Ok(new RelatedNotesResponse([], Reindexing: true));
         }
 
         var k = Math.Clamp(req.K ?? o.DefaultK, 1, o.MaxK);

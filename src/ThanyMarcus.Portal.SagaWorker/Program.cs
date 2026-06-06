@@ -13,8 +13,10 @@ using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Secrets;
 using ThanyMarcus.Portal.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.Database;
+using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Api.Features.Provisioning.Pricing;
 using ThanyMarcus.Portal.Api.Features.Provisioning.Providers;
+using ThanyMarcus.Portal.Api.Features.CloudManagement.Migrate;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning;
 using ThanyMarcus.Portal.SagaWorker.Features.Provisioning.Handlers;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.Events;
@@ -129,6 +131,26 @@ public static class Program
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackTfHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, RollingBackDnsHandler>();
         builder.Services.AddScoped<ISagaPhaseHandler, DestroyEntryHandler>();
+
+        builder.Services.AddScoped<IBlueGreenOperations, StubBlueGreenOperations>();
+        builder.Services.AddScoped<IBlueGreenOperations, DigitalOceanBlueGreenOperations>();
+        builder.Services.AddHttpClient(DigitalOceanBlueGreenOperations.HttpClientName, c =>
+        {
+            c.BaseAddress = new Uri("https://api.digitalocean.com/");
+            c.Timeout = TimeSpan.FromSeconds(30);
+        });
+        foreach (var migratePhase in new[]
+                 {
+                     SagaStatus.MigrateQuiescing, SagaStatus.MigrateSnapshotting, SagaStatus.MigrateProvisioning,
+                     SagaStatus.MigrateVerifying, SagaStatus.MigrateCutover, SagaStatus.MigratePostGate,
+                     SagaStatus.MigrateDestroyingOld,
+                 })
+        {
+            var phase = migratePhase;
+            builder.Services.AddScoped<ISagaPhaseHandler>(sp =>
+                ActivatorUtilities.CreateInstance<BlueGreenHandler>(sp, phase));
+        }
+
         builder.Services.AddScoped<CancelHandler>();
         builder.Services.AddScoped<SagaPhaseDispatcher>();
 

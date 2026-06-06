@@ -65,16 +65,14 @@ public sealed class SagaEndToEndTests(PostgresFixture postgres) : DbIntegrationT
         try
         {
             var dp = new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider();
-            var (_, cloud, job) = await SagaTestSeed.SeedAsync(
+            var (_, _, job) = await SagaTestSeed.SeedAsync(
                 Db, Clock, dp,
                 status: SagaStatus.AwaitingCert,
                 ct: ct);
 
-            // Seed the DataProtection-encrypted admin token so the post-cert
-            // IssuingPluginToken phase has the bearer it needs to call the cloud.
-            var trackedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+            var trackedJob = await Db.ProvisioningJobs.SingleAsync(j => j.Id == job.Id, ct);
             var protector = dp.CreateProtector("cloud-admin-token:v1");
-            trackedCloud.EncryptedCloudAdminToken =
+            trackedJob.AdminTokenCiphertext =
                 protector.Protect(System.Text.Encoding.UTF8.GetBytes("stub-admin-token"));
             await Db.SaveChangesAsync(ct);
             Db.ChangeTracker.Clear();

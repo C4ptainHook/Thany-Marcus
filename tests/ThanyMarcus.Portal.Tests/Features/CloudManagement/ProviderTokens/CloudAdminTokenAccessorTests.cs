@@ -1,11 +1,12 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
-using NodaTime;
 using Shouldly;
 using ThanyMarcus.Portal.Api.Features.Auth;
 using ThanyMarcus.Portal.Api.Features.CloudManagement;
 using ThanyMarcus.Portal.Api.Features.CloudManagement.ProviderTokens;
+using ThanyMarcus.Portal.Api.Features.Provisioning;
 using ThanyMarcus.Portal.Tests.Infrastructure;
 
 namespace ThanyMarcus.Portal.Tests.Features.CloudManagement.ProviderTokens;
@@ -26,7 +27,7 @@ public sealed class CloudAdminTokenAccessorTests(PostgresFixture postgres) : DbI
     }
 
     [Fact]
-    public async Task Returns_null_when_no_encrypted_column()
+    public async Task Returns_null_when_no_ephemeral_token()
     {
         var ct = TestContext.Current.CancellationToken;
         var dpp = new EphemeralDataProtectionProvider();
@@ -45,10 +46,10 @@ public sealed class CloudAdminTokenAccessorTests(PostgresFixture postgres) : DbI
         var dpp = new EphemeralDataProtectionProvider();
         var cloud = await SeedCloudWithEncryptedTokenAsync(dpp, "x", ct);
 
-        var trackedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
-        var corrupted = trackedCloud.EncryptedCloudAdminToken!.ToArray();
+        var trackedJob = await Db.ProvisioningJobs.SingleAsync(j => j.CloudId == cloud.Id, ct);
+        var corrupted = trackedJob.AdminTokenCiphertext!.ToArray();
         corrupted[0] ^= 0xFF;
-        trackedCloud.EncryptedCloudAdminToken = corrupted;
+        trackedJob.AdminTokenCiphertext = corrupted;
         await Db.SaveChangesAsync(ct);
         Db.ChangeTracker.Clear();
 
@@ -90,9 +91,21 @@ public sealed class CloudAdminTokenAccessorTests(PostgresFixture postgres) : DbI
         EphemeralDataProtectionProvider dpp, string plaintext, CancellationToken ct)
     {
         var cloud = await SeedCloudOnlyAsync(ct);
-        var trackedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
+        var now = Clock.GetCurrentInstant();
         var protector = dpp.CreateProtector(CloudAdminTokenAccessor.DataProtectionPurpose);
-        trackedCloud.EncryptedCloudAdminToken = protector.Protect(Encoding.UTF8.GetBytes(plaintext));
+        Db.ProvisioningJobs.Add(new ProvisioningJob
+        {
+            CloudId = cloud.Id,
+            UserId = cloud.UserId,
+            Kind = SagaKinds.Create,
+            Status = SagaStatus.AwaitingCert,
+            Payload = JsonDocument.Parse("{}"),
+            EventsLog = JsonDocument.Parse("[]"),
+            NextVisibleAt = now,
+            AdminTokenCiphertext = protector.Protect(Encoding.UTF8.GetBytes(plaintext)),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
         await Db.SaveChangesAsync(ct);
         Db.ChangeTracker.Clear();
         return cloud;

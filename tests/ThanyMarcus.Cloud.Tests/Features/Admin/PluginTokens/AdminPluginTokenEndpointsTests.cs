@@ -4,8 +4,10 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NodaTime;
 using Shouldly;
 using ThanyMarcus.Cloud.Api.Features.PluginAuth;
+using ThanyMarcus.Cloud.Api.Features.Settings;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Cloud.Tests.Infrastructure;
 using ThanyMarcus.Shared.CloudAdmin;
@@ -29,12 +31,22 @@ public sealed class AdminPluginTokenEndpointsTests(PostgresFixture postgres) : I
         await factory.DisposeAsync();
     }
 
+    private async Task ClearBootstrapConsumedAsync(CancellationToken ct)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CloudDbContext>();
+        await db.CloudSettings
+            .Where(s => s.Id == CloudSettings.SingletonId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.BootstrapConsumedAt, (Instant?)null), ct);
+    }
+
     [Fact]
     public async Task Posts_valid_hash_returns_200_and_persists_row()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
         using var client = factory.CreateClient();
+        await ClearBootstrapConsumedAsync(ct);
 
         var hash = SHA256.HashData("plugin-token-1"u8);
         var req = new HttpRequestMessage(HttpMethod.Post, "/admin/plugin-tokens")
@@ -64,6 +76,7 @@ public sealed class AdminPluginTokenEndpointsTests(PostgresFixture postgres) : I
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
         using var client = factory.CreateClient();
+        await ClearBootstrapConsumedAsync(ct);
 
         var hash = SHA256.HashData("plugin-token-dup"u8);
 
@@ -91,6 +104,7 @@ public sealed class AdminPluginTokenEndpointsTests(PostgresFixture postgres) : I
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
         using var client = factory.CreateClient();
+        await ClearBootstrapConsumedAsync(ct);
 
         var req = new HttpRequestMessage(HttpMethod.Post, "/admin/plugin-tokens")
         {
@@ -110,6 +124,7 @@ public sealed class AdminPluginTokenEndpointsTests(PostgresFixture postgres) : I
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
         using var client = factory.CreateClient();
+        await ClearBootstrapConsumedAsync(ct);
 
         var hash = SHA256.HashData("any-token"u8);
         var req = new HttpRequestMessage(HttpMethod.Post, "/admin/plugin-tokens")
@@ -130,6 +145,7 @@ public sealed class AdminPluginTokenEndpointsTests(PostgresFixture postgres) : I
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
         using var client = factory.CreateClient();
+        await ClearBootstrapConsumedAsync(ct);
 
         var hash = SHA256.HashData("any-token"u8);
         using var resp = await client.PostAsJsonAsync(
@@ -146,6 +162,7 @@ public sealed class AdminPluginTokenEndpointsTests(PostgresFixture postgres) : I
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
         using var client = factory.CreateClient();
+        await ClearBootstrapConsumedAsync(ct);
 
         var hash = SHA256.HashData("any-token"u8);
         var req = new HttpRequestMessage(HttpMethod.Post, "/admin/plugin-tokens")
@@ -161,71 +178,28 @@ public sealed class AdminPluginTokenEndpointsTests(PostgresFixture postgres) : I
     }
 
     [Fact]
-    public async Task Revoke_sets_revoked_at_and_rejects_future_plugin_auth()
+    public async Task Second_distinct_hash_after_consumption_returns_409()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
         using var client = factory.CreateClient();
+        await ClearBootstrapConsumedAsync(ct);
 
-        var raw = "tm_revoke_e2e_token";
-        var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw));
-
-        var post = new HttpRequestMessage(HttpMethod.Post, "/admin/plugin-tokens")
+        async Task<HttpStatusCode> Post(string seed)
         {
-            Content = JsonContent.Create(new AdminIssuePluginTokenRequest(
-                Convert.ToBase64String(hash), "plugin")),
-        };
-        post.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CloudAdminToken);
-        using var postResp = await client.SendAsync(post, ct);
-        postResp.StatusCode.ShouldBe(HttpStatusCode.OK);
+            var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(seed));
+            var req = new HttpRequestMessage(HttpMethod.Post, "/admin/plugin-tokens")
+            {
+                Content = JsonContent.Create(new AdminIssuePluginTokenRequest(
+                    Convert.ToBase64String(hash), "plugin")),
+            };
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CloudAdminToken);
+            using var resp = await client.SendAsync(req, ct);
+            return resp.StatusCode;
+        }
 
-        var revoke = new HttpRequestMessage(HttpMethod.Post, "/admin/plugin-tokens/revoke")
-        {
-            Content = JsonContent.Create(new AdminRevokePluginTokenRequest(
-                Convert.ToBase64String(hash))),
-        };
-        revoke.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CloudAdminToken);
-        using var revokeResp = await client.SendAsync(revoke, ct);
-        revokeResp.StatusCode.ShouldBe(HttpStatusCode.NoContent);
-
-        await using var scope = factory.Services.CreateAsyncScope();
-        var auth = scope.ServiceProvider.GetRequiredService<IPluginTokenAuthenticator>();
-        var principal = await auth.AuthenticateAsync($"Bearer {raw}", ct);
-        principal.ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task Revoke_unknown_hash_returns_404()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        await postgres.ResetAsync();
-        using var client = factory.CreateClient();
-
-        var hash = SHA256.HashData("never-existed"u8);
-        var revoke = new HttpRequestMessage(HttpMethod.Post, "/admin/plugin-tokens/revoke")
-        {
-            Content = JsonContent.Create(new AdminRevokePluginTokenRequest(
-                Convert.ToBase64String(hash))),
-        };
-        revoke.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CloudAdminToken);
-        using var resp = await client.SendAsync(revoke, ct);
-        resp.StatusCode.ShouldBe(HttpStatusCode.NotFound);
-    }
-
-    [Fact]
-    public async Task Revoke_without_auth_returns_401()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        await postgres.ResetAsync();
-        using var client = factory.CreateClient();
-
-        var hash = SHA256.HashData("any"u8);
-        using var resp = await client.PostAsJsonAsync(
-            new Uri("/admin/plugin-tokens/revoke", UriKind.Relative),
-            new AdminRevokePluginTokenRequest(Convert.ToBase64String(hash)),
-            ct);
-
-        resp.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        (await Post("tm_first")).ShouldBe(HttpStatusCode.OK);
+        (await Post("tm_second")).ShouldBe(HttpStatusCode.Conflict);
     }
 
     [Fact]
@@ -234,6 +208,7 @@ public sealed class AdminPluginTokenEndpointsTests(PostgresFixture postgres) : I
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
         using var client = factory.CreateClient();
+        await ClearBootstrapConsumedAsync(ct);
 
         var raw = "tm_authflow_e2e_token";
         var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw));

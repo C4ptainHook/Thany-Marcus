@@ -1,5 +1,15 @@
 output "ip" {
-  description = "Droplet public IPv4 address. PORTAL-007's WorkspaceLayout rendering forwards this as the root module's ip output, which DnsCreatingHandler reads to set up the Cloudflare A-record."
+  description = "Reserved IP bound to the droplet. The domain A-record points here permanently; blue-green cutover reassigns this reserved IP to the green droplet without a DNS change."
+  value       = digitalocean_reserved_ip.cloud.ip_address
+}
+
+output "reserved_ip" {
+  description = "Reserved IP address for this cloud. Stamped onto cloud.VmIp and reassigned old->green during a blue-green migration."
+  value       = digitalocean_reserved_ip.cloud.ip_address
+}
+
+output "droplet_ipv4" {
+  description = "Droplet's own ephemeral public IPv4 (pre-reserved-IP). Surfaced for debugging only."
   value       = digitalocean_droplet.cloud.ipv4_address
 }
 

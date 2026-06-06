@@ -16,6 +16,11 @@ public sealed class CloudSettings : IHasUpdatedAt
     public int? RelatedNotesAutoNoteCount { get; set; }
     public int? RelatedNotesAutoEntityCount { get; set; }
 
+    public Instant? BootstrapConsumedAt { get; set; }
+    public byte[]? RecoveryAnchorHash { get; set; }
+
+    public bool ReindexInProgress { get; set; }
+
     public Instant UpdatedAt { get; set; }
 }
 
