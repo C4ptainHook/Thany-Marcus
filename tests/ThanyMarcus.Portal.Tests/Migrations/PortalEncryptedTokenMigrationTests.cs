@@ -10,18 +10,17 @@ namespace ThanyMarcus.Portal.Tests.Migrations;
 public sealed class PortalEncryptedTokenMigrationTests(PostgresFixture postgres)
 {
     [Fact]
-    public async Task After_migration_clouds_has_encrypted_column_and_no_hash_column()
+    public async Task After_migration_admin_token_is_ephemeral_on_jobs_not_on_clouds()
     {
         var ct = TestContext.Current.CancellationToken;
         await postgres.ResetAsync();
 
-        // PostgresFixture.InitializeAsync already ran Database.MigrateAsync; just verify the
-        // resulting schema.
         await using var conn = new NpgsqlConnection(postgres.ConnectionString);
         await conn.OpenAsync(ct);
 
-        (await ColumnExistsAsync(conn, "clouds", "encrypted_cloud_admin_token", ct)).ShouldBeTrue();
+        (await ColumnExistsAsync(conn, "clouds", "encrypted_cloud_admin_token", ct)).ShouldBeFalse();
         (await ColumnExistsAsync(conn, "clouds", "cloud_admin_token_hash", ct)).ShouldBeFalse();
+        (await ColumnExistsAsync(conn, "provisioning_jobs", "admin_token_ciphertext", ct)).ShouldBeTrue();
     }
 
     [Fact]
