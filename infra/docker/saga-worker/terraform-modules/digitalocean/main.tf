@@ -57,6 +57,15 @@ resource "digitalocean_volume_attachment" "data" {
   volume_id  = digitalocean_volume.data.id
 }
 
+resource "digitalocean_reserved_ip" "cloud" {
+  region = var.region
+}
+
+resource "digitalocean_reserved_ip_assignment" "cloud" {
+  ip_address = digitalocean_reserved_ip.cloud.ip_address
+  droplet_id = digitalocean_droplet.cloud.id
+}
+
 resource "digitalocean_spaces_bucket" "artifacts" {
   name          = local.bucket_name
   region        = var.region

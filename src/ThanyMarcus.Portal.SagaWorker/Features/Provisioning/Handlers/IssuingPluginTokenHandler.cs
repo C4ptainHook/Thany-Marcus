@@ -102,6 +102,7 @@ public sealed partial class IssuingPluginTokenHandler(
         });
 
         cloud.ProvisioningCompletedAt = clock.GetCurrentInstant();
+        job.AdminTokenCiphertext = null;
 
         await db.SaveChangesAsync(ct);
         await eventBus.PublishPluginTokenIssuedAsync(cloud.Id, raw, deepLink, ct);

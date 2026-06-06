@@ -546,10 +546,6 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("dns_started_at");
 
-                    b.Property<byte[]>("EncryptedCloudAdminToken")
-                        .HasColumnType("bytea")
-                        .HasColumnName("encrypted_cloud_admin_token");
-
                     b.Property<string>("Hostname")
                         .IsRequired()
                         .HasColumnType("text")
@@ -767,6 +763,10 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<byte[]>("AdminTokenCiphertext")
+                        .HasColumnType("bytea")
+                        .HasColumnName("admin_token_ciphertext");
+
                     b.Property<short>("AttemptCount")
                         .HasColumnType("smallint")
                         .HasColumnName("attempt_count");
@@ -887,6 +887,70 @@ namespace ThanyMarcus.Portal.Api.Infrastructure.Database.Migrations
                         .HasDatabaseName("ix_saga_credential_grants_expires_at");
 
                     b.ToTable("saga_credential_grants", (string)null);
+                });
+
+            modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Releases.Release", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ComposeYaml")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("compose_yaml");
+
+                    b.Property<Instant>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<JsonDocument>("EnvOverlay")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("env_overlay");
+
+                    b.Property<JsonDocument>("ImageDigests")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("image_digests");
+
+                    b.Property<JsonDocument>("ModelTags")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("model_tags");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("SchemaMinFrom")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("schema_min_from");
+
+                    b.Property<string>("Strategy")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("strategy");
+
+                    b.Property<Instant>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_releases");
+
+                    b.HasIndex("Version")
+                        .IsUnique()
+                        .HasDatabaseName("ix_releases_version");
+
+                    b.ToTable("releases", (string)null);
                 });
 
             modelBuilder.Entity("ThanyMarcus.Portal.Api.Features.Auth.AuthLockout", b =>

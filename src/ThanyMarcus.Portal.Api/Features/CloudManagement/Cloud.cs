@@ -15,7 +15,6 @@ public sealed class Cloud : IHasUpdatedAt
     public string? Subdomain { get; set; }
     public string? VmIp { get; set; }
     public string? TerraformWorkspace { get; set; }
-    public byte[]? EncryptedCloudAdminToken { get; set; }
     public Guid? ProviderTokenId { get; set; }
 
     public string ProvisioningStatus { get; set; } = null!;

@@ -851,6 +851,10 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         .HasDefaultValue(1)
                         .HasColumnName("id");
 
+                    b.Property<Instant?>("BootstrapConsumedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("bootstrap_consumed_at");
+
                     b.Property<byte[]>("EncryptedExternalApiKey")
                         .HasColumnType("bytea")
                         .HasColumnName("encrypted_external_api_key");
@@ -865,6 +869,16 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                     b.Property<string>("LlmModel")
                         .HasColumnType("text")
                         .HasColumnName("llm_model");
+
+                    b.Property<byte[]>("RecoveryAnchorHash")
+                        .HasColumnType("bytea")
+                        .HasColumnName("recovery_anchor_hash");
+
+                    b.Property<bool>("ReindexInProgress")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("reindex_in_progress");
 
                     b.Property<int?>("RelatedNotesAutoEntityCount")
                         .HasColumnType("integer")
@@ -897,6 +911,7 @@ namespace ThanyMarcus.Cloud.Api.Infrastructure.Database.Migrations
                         {
                             Id = 1,
                             LlmMode = "safe",
+                            ReindexInProgress = false,
                             UpdatedAt = NodaTime.Instant.FromUnixTimeTicks(17790624000000000L)
                         });
                 });

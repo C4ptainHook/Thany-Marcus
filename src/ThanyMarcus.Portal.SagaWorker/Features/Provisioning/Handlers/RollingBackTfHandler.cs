@@ -128,7 +128,6 @@ public sealed partial class RollingBackTfHandler(
 
                 cloud.DestroyedAt = clock.GetCurrentInstant();
                 cloud.VmIp = null;
-                cloud.EncryptedCloudAdminToken = null;
                 cloud.TerraformWorkspace = null;
 
                 EventsLogAppender.Append(job, clock, Phase, new JsonObject
@@ -196,7 +195,6 @@ public sealed partial class RollingBackTfHandler(
 
         cloud.DestroyedAt        = now;
         cloud.VmIp               = null;
-        cloud.EncryptedCloudAdminToken = null;
         cloud.TerraformWorkspace = null;
 
         var revoked = await db.PluginTokenMetadata

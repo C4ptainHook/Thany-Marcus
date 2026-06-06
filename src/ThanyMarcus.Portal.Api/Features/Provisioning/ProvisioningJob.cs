@@ -13,6 +13,7 @@ public sealed class ProvisioningJob : IHasUpdatedAt
     public JsonDocument Payload { get; init; } = null!;
     public string Status { get; set; } = null!;
     public string? EnrollmentToken { get; set; }
+    public byte[]? AdminTokenCiphertext { get; set; }
 
     public Instant NextVisibleAt { get; set; }
     public Instant? LeaseExpiresAt { get; set; }

@@ -114,6 +114,163 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
+  - path: /etc/systemd/system/thany-update.path
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Watch for a queued Thany cloud update
+
+      [Path]
+      PathExists=/mnt/thany-data/cloud-state/pending-update.json
+      Unit=thany-update.service
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/thany-update.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Apply a queued Thany cloud in-place update
+      Requires=docker.service
+      After=docker.service network-online.target
+
+      [Service]
+      Type=oneshot
+      WorkingDirectory=/opt/thany-cloud
+      ExecStart=/opt/thany-cloud/update/apply.sh
+
+  - path: /opt/thany-cloud/update/apply.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      STATE_DIR=/mnt/thany-data/cloud-state
+      COMPOSE_DIR=/opt/thany-cloud
+      PENDING="$STATE_DIR/pending-update.json"
+      STATUS="$STATE_DIR/update-status.json"
+      CURRENT_FILE="$STATE_DIR/current_version"
+      PREV_DIR="$STATE_DIR/previous"
+      ENV_FILE="$COMPOSE_DIR/.env"
+      COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
+      TARGET_VERSION=""
+
+      trap 'rm -f "$PENDING"' EXIT
+
+      log() { echo "[thany-update] $*" >&2; }
+
+      current_version() {
+        if [ -f "$CURRENT_FILE" ]; then cat "$CURRENT_FILE"; else echo "0.0.0"; fi
+      }
+
+      write_status() {
+        phase="$1"; message="$2"
+        target_json=null
+        if [ -n "$TARGET_VERSION" ]; then target_json="\"$TARGET_VERSION\""; fi
+        tmp="$STATUS.part"
+        printf '{"phase":"%s","current_version":"%s","target_version":%s,"message":"%s","updated_at":"%s"}\n' \
+          "$phase" "$(current_version)" "$target_json" "$message" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tmp"
+        mv -f "$tmp" "$STATUS"
+      }
+
+      fail() { write_status failed "$1"; log "FAILED: $1"; exit 1; }
+
+      ver_gt() {
+        [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+      }
+
+      rollback() {
+        log "rolling back: $1"
+        [ -f "$PREV_DIR/docker-compose.yml" ] && cp -f "$PREV_DIR/docker-compose.yml" "$COMPOSE_FILE"
+        [ -f "$PREV_DIR/.env" ] && cp -f "$PREV_DIR/.env" "$ENV_FILE"
+        ( cd "$COMPOSE_DIR" && docker compose up -d ) || log "rollback compose up failed"
+        write_status rolled_back "$1"
+        exit 1
+      }
+
+      [ -f "$PENDING" ] || exit 0
+      command -v jq >/dev/null 2>&1 || { log "jq missing"; exit 1; }
+
+      TARGET_VERSION="$(jq -r '.version // empty' "$PENDING")"
+      STRATEGY="$(jq -r '.strategy // empty' "$PENDING")"
+      SCHEMA_MIN_FROM="$(jq -r '.schema_min_from // empty' "$PENDING")"
+      CUR="$(current_version)"
+
+      write_status verifying "Verifying bundle"
+      [ -n "$TARGET_VERSION" ] || fail "missing version"
+
+      if [ "$STRATEGY" = "blue-green" ]; then
+        write_status requires_blue_green "Blue-green migration must run from the portal"
+        exit 0
+      fi
+      [ "$STRATEGY" = "in-place" ] || fail "invalid strategy: $STRATEGY"
+
+      if ! ver_gt "$TARGET_VERSION" "$CUR"; then
+        write_status up_to_date "Already at $CUR; target $TARGET_VERSION is not newer"
+        exit 0
+      fi
+
+      if [ -n "$SCHEMA_MIN_FROM" ] && ver_gt "$SCHEMA_MIN_FROM" "$CUR"; then
+        write_status requires_blue_green "Current $CUR is below schema floor $SCHEMA_MIN_FROM"
+        exit 0
+      fi
+
+      for d in $(jq -r '.image_digests[]? // empty' "$PENDING"); do
+        echo "$d" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail "malformed image digest: $d"
+      done
+
+      NEW_COMPOSE="$(jq -r '.compose_yaml' "$PENDING")"
+      [ -n "$NEW_COMPOSE" ] || fail "empty compose"
+      if echo "$NEW_COMPOSE" | grep -E 'image:[^#]*ghcr\.io/c4ptainhook/' | grep -vq '@sha256:'; then
+        fail "app image is not digest-pinned to the allowed namespace"
+      fi
+
+      mkdir -p "$PREV_DIR"
+      cp -f "$COMPOSE_FILE" "$PREV_DIR/docker-compose.yml" 2>/dev/null || true
+      cp -f "$ENV_FILE" "$PREV_DIR/.env" 2>/dev/null || true
+      echo "$CUR" > "$PREV_DIR/current_version"
+
+      PROTECTED='^(CLOUD_ADMIN_TOKEN|JWT_SIGNING_KEY|POSTGRES_PASSWORD)='
+      jq -r '.env_overlay // {} | to_entries[] | "\(.key)=\(.value)"' "$PENDING" | while IFS= read -r line; do
+        key="$${line%%=*}"
+        echo "$key=" | grep -Eq "$PROTECTED" && continue
+        sed -i "/^$key=/d" "$ENV_FILE"
+        echo "$line" >> "$ENV_FILE"
+      done
+
+      write_status pulling "Pulling models and images"
+      cd "$COMPOSE_DIR"
+
+      VISION_TAG="$(jq -r '.model_tags.vision // empty' "$PENDING")"
+      TEXT_TAG="$(jq -r '.model_tags.text // empty' "$PENDING")"
+      [ -n "$VISION_TAG" ] && { docker compose exec -T ollama-vision ollama pull "$VISION_TAG" || log "vision pull deferred to start"; }
+      [ -n "$TEXT_TAG" ] && { docker compose exec -T ollama-text ollama pull "$TEXT_TAG" || log "text pull deferred to start"; }
+
+      printf '%s\n' "$NEW_COMPOSE" > "$COMPOSE_FILE.new"
+      docker compose -f "$COMPOSE_FILE.new" config >/dev/null 2>&1 || fail "new compose failed validation"
+      mv -f "$COMPOSE_FILE.new" "$COMPOSE_FILE"
+
+      docker compose pull || rollback "image pull failed"
+
+      write_status applying "Recreating services"
+      docker compose up -d || rollback "compose up failed"
+
+      write_status health_check "Waiting for health"
+      ok=0
+      for i in $(seq 1 60); do
+        if curl -fsS -o /dev/null http://127.0.0.1:8080/health/ready && curl -fsS -o /dev/null http://127.0.0.1:8080/admin/health; then ok=1; break; fi
+        sleep 5
+      done
+      [ "$ok" = "1" ] || rollback "health gate failed"
+
+      echo "$TARGET_VERSION" > "$CURRENT_FILE"
+      write_status committed "Updated to $TARGET_VERSION"
+      log "committed $TARGET_VERSION"
+
   - path: /etc/ufw/applications.d/thany-cloud
     owner: root:root
     permissions: "0644"
@@ -215,6 +372,7 @@ write_files:
             IngestSaga__Sidecars__Parakeet__HealthPath: /health
           volumes:
             - /etc/letsencrypt:/etc/letsencrypt:ro
+            - /mnt/thany-data/cloud-state:/mnt/thany-data/cloud-state
           depends_on:
             postgres:      { condition: service_healthy }
             ollama-vision: { condition: service_started }
@@ -365,6 +523,8 @@ runcmd:
     mountpoint -q /mnt/thany-data || mount /mnt/thany-data \
       || { echo "[cloud-init] FATAL: mount of /mnt/thany-data failed" >&2; exit 1; }
     mkdir -p /mnt/thany-data/postgres
+    mkdir -p /mnt/thany-data/cloud-state
+    [ -f /mnt/thany-data/cloud-state/current_version ] || echo "${image_tag}" > /mnt/thany-data/cloud-state/current_version
     touch /opt/thany-cloud/.data-volume-ok
     echo "[cloud-init] data volume mounted at /mnt/thany-data"
 
@@ -478,6 +638,7 @@ runcmd:
 
   - systemctl daemon-reload
   - systemctl enable --now thany-cloud.service
+  - systemctl enable --now thany-update.path
 
   - |
     if [ ! -f /opt/thany-cloud/.data-volume-ok ] || [ ! -f /opt/thany-cloud/.ollama-vision-puller-ok ] || [ ! -f /opt/thany-cloud/.ollama-text-puller-ok ]; then

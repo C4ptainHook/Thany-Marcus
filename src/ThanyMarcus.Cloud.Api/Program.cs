@@ -20,6 +20,8 @@ using ThanyMarcus.Cloud.Api.Features.Processing;
 using ThanyMarcus.Cloud.Api.Features.Processing.Composing;
 using ThanyMarcus.Cloud.Api.Features.Processing.Composing.Renderers;
 using ThanyMarcus.Cloud.Api.Features.Processing.Phases;
+using ThanyMarcus.Cloud.Api.Features.Recovery;
+using ThanyMarcus.Cloud.Api.Features.Update;
 using ThanyMarcus.Cloud.Api.Features.Processing.Specialists;
 using ThanyMarcus.Cloud.Api.Features.Settings;
 using ThanyMarcus.Cloud.Api.Features.Sync;
@@ -90,6 +92,11 @@ builder.Services.AddSingleton<PortalCallbackService>();
 
 builder.Services.AddSingleton<CertFileReader>();
 builder.Services.AddHostedService<RegistrationStartupSweeper>();
+
+builder.Services.Configure<CloudUpdateOptions>(builder.Configuration.GetSection(CloudUpdateOptions.SectionName));
+builder.Services.AddSingleton<CloudVersionReader>();
+builder.Services.AddSingleton<CloudUpdateStateStore>();
+builder.Services.AddSingleton<RecoveryThrottle>();
 
 builder.Services.AddSingleton(_ => new StorageOptions
 {
@@ -229,6 +236,7 @@ builder.Services.Configure<RelatedNotesOptions>(
     builder.Configuration.GetSection("IngestSaga:Retrieval"));
 builder.Services.AddSingleton<RelatedNotesCalibrationSignal>();
 builder.Services.AddScoped<RelatedNotesCalibrator>();
+builder.Services.AddScoped<ReindexGate>();
 builder.Services.AddHostedService<RelatedNotesCalibrationWorker>();
 builder.Services.AddScoped<IVlmClient, OllamaVlmClient>();
 builder.Services.AddSingleton<IDoclingClient, DoclingHttpClient>();
@@ -364,6 +372,9 @@ app.MapFolderDissolveEndpoint();
 app.MapEntitySuggestionsEndpoints();
 app.MapAdminSettingsEndpoints();
 app.MapAdminPluginTokenEndpoints();
+app.MapPluginTokenRotationEndpoint();
+app.MapRecoveryEndpoints();
+app.MapUpdateEndpoints();
 
 app.MapFallback(() => Results.NotFound());
 

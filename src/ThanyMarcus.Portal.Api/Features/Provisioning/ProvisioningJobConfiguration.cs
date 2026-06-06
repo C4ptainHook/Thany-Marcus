@@ -31,6 +31,7 @@ public sealed class ProvisioningJobConfiguration : IEntityTypeConfiguration<Prov
             .HasDefaultValueSql("'[]'::jsonb");
         builder.Property(j => j.TfOutputs).HasColumnType("jsonb");
         builder.Property(j => j.EnrollmentToken);
+        builder.Property(j => j.AdminTokenCiphertext);
         builder.Property(j => j.CreatedAt).IsRequired();
         builder.Property(j => j.UpdatedAt).IsRequired();
 

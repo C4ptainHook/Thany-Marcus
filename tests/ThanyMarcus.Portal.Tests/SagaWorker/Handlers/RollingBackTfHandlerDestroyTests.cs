@@ -39,7 +39,6 @@ public sealed class RollingBackTfHandlerDestroyTests(PostgresFixture postgres) :
             new PluginTokenMetadata { CloudId = cloud.Id, Name = "t2", TokenHash = Guid.NewGuid().ToByteArray(), CreatedAt = now, UpdatedAt = now });
         var trackedCloud = await Db.Clouds.IgnoreQueryFilters().SingleAsync(c => c.Id == cloud.Id, ct);
         trackedCloud.VmIp = "203.0.113.1";
-        trackedCloud.EncryptedCloudAdminToken = new byte[] { 0xAA, 0xBB };
         trackedCloud.TerraformWorkspace = "abc12345";
         await Db.SaveChangesAsync(ct);
         Db.ChangeTracker.Clear();
@@ -62,7 +61,6 @@ public sealed class RollingBackTfHandlerDestroyTests(PostgresFixture postgres) :
         reloadedCloud.DestroyedAt.ShouldNotBeNull();
         reloadedCloud.ProvisioningStatus.ShouldBe(SagaStatus.RolledBack);
         reloadedCloud.VmIp.ShouldBeNull();
-        reloadedCloud.EncryptedCloudAdminToken.ShouldBeNull();
         reloadedCloud.TerraformWorkspace.ShouldBeNull();
 
         var tokens = await Db.PluginTokenMetadata.Where(p => p.CloudId == cloud.Id).ToListAsync(ct);

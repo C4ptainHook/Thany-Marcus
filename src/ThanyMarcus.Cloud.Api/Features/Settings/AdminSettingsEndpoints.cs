@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using NodaTime;
+using ThanyMarcus.Cloud.Api.Features.PluginAuth;
 using ThanyMarcus.Cloud.Api.Infrastructure.Database;
 using ThanyMarcus.Shared.CloudAdmin;
 
@@ -13,7 +14,7 @@ public static class AdminSettingsEndpoints
 
     public static void MapAdminSettingsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/admin/settings").AddEndpointFilter<RequireCloudAdminTokenFilter>();
+        var group = app.MapGroup("/admin/settings").AddEndpointFilter<RequirePluginAuthFilter>();
 
         group.MapGet("", GetAsync)
              .WithName("GetAdminSettings")
